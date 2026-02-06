@@ -75,7 +75,7 @@ class LauncherSettings
     {
         var parts = new List<string>();
         foreach (var tool in AllowedTools)
-            parts.Add($"--allow-tool={tool}");
+            parts.Add($"--allow-tool='{tool}'");
         foreach (var dir in AllowedDirs)
             parts.Add($"--add-dir=\"{dir}\"");
         foreach (var arg in extraArgs)
