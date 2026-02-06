@@ -435,7 +435,7 @@ class Program
         // Create form - visible in taskbar for jump list
         _hiddenForm = new Form
         {
-            Text = "Copilot Permissive",
+            Text = "Copilot App",
             ShowInTaskbar = true,
             WindowState = FormWindowState.Minimized,
             FormBorderStyle = FormBorderStyle.FixedSingle,
@@ -738,7 +738,7 @@ class Program
             try
             {
                 var proc = Process.GetProcessById(pid);
-                if (proc.ProcessName != "CopilotPermissive")
+                if (proc.ProcessName != "CopilotApp")
                 {
                     toRemove.Add(pidStr);
                     continue;

@@ -24,7 +24,7 @@ cd copilot-app
 .\install.ps1
 
 # 2. Pin to taskbar
-#    Launch CopilotPermissive.exe, right-click its taskbar icon → "Pin to taskbar"
+#    Launch CopilotApp.exe, right-click its taskbar icon → "Pin to taskbar"
 
 # 3. Configure
 #    Right-click pinned icon → Settings
@@ -41,7 +41,7 @@ dotnet publish -c Release -o ..\publish
 
 ### Configuration
 
-All settings are managed via the **Settings UI** (right-click pinned icon → Settings, or run `CopilotPermissive.exe --settings`).
+All settings are managed via the **Settings UI** (right-click pinned icon → Settings, or run `CopilotApp.exe --settings`).
 
 Settings are stored in `~/.copilot/launcher-settings.json` and include:
 
@@ -54,7 +54,7 @@ Settings are stored in `~/.copilot/launcher-settings.json` and include:
 You can also pass a working directory as a command-line argument:
 
 ```powershell
-CopilotPermissive.exe "C:\my\project"
+CopilotApp.exe "C:\my\project"
 ```
 
 ### Default Allowed Tools
@@ -86,15 +86,15 @@ Example directories you may want to add:
 | New session | Click the pinned icon or select "New Copilot Session" from jump list |
 | Resume session | Select session from "Active Sessions" in jump list |
 | Open existing | Select "Open Existing Session" from jump list → pick from dialog |
-| Custom work dir | `CopilotPermissive.exe "C:\my\project"` |
+| Custom work dir | `CopilotApp.exe "C:\my\project"` |
 
 ## Architecture
 
 ```
-CopilotPermissive.exe (WinForms, hidden window)
+CopilotApp.exe (WinForms, hidden window)
 ├── Sets AppUserModelID for taskbar grouping
 ├── Registers PID in ~/.copilot/active-pids.json
-├── Launches: pwsh -NoExit -Command "copilot-permissive [--resume id]"
+├── Launches: pwsh -NoExit -Command "copilot [--allow-tool ...] [--add-dir ...] [--resume id]"
 ├── Detects new session folder via directory snapshot
 ├── Updates jump list immediately + every 5min (background)
 └── Cleans up on exit (unregisters PID, updates jump list)
