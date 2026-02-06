@@ -1004,22 +1004,20 @@ class Program
             return;
         }
 
-        // Find git repo root
         var repoRoot = FindGitRoot(cwd);
+        bool hasRepo = repoRoot != null && !string.Equals(repoRoot, cwd, StringComparison.OrdinalIgnoreCase);
 
-        // Build folder choices
-        var folderChoices = new List<(string label, string path)> { ($"CWD: {cwd}", cwd) };
-        if (repoRoot != null && !string.Equals(repoRoot, cwd, StringComparison.OrdinalIgnoreCase))
-            folderChoices.Add(($"Repo: {repoRoot}", repoRoot));
-
-        // Show picker dialog
+        // Build a compact picker: one row per IDE, each with CWD and Repo buttons
         var form = new Form
         {
             Text = "Open in IDE",
-            Size = new Size(500, 320),
             StartPosition = FormStartPosition.CenterScreen,
             FormBorderStyle = FormBorderStyle.FixedDialog,
-            MaximizeBox = false
+            MaximizeBox = false,
+            MinimizeBox = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(12)
         };
 
         try
@@ -1029,72 +1027,83 @@ class Program
         }
         catch { }
 
-        // Folder selection
-        var lblFolder = new Label { Text = "Open folder:", Location = new Point(12, 12), AutoSize = true };
-        var folderCombo = new ComboBox
+        var layout = new TableLayoutPanel
         {
-            Location = new Point(12, 32),
-            Width = 455,
-            DropDownStyle = ComboBoxStyle.DropDownList
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = hasRepo ? 3 : 2,
+            Padding = new Padding(0),
+            CellBorderStyle = TableLayoutPanelCellBorderStyle.None
         };
-        foreach (var (label, _) in folderChoices)
-            folderCombo.Items.Add(label);
-        folderCombo.SelectedIndex = 0;
 
-        // IDE selection
-        var lblIde = new Label { Text = "Select IDE:", Location = new Point(12, 65), AutoSize = true };
-        var ideList = new ListView
+        // Header
+        var lblIde = new Label { Text = "IDE", Font = new Font(SystemFonts.DefaultFont.FontFamily, 9, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 4, 8, 4) };
+        layout.Controls.Add(lblIde, 0, 0);
+        var lblCwd = new Label { Text = $"CWD: {cwd}", Font = new Font(SystemFonts.DefaultFont.FontFamily, 8), AutoSize = true, Padding = new Padding(0, 4, 4, 4), ForeColor = Color.Gray };
+        layout.Controls.Add(lblCwd, 1, 0);
+        if (hasRepo)
         {
-            Location = new Point(12, 85),
-            Size = new Size(455, 150),
-            View = View.Details,
-            FullRowSelect = true,
-            MultiSelect = false,
-            GridLines = true
-        };
-        ideList.Columns.Add("IDE", 180);
-        ideList.Columns.Add("Path", 260);
+            var lblRepo = new Label { Text = $"Repo: {repoRoot}", Font = new Font(SystemFonts.DefaultFont.FontFamily, 8), AutoSize = true, Padding = new Padding(0, 4, 0, 4), ForeColor = Color.Gray };
+            layout.Controls.Add(lblRepo, 2, 0);
+        }
+
+        int row = 1;
         foreach (var ide in _settings.Ides)
         {
-            var item = new ListViewItem(ide.Description);
-            item.SubItems.Add(ide.Path);
-            ideList.Items.Add(item);
-        }
-        if (ideList.Items.Count > 0)
-            ideList.Items[0].Selected = true;
-
-        var btnOpen = new Button { Text = "Open", Location = new Point(305, 245), Width = 80 };
-        var btnCancel = new Button { Text = "Cancel", Location = new Point(392, 245), Width = 80 };
-        btnCancel.Click += (s, e) => form.Close();
-
-        btnOpen.Click += (s, e) =>
-        {
-            if (ideList.SelectedItems.Count == 0) return;
-            var idePath = ideList.SelectedItems[0].SubItems[1].Text;
-            var folderPath = folderChoices[folderCombo.SelectedIndex].path;
-
-            try
+            var ideName = new Label
             {
-                Process.Start(new ProcessStartInfo
+                Text = ide.Description,
+                AutoSize = true,
+                Padding = new Padding(0, 6, 8, 2),
+                Font = new Font(SystemFonts.DefaultFont.FontFamily, 9.5f)
+            };
+            layout.Controls.Add(ideName, 0, row);
+
+            var btnCwd = new Button { Text = "Open CWD", Width = 100, Height = 28 };
+            var capturedIde = ide;
+            btnCwd.Click += (s, e) =>
+            {
+                LaunchIde(capturedIde.Path, cwd);
+                form.Close();
+            };
+            layout.Controls.Add(btnCwd, 1, row);
+
+            if (hasRepo)
+            {
+                var btnRepo = new Button { Text = "Open Repo", Width = 100, Height = 28 };
+                btnRepo.Click += (s, e) =>
                 {
-                    FileName = idePath,
-                    Arguments = $"\"{folderPath}\"",
-                    UseShellExecute = true
-                });
+                    LaunchIde(capturedIde.Path, repoRoot!);
+                    form.Close();
+                };
+                layout.Controls.Add(btnRepo, 2, row);
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to launch IDE: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            form.Close();
-        };
 
-        ideList.DoubleClick += (s, e) => btnOpen.PerformClick();
+            row++;
+        }
 
-        form.Controls.AddRange(new Control[] { lblFolder, folderCombo, lblIde, ideList, btnOpen, btnCancel });
-        form.AcceptButton = btnOpen;
-        form.CancelButton = btnCancel;
+        form.Controls.Add(layout);
+        form.CancelButton = null;
+        form.KeyPreview = true;
+        form.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) form.Close(); };
         form.ShowDialog();
+    }
+
+    static void LaunchIde(string idePath, string folderPath)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = idePath,
+                Arguments = $"\"{folderPath}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to launch IDE: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     static string? FindGitRoot(string startPath)
@@ -1260,3 +1269,4 @@ class SessionInfo
     public string Summary { get; set; } = "";
     public int Pid { get; set; }
 }
+
