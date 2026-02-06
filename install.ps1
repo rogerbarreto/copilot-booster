@@ -4,17 +4,17 @@
 
 .DESCRIPTION
     Builds the CopilotApp.exe and optionally sets the default work directory.
-    Settings (allowed tools, directories) are managed via the Settings UI in the app itself.
+    Settings (allowed tools, directories, IDEs) are managed via the Settings UI in the app itself.
 
 .PARAMETER PublishDir
-    Where to publish the built exe. Default: ~\Documents\CopilotLauncher\publish
+    Where to publish the built exe. Default: <repo>\publish
 
 .PARAMETER WorkDir
     Default working directory for new sessions. Saved to launcher settings.
 #>
 
 param(
-    [string]$PublishDir = (Join-Path ([Environment]::GetFolderPath("MyDocuments")) "CopilotLauncher\publish"),
+    [string]$PublishDir = (Join-Path $PSScriptRoot "publish"),
     [string]$WorkDir = ""
 )
 
@@ -28,7 +28,7 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     Write-Error ".NET SDK is required. Install from https://dot.net/download"
     return
 }
-if (-not (Get-Command copilot -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command copilot.exe -ErrorAction SilentlyContinue)) {
     Write-Error "GitHub Copilot CLI is required. Install via: winget install GitHub.Copilot"
     return
 }
@@ -56,6 +56,7 @@ if ($WorkDir) {
             allowedTools = @()
             allowedDirs = @()
             defaultWorkDir = $WorkDir
+            ides = @()
         }
     }
     $settingsDir = Split-Path $settingsFile
@@ -74,9 +75,9 @@ Write-Host "  1. Run CopilotApp.exe"
 Write-Host "  2. Right-click its taskbar icon and select 'Pin to taskbar'"
 Write-Host "  3. Right-click the pinned icon to access jump list:"
 Write-Host "     - New Copilot Session"
-Write-Host "     - Open Existing Session"
-Write-Host "     - Settings (configure allowed tools and directories)"
+Write-Host "     - Existing Sessions"
+Write-Host "     - Settings (configure allowed tools, directories, IDEs)"
 Write-Host ""
-Write-Host "To configure allowed tools and directories:" -ForegroundColor Yellow
+Write-Host "To configure settings:" -ForegroundColor Yellow
 Write-Host "  Right-click pinned icon → Settings"
 Write-Host "  Or run: CopilotApp.exe --settings"
