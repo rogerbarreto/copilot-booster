@@ -75,9 +75,9 @@ class LauncherSettings
     {
         var parts = new List<string>();
         foreach (var tool in AllowedTools)
-            parts.Add($"--allow-tool='{tool}'");
+            parts.Add($"\"--allow-tool={tool}\"");
         foreach (var dir in AllowedDirs)
-            parts.Add($"--add-dir=\"{dir}\"");
+            parts.Add($"\"--add-dir={dir}\"");
         foreach (var arg in extraArgs)
             parts.Add(arg);
         return string.Join(" ", parts);
@@ -477,7 +477,7 @@ class Program
 
     static LauncherSettings _settings = null!;
     static Form? _hiddenForm;
-    static Process? _pwshProcess;
+    static Process? _copilotProcess;
 
     [DllImport("shell32.dll", SetLastError = true)]
     static extern void SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
@@ -654,7 +654,7 @@ class Program
             updaterThread.Start();
         }
 
-        Log("Starting pwsh...");
+        Log("Starting copilot...");
 
         // Snapshot existing sessions before launch
         var existingSessions = new HashSet<string>(
@@ -670,14 +670,14 @@ class Program
 
         var psi = new ProcessStartInfo
         {
-            FileName = "pwsh.exe",
-            Arguments = $"-NoExit -Command \"copilot {settingsArgs}\"",
+            FileName = CopilotExePath,
+            Arguments = settingsArgs,
             WorkingDirectory = workDir,
             UseShellExecute = true
         };
 
-        _pwshProcess = Process.Start(psi);
-        Log($"Started pwsh with PID: {_pwshProcess?.Id}");
+        _copilotProcess = Process.Start(psi);
+        Log($"Started copilot with PID: {_copilotProcess?.Id}");
 
         // Update jump list after session creation delay
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };
@@ -705,11 +705,11 @@ class Program
             TryUpdateJumpListWithLock();
             Log("Jump list updated");
 
-            // Watch for pwsh exit
+            // Watch for copilot exit
             var exitWatcher = new Thread(() =>
             {
-                _pwshProcess?.WaitForExit();
-                Log("pwsh exited");
+                _copilotProcess?.WaitForExit();
+                Log("copilot exited");
 
                 UnregisterPid(myPid);
                 TryUpdateJumpListWithLock();
