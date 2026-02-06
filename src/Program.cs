@@ -187,22 +187,19 @@ internal class Program
             }
         }
 
-        // If resuming a session that is already running, focus its window instead of launching a new instance
+        // If resuming a session that is already running, focus its terminal window
         if (resumeSessionId != null)
         {
             var activeSessions = SessionService.GetActiveSessions(s_pidRegistryFile, SessionStateDir);
-            LogService.Log($"Active sessions: {activeSessions.Count}, looking for {resumeSessionId}", s_logFile);
             var existing = activeSessions.FirstOrDefault(s => s.Id == resumeSessionId);
-            if (existing != null && existing.WindowHandle != 0)
+            if (existing != null)
             {
-                LogService.Log($"Trying to focus window handle: {existing.WindowHandle}", s_logFile);
-                if (WindowFocusService.TryFocusWindowHandle(new IntPtr(existing.WindowHandle)))
+                // All copilot tabs share the same Windows Terminal window titled "GitHub Copilot"
+                if (WindowFocusService.TryFocusWindowByTitle("GitHub Copilot"))
                 {
-                    LogService.Log($"Focused existing session {resumeSessionId}", s_logFile);
+                    LogService.Log($"Focused terminal for session {resumeSessionId}", s_logFile);
                     return;
                 }
-
-                LogService.Log("TryFocusWindowHandle returned false", s_logFile);
             }
         }
 
@@ -305,13 +302,10 @@ internal class Program
 
         var settingsArgs = _settings.BuildCopilotArgs(copilotArgs.ToArray());
 
-        // Snapshot existing "GitHub Copilot" windows before launch
-        var existingWindows = WindowFocusService.FindWindowsByTitle("GitHub Copilot");
-
         var psi = new ProcessStartInfo
         {
-            FileName = CopilotExePath,
-            Arguments = settingsArgs,
+            FileName = "cmd.exe",
+            Arguments = $"/c \"\"{CopilotExePath}\" {settingsArgs}\"",
             WorkingDirectory = workDir,
             UseShellExecute = true
         };
@@ -325,12 +319,6 @@ internal class Program
         {
             timer.Stop();
 
-            // Find the new "GitHub Copilot" window that appeared after launch
-            var currentWindows = WindowFocusService.FindWindowsByTitle("GitHub Copilot");
-            var newWindow = currentWindows.FirstOrDefault(w => !existingWindows.Contains(w));
-            long windowHandle = newWindow != IntPtr.Zero ? newWindow.ToInt64() : 0;
-            LogService.Log($"Captured window handle: {windowHandle}", s_logFile);
-
             // Map this PID to its session
             string? sessionId = resumeSessionId;
             if (sessionId == null && Directory.Exists(SessionStateDir))
@@ -343,8 +331,8 @@ internal class Program
 
             if (sessionId != null)
             {
-                PidRegistryService.UpdatePidSessionId(myPid, sessionId, s_pidRegistryFile, 0, windowHandle);
-                LogService.Log($"Mapped PID {myPid} to session {sessionId} (window {windowHandle})", s_logFile);
+                PidRegistryService.UpdatePidSessionId(myPid, sessionId, s_pidRegistryFile);
+                LogService.Log($"Mapped PID {myPid} to session {sessionId}", s_logFile);
             }
 
             LogService.Log("Updating jump list...", s_logFile);
