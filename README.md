@@ -59,22 +59,24 @@ CopilotPermissive.exe "C:\my\project"
 
 ### Default Allowed Tools
 
-On first run, the following tools are whitelisted:
+On first run, settings are empty. Use the **Settings UI** to add the tools and directories you need.
+
+Example tools you may want to whitelist:
 
 | Tool | Description |
 |------|-------------|
-| `Block` | Block tool for structured output |
-| `Cmd` | Shell command execution |
-| `Edit` | File editing |
-| `GlobTool` | File pattern matching |
-| `GrepTool` | Content search |
-| `ReadNotebook` | Jupyter notebook reading |
-| `Replace` | String replacement in files |
-| `View` | File/directory viewing |
-| `Write` | File creation |
-| `BatchTool` | Batch operations |
-| `exit` | Session exit |
+| `shell(dotnet:*)` | .NET CLI commands |
+| `shell(git diff:*)` | Git diff commands |
+| `shell(git log:*)` | Git log commands |
+| `shell(Set-Location:*)` | Change directory |
 | `mcp__github-mcp-server` | GitHub MCP server tools |
+
+Example directories you may want to add:
+
+| Directory | Description |
+|-----------|-------------|
+| `D:\repo` | Your repository root |
+| `~\.copilot` | Copilot session state |
 ```
 
 ## Usage

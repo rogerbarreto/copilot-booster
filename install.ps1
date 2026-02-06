@@ -53,11 +53,7 @@ if ($WorkDir) {
         $settings.defaultWorkDir = $WorkDir
     } else {
         $settings = @{
-            allowedTools = @(
-                "Block", "Cmd", "Edit", "GlobTool", "GrepTool",
-                "ReadNotebook", "Replace", "View", "Write", "BatchTool",
-                "exit", "mcp__github-mcp-server"
-            )
+            allowedTools = @()
             allowedDirs = @()
             defaultWorkDir = $WorkDir
         }

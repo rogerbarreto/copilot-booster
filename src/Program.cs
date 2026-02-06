@@ -28,13 +28,6 @@ class LauncherSettings
     [JsonPropertyName("defaultWorkDir")]
     public string DefaultWorkDir { get; set; } = "";
 
-    static readonly List<string> DefaultTools = new()
-    {
-        "Block", "Cmd", "Edit", "GlobTool", "GrepTool",
-        "ReadNotebook", "Replace", "View", "Write", "BatchTool",
-        "exit", "mcp__github-mcp-server"
-    };
-
     public static LauncherSettings Load()
     {
         try
@@ -69,7 +62,7 @@ class LauncherSettings
     {
         return new LauncherSettings
         {
-            AllowedTools = new List<string>(DefaultTools),
+            AllowedTools = new List<string>(),
             AllowedDirs = new List<string>(),
             DefaultWorkDir = ""
         };
@@ -81,7 +74,7 @@ class LauncherSettings
         foreach (var tool in AllowedTools)
             parts.Add($"--allow-tool={tool}");
         foreach (var dir in AllowedDirs)
-            parts.Add($"--allow-dir=\"{dir}\"");
+            parts.Add($"--add-dir=\"{dir}\"");
         foreach (var arg in extraArgs)
             parts.Add(arg);
         return string.Join(" ", parts);
