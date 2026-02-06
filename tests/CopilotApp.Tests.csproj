@@ -21,6 +21,9 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="CopilotApp.Forms" />
+    <Using Include="CopilotApp.Models" />
+    <Using Include="CopilotApp.Services" />
   </ItemGroup>
 
 </Project>
