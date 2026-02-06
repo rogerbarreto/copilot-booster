@@ -47,14 +47,6 @@ internal static partial class WindowFocusService
     [LibraryImport("kernel32.dll")]
     private static partial uint GetCurrentThreadId();
 
-    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-#pragma warning disable SYSLIB1054 // Use 'LibraryImportAttribute' instead of 'DllImportAttribute' to generate P/Invoke marshalling code at compile time
-    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-#pragma warning restore SYSLIB1054 // Use 'LibraryImportAttribute' instead of 'DllImportAttribute' to generate P/Invoke marshalling code at compile time
-
     /// <summary>
     /// Attempts to bring the window of the specified process to the foreground.
     /// </summary>
@@ -127,19 +119,55 @@ internal static partial class WindowFocusService
     }
 
     /// <summary>
-    /// Finds the terminal host window (conhost or Windows Terminal) for a console process
-    /// by looking for parent/ancestor process windows.
+    /// Finds the terminal host window for a console process.
+    /// Handles both Windows Terminal (default terminal) and standalone conhost.
     /// </summary>
     private static IntPtr FindTerminalWindowForProcess(int childPid)
     {
-        // Strategy: walk up the parent process chain from the copilot process
-        // to find a terminal host that has a visible window.
         try
         {
+            // Strategy 1: The process itself may have a visible window
             var childProc = Process.GetProcessById(childPid);
-            var visited = new HashSet<int> { childPid };
+            if (childProc.MainWindowHandle != IntPtr.Zero && IsWindowVisible(childProc.MainWindowHandle))
+            {
+                return childProc.MainWindowHandle;
+            }
 
-            // Walk parent chain (copilot → cmd/powershell → WindowsTerminal/conhost)
+            // Strategy 2: Find conhost child of our process — its parent terminal has the window.
+            // When Windows Terminal is the default, the process tree is:
+            //   copilot.exe → conhost.exe (child) ← hosted by WindowsTerminal.exe
+            // Find all conhost processes whose parent is our target PID.
+            foreach (var conhost in Process.GetProcessesByName("conhost"))
+            {
+                try
+                {
+                    var parent = GetParentProcess(conhost);
+                    if (parent?.Id == childPid)
+                    {
+                        // This conhost belongs to our process.
+                        // Now find the Windows Terminal that owns this conhost's console.
+                        // Windows Terminal is the only top-level visible window process
+                        // of type "WindowsTerminal" — focus it.
+                        foreach (var wt in Process.GetProcessesByName("WindowsTerminal"))
+                        {
+                            if (wt.MainWindowHandle != IntPtr.Zero && IsWindowVisible(wt.MainWindowHandle))
+                            {
+                                return wt.MainWindowHandle;
+                            }
+                        }
+
+                        // Fallback: conhost itself might have a window (legacy console mode)
+                        if (conhost.MainWindowHandle != IntPtr.Zero && IsWindowVisible(conhost.MainWindowHandle))
+                        {
+                            return conhost.MainWindowHandle;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Strategy 3: Walk parent chain as fallback
+            var visited = new HashSet<int> { childPid };
             Process? current = GetParentProcess(childProc);
             while (current != null && visited.Add(current.Id))
             {
@@ -153,37 +181,7 @@ internal static partial class WindowFocusService
         }
         catch { }
 
-        // Fallback: enumerate all top-level windows and check if any terminal
-        // window's process tree contains our child PID.
-        IntPtr found = IntPtr.Zero;
-        EnumWindows((hwnd, _) =>
-        {
-            if (!IsWindowVisible(hwnd))
-            {
-                return true;
-            }
-
-            _ = GetWindowThreadProcessId(hwnd, out uint windowPid);
-            try
-            {
-                var windowProc = Process.GetProcessById((int)windowPid);
-                var name = windowProc.ProcessName.ToLowerInvariant();
-                if (name is "windowsterminal" or "conhost" or "cmd" or "powershell" or "pwsh")
-                {
-                    // Check if this terminal is hosting our process
-                    if (IsAncestorOf((int)windowPid, childPid))
-                    {
-                        found = hwnd;
-                        return false; // stop enumeration
-                    }
-                }
-            }
-            catch { }
-
-            return true;
-        }, IntPtr.Zero);
-
-        return found;
+        return IntPtr.Zero;
     }
 
     /// <summary>
@@ -205,41 +203,6 @@ internal static partial class WindowFocusService
         catch { }
 
         return null;
-    }
-
-    /// <summary>
-    /// Checks whether ancestorPid is an ancestor of childPid in the process tree.
-    /// </summary>
-    private static bool IsAncestorOf(int ancestorPid, int childPid)
-    {
-        var visited = new HashSet<int>();
-        int currentPid = childPid;
-
-        while (visited.Add(currentPid))
-        {
-            try
-            {
-                var proc = Process.GetProcessById(currentPid);
-                var parent = GetParentProcess(proc);
-                if (parent == null)
-                {
-                    return false;
-                }
-
-                if (parent.Id == ancestorPid)
-                {
-                    return true;
-                }
-
-                currentPid = parent.Id;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        return false;
     }
 
     [StructLayout(LayoutKind.Sequential)]
