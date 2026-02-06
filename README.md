@@ -1,141 +1,161 @@
 # Copilot App
 
-A Windows taskbar launcher for [GitHub Copilot CLI](https://github.com/github/copilot-cli) that provides:
+> A Windows taskbar companion for GitHub Copilot CLI — manage sessions, tools, and IDEs from a single pinned icon.
 
-- **Taskbar pinning** with the Copilot icon and jump list
-- **Settings UI** to configure allowed tools, directories, and IDEs
-- **CWD picker** for new sessions — shows previously-used directories sorted by frequency
-- **Session browser** to resume any previous named session
-- **IDE integration** — open a session's working directory or git repo root in your configured IDE
-- **Active sessions** in the jump list with resume support
-- **Background jump list updates** with multi-instance coordination
+**Copilot App** turns [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) into a first-class desktop experience. Pin it to your taskbar and get instant access to new sessions, session history, IDE integration, and per-user tool permissions — all without touching config files.
 
-## Prerequisites
+---
+
+## ✨ Features at a Glance
+
+### 📌 Taskbar Jump List
+
+Right-click the pinned icon to access everything:
+
+<p align="center">
+  <img src="images/menu-tasks.png" alt="Jump list with tasks" width="300">
+</p>
+
+- **New Copilot Session** — start a new session with a smart directory picker
+- **Existing Sessions** — browse, resume, or open sessions in your IDE
+- **Settings** — configure tools, directories, and IDEs
+
+---
+
+### 📂 Smart Directory Picker
+
+When starting a new session, Copilot App shows your most-used working directories — sorted by frequency across all previous sessions. Non-existent paths are automatically cleaned up.
+
+<p align="center">
+  <img src="images/copilot-new-session-cwd-picker.png" alt="CWD picker sorted by usage" width="500">
+</p>
+
+No more typing paths. Just click and go — or hit **Browse...** to pick any folder.
+
+---
+
+### 🔄 Session Browser
+
+Resume any previous session with full context. Each entry shows the session name, full working directory path, and last-used date.
+
+<p align="center">
+  <img src="images/existing-copilot-sessions-picker.png" alt="Existing sessions browser" width="500">
+</p>
+
+- **Open Session** — resumes the session in its original working directory
+- **Open in IDE** — jump straight into the code (see below)
+- **Refresh** — reload the session list without reopening the window
+
+---
+
+### 🖥️ IDE Integration
+
+Open any session's working directory or git repository root in your configured IDE — with a single click.
+
+<p align="center">
+  <img src="images/open-ide-on-session-context.png" alt="Open in IDE picker" width="650">
+</p>
+
+Each IDE shows two options:
+- **Open CWD** — opens the session's exact working directory
+- **Open Repo** — opens the git repository root (when different from CWD)
+
+---
+
+### ⚙️ Settings
+
+All configuration lives in a tabbed UI — no JSON editing required.
+
+#### Allowed Tools
+Whitelist shell commands and MCP tools that Copilot can use without prompting:
+
+<p align="center">
+  <img src="images/global-allowed-tools.png" alt="Allowed tools settings" width="500">
+</p>
+
+#### Allowed Directories
+Grant Copilot access to specific directories:
+
+<p align="center">
+  <img src="images/global-allowed-directories.png" alt="Allowed directories settings" width="500">
+</p>
+
+#### IDEs
+Register your IDEs for the "Open in IDE" feature:
+
+<p align="center">
+  <img src="images/settings-IDEs.png" alt="IDE settings" width="500">
+</p>
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or later
-- [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) installed via `winget install GitHub.Copilot` or `GitHub.Copilot.Prerelease`
+- [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) — install via `winget install GitHub.Copilot` or `GitHub.Copilot.Prerelease`
 
-## Quick Start
+### Install
 
 ```powershell
-# 1. Clone and build
 git clone <repo-url> copilot-app
 cd copilot-app
 .\install.ps1
-
-# 2. Pin to taskbar
-#    Launch CopilotApp.exe, right-click its taskbar icon → "Pin to taskbar"
-
-# 3. Configure
-#    Right-click pinned icon → Settings
 ```
 
-## Manual Setup
+### Pin to Taskbar
 
-### Build
+1. Run `CopilotApp.exe` from the publish folder
+2. Right-click the icon in the taskbar → **Pin to taskbar**
+3. Right-click the pinned icon → **Settings** to configure your tools and directories
+
+### Manual Build
 
 ```powershell
 cd src
 dotnet publish -c Release -o ..\publish
 ```
 
-## Configuration
+---
 
-All settings are managed via the **Settings UI** (right-click pinned icon → Settings, or run `CopilotApp.exe --settings`).
-
-Settings are stored in `~/.copilot/launcher-settings.json`:
-
-| Tab | Description |
-|-----|-------------|
-| **Allowed Tools** | Shell commands and tools Copilot can use without prompting |
-| **Allowed Directories** | Directories Copilot can access (passed as `--add-dir`) |
-| **IDEs** | IDE executables for "Open in IDE" feature (description + path) |
-| **Default Work Dir** | Starting directory for the folder browser |
-
-### Example Tools
-
-On first run, settings are empty. Example tools you may want to add:
-
-| Tool | Description |
-|------|-------------|
-| `shell(dotnet:*)` | .NET CLI commands |
-| `shell(git diff:*)` | Git diff commands |
-| `shell(git log:*)` | Git log commands |
-| `shell(Set-Location:*)` | Change directory |
-| `mcp__github-mcp-server` | GitHub MCP server tools |
-
-### Example Directories
-
-| Directory | Description |
-|-----------|-------------|
-| `D:\repo` | Your repository root |
-| `~\.copilot` | Copilot session state |
-
-## Usage
-
-### Jump List (right-click pinned icon)
-
-| Action | Description |
-|--------|-------------|
-| **New Copilot Session** | Shows CWD picker with previously-used directories, then launches Copilot |
-| **Existing Sessions** | Browse and resume named sessions, or open their folder in an IDE |
-| **Settings** | Configure allowed tools, directories, IDEs, and default work dir |
-| **Active Sessions** | Click to resume a running session |
-
-### CWD Picker (New Session)
-
-When starting a new session, a directory picker shows:
-- Previously-used directories sorted by most-used across all sessions
-- Non-existent directories are automatically filtered out
-- **Browse...** button to pick any folder (starts at default work dir)
-
-### Existing Sessions
-
-The session browser shows all named sessions with:
-- Session name, full CWD path, and last-used date
-- **Open Session** — resumes the session in its original CWD
-- **Open in IDE** — opens the session's CWD or git repo root in a configured IDE
-
-### IDE Integration
-
-When clicking "Open in IDE", a compact picker shows each configured IDE with:
-- **Open CWD** — opens the session's working directory
-- **Open Repo** — opens the git repository root (only shown when different from CWD)
-
-### Command Line
+## 💻 Command Line
 
 ```powershell
-CopilotApp.exe                        # New session with CWD picker
-CopilotApp.exe "C:\my\project"        # New session in specified directory
-CopilotApp.exe --resume <sessionId>   # Resume a session (uses its original CWD)
-CopilotApp.exe --open-existing        # Show session browser
+CopilotApp.exe                        # New session (shows CWD picker)
+CopilotApp.exe "C:\my\project"        # New session in a specific directory
+CopilotApp.exe --resume <sessionId>   # Resume a session in its original CWD
+CopilotApp.exe --open-existing        # Open the session browser
 CopilotApp.exe --open-ide <sessionId> # Open IDE picker for a session
-CopilotApp.exe --settings             # Open settings dialog
+CopilotApp.exe --settings             # Open settings
 ```
 
-## Architecture
+---
+
+## 🏗️ Architecture
 
 ```
-CopilotApp.exe (WinForms, hidden window)
+CopilotApp.exe (WinForms, hidden taskbar window)
 ├── Sets AppUserModelID for taskbar grouping
-├── Registers PID in ~/.copilot/active-pids.json
-├── Launches: copilot.exe --allow-tool=... --add-dir=... [--resume id]
-├── WorkingDirectory set to chosen CWD (new) or session's original CWD (resume)
-├── Detects new session folder via directory snapshot
-├── Updates jump list immediately + every 5min (background)
-└── Cleans up on exit (unregisters PID, updates jump list)
+├── Registers PID → session mapping in ~/.copilot/active-pids.json
+├── Launches copilot.exe with --allow-tool and --add-dir from settings
+├── Detects new session via directory snapshot (before/after launch)
+├── Updates jump list on launch + every 5 min (background, coordinated)
+└── Cleans up on exit (unregisters PID, refreshes jump list)
 ```
 
 ### Files
 
 | Path | Purpose |
 |------|---------|
-| `~/.copilot/launcher-settings.json` | Allowed tools, dirs, IDEs, default work dir |
-| `~/.copilot/active-pids.json` | PID → session ID registry |
-| `~/.copilot/jumplist-lastupdate.txt` | Timestamp for update coordination |
+| `~/.copilot/launcher-settings.json` | Tools, directories, IDEs, default work dir |
+| `~/.copilot/active-pids.json` | PID → session ID mapping |
+| `~/.copilot/jumplist-lastupdate.txt` | Update coordination timestamp |
 | `~/.copilot/launcher.log` | Debug log |
-| `~/.copilot/session-state/<id>/workspace.yaml` | Session metadata (managed by Copilot CLI) |
+| `~/.copilot/session-state/` | Session metadata (managed by Copilot CLI) |
 
-## License
+---
+
+## 📄 License
 
 MIT
