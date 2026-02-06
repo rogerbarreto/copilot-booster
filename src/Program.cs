@@ -127,7 +127,7 @@ class MainForm : Form
 
         try
         {
-            var icon = Icon.ExtractAssociatedIcon(Program.CopilotExePath);
+            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (icon != null) Icon = icon;
         }
         catch { }
@@ -844,7 +844,7 @@ class Program
         // Set window icon
         try
         {
-            var icon = System.Drawing.Icon.ExtractAssociatedIcon(CopilotExePath);
+            var icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (icon != null) _hiddenForm.Icon = icon;
         }
         catch { }
@@ -1020,19 +1020,19 @@ class Program
 
             var newSessionTask = new JumpListLink(LauncherExePath, "New Copilot Session")
             {
-                IconReference = new IconReference(CopilotExePath, 0)
+                IconReference = new IconReference(LauncherExePath, 0)
             };
 
             var openExistingTask = new JumpListLink(LauncherExePath, "Existing Sessions")
             {
                 Arguments = "--open-existing",
-                IconReference = new IconReference(CopilotExePath, 0)
+                IconReference = new IconReference(LauncherExePath, 0)
             };
 
             var settingsTask = new JumpListLink(LauncherExePath, "Settings")
             {
                 Arguments = "--settings",
-                IconReference = new IconReference(CopilotExePath, 0)
+                IconReference = new IconReference(LauncherExePath, 0)
             };
 
             jumpList.AddUserTasks(newSessionTask, new JumpListSeparator(), openExistingTask, new JumpListSeparator(), settingsTask);
@@ -1043,7 +1043,7 @@ class Program
                 var link = new JumpListLink(LauncherExePath, session.Summary)
                 {
                     Arguments = $"--resume {session.Id}",
-                    IconReference = new IconReference(CopilotExePath, 0),
+                    IconReference = new IconReference(LauncherExePath, 0),
                     WorkingDirectory = session.Cwd
                 };
                 category.AddJumpListItems(link);
@@ -1248,7 +1248,7 @@ class Program
 
         try
         {
-            var icon = Icon.ExtractAssociatedIcon(CopilotExePath);
+            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (icon != null) form.Icon = icon;
         }
         catch { }
@@ -1396,7 +1396,7 @@ class Program
 
         try
         {
-            var icon = Icon.ExtractAssociatedIcon(CopilotExePath);
+            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (icon != null) form.Icon = icon;
         }
         catch { }
