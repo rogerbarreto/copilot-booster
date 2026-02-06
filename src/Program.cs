@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -659,7 +658,6 @@ class NamedSession
 
 class Program
 {
-    const string AppId = "GitHub.CopilotCLI.Permissive";
     const string UpdaterMutexName = "Global\\CopilotJumpListUpdater";
     const string UpdateLockName = "Global\\CopilotJumpListUpdateLock";
 
@@ -668,16 +666,13 @@ class Program
     static readonly string PidRegistryFile = Path.Combine(CopilotDir, "active-pids.json");
     static readonly string LastUpdateFile = Path.Combine(CopilotDir, "jumplist-lastupdate.txt");
     static readonly string LogFile = Path.Combine(CopilotDir, "launcher.log");
-    static readonly string LauncherExePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+    static readonly string LauncherExePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
     internal static readonly string CopilotExePath = FindCopilotExe();
 
     internal static LauncherSettings _settings = null!;
     static Form? _hiddenForm;
     static Process? _copilotProcess;
     static MainForm? _mainForm;
-
-    [DllImport("shell32.dll", SetLastError = true)]
-    static extern void SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
 
     static string FindCopilotExe()
     {
@@ -731,8 +726,6 @@ class Program
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-
-        SetCurrentProcessExplicitAppUserModelID(AppId);
 
         // Load settings (creates defaults on first run)
         _settings = LauncherSettings.Load();
@@ -852,7 +845,6 @@ class Program
         _hiddenForm.Load += (s, e) =>
         {
             _hiddenForm.WindowState = FormWindowState.Minimized;
-            _hiddenForm.Visible = false;
             _hiddenForm.ShowInTaskbar = true;
             StartCopilotSession(workDir, resumeSessionId);
         };
@@ -1014,41 +1006,44 @@ class Program
                 return;
             }
 
-            var jumpList = JumpList.CreateJumpListForIndividualWindow(AppId, _hiddenForm.Handle);
+            var jumpList = JumpList.CreateJumpList();
             jumpList.KnownCategoryToDisplay = JumpListKnownCategoryType.Neither;
             jumpList.ClearAllUserTasks();
 
             var newSessionTask = new JumpListLink(LauncherExePath, "New Copilot Session")
             {
-                IconReference = new IconReference(LauncherExePath, 0)
+                IconReference = new IconReference(CopilotExePath, 0)
             };
 
             var openExistingTask = new JumpListLink(LauncherExePath, "Existing Sessions")
             {
                 Arguments = "--open-existing",
-                IconReference = new IconReference(LauncherExePath, 0)
+                IconReference = new IconReference(CopilotExePath, 0)
             };
 
             var settingsTask = new JumpListLink(LauncherExePath, "Settings")
             {
                 Arguments = "--settings",
-                IconReference = new IconReference(LauncherExePath, 0)
+                IconReference = new IconReference(CopilotExePath, 0)
             };
 
             jumpList.AddUserTasks(newSessionTask, new JumpListSeparator(), openExistingTask, new JumpListSeparator(), settingsTask);
 
-            var category = new JumpListCustomCategory("Active Sessions");
-            foreach (var session in activeSessions)
+            if (activeSessions.Count > 0)
             {
-                var link = new JumpListLink(LauncherExePath, session.Summary)
+                var category = new JumpListCustomCategory("Active Sessions");
+                foreach (var session in activeSessions)
                 {
-                    Arguments = $"--resume {session.Id}",
-                    IconReference = new IconReference(LauncherExePath, 0),
-                    WorkingDirectory = session.Cwd
-                };
-                category.AddJumpListItems(link);
+                    var link = new JumpListLink(LauncherExePath, session.Summary)
+                    {
+                        Arguments = $"--resume {session.Id}",
+                        IconReference = new IconReference(CopilotExePath, 0),
+                        WorkingDirectory = session.Cwd
+                    };
+                    category.AddJumpListItems(link);
+                }
+                jumpList.AddCustomCategories(category);
             }
-            jumpList.AddCustomCategories(category);
 
             jumpList.Refresh();
             Log($"Jump list updated: {activeSessions.Count} sessions");
