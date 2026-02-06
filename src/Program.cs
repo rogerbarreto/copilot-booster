@@ -106,6 +106,8 @@ internal class Program
         string? openIdeSessionId = parsed.OpenIdeSessionId;
         string? workDir = parsed.WorkDir;
 
+        LogService.Log($"Args: resume={resumeSessionId ?? "null"}, openExisting={openExisting}, settings={showSettings}", s_logFile);
+
         // Settings / Existing Sessions / Open IDE share a single MainForm window
         if (showSettings || openExisting || openIdeSessionId != null)
         {
@@ -189,15 +191,18 @@ internal class Program
         if (resumeSessionId != null)
         {
             var activeSessions = SessionService.GetActiveSessions(s_pidRegistryFile, SessionStateDir);
+            LogService.Log($"Active sessions: {activeSessions.Count}, looking for {resumeSessionId}", s_logFile);
             var existing = activeSessions.FirstOrDefault(s => s.Id == resumeSessionId);
-            if (existing != null)
+            if (existing != null && existing.WindowHandle != 0)
             {
-                string expectedTitle = $"Copilot [{resumeSessionId}]";
-                if (WindowFocusService.TryFocusWindowByTitle(expectedTitle))
+                LogService.Log($"Trying to focus window handle: {existing.WindowHandle}", s_logFile);
+                if (WindowFocusService.TryFocusWindowHandle(new IntPtr(existing.WindowHandle)))
                 {
-                    LogService.Log($"Focused existing session {resumeSessionId} by title", s_logFile);
+                    LogService.Log($"Focused existing session {resumeSessionId}", s_logFile);
                     return;
                 }
+
+                LogService.Log("TryFocusWindowHandle returned false", s_logFile);
             }
         }
 
@@ -300,24 +305,31 @@ internal class Program
 
         var settingsArgs = _settings.BuildCopilotArgs(copilotArgs.ToArray());
 
-        // Use a unique window title so we can find this session's terminal window
-        string windowTitle = $"Copilot [{resumeSessionId ?? "new-" + myPid}]";
+        // Snapshot existing "GitHub Copilot" windows before launch
+        var existingWindows = WindowFocusService.FindWindowsByTitle("GitHub Copilot");
+
         var psi = new ProcessStartInfo
         {
-            FileName = "cmd.exe",
-            Arguments = $"/c \"title {windowTitle} && \"{CopilotExePath}\" {settingsArgs}\"",
+            FileName = CopilotExePath,
+            Arguments = settingsArgs,
             WorkingDirectory = workDir,
             UseShellExecute = true
         };
 
         s_copilotProcess = Process.Start(psi);
-        LogService.Log($"Started copilot via cmd with PID: {s_copilotProcess?.Id}", s_logFile);
+        LogService.Log($"Started copilot with PID: {s_copilotProcess?.Id}", s_logFile);
 
         // Update jump list after session creation delay
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };
         timer.Tick += (s, e) =>
         {
             timer.Stop();
+
+            // Find the new "GitHub Copilot" window that appeared after launch
+            var currentWindows = WindowFocusService.FindWindowsByTitle("GitHub Copilot");
+            var newWindow = currentWindows.FirstOrDefault(w => !existingWindows.Contains(w));
+            long windowHandle = newWindow != IntPtr.Zero ? newWindow.ToInt64() : 0;
+            LogService.Log($"Captured window handle: {windowHandle}", s_logFile);
 
             // Map this PID to its session
             string? sessionId = resumeSessionId;
@@ -331,17 +343,8 @@ internal class Program
 
             if (sessionId != null)
             {
-                int copilotPid = s_copilotProcess?.Id ?? 0;
-                PidRegistryService.UpdatePidSessionId(myPid, sessionId, s_pidRegistryFile, copilotPid);
-                LogService.Log($"Mapped PID {myPid} to session {sessionId} (copilot PID {copilotPid})", s_logFile);
-
-                // Update the console window title to include session ID for focus tracking
-                if (resumeSessionId == null)
-                {
-                    string newTitle = $"Copilot [{sessionId}]";
-                    WindowFocusService.TrySetWindowTitle(windowTitle, newTitle);
-                    windowTitle = newTitle;
-                }
+                PidRegistryService.UpdatePidSessionId(myPid, sessionId, s_pidRegistryFile, 0, windowHandle);
+                LogService.Log($"Mapped PID {myPid} to session {sessionId} (window {windowHandle})", s_logFile);
             }
 
             LogService.Log("Updating jump list...", s_logFile);

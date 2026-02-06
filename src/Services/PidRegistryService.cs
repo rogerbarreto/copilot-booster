@@ -41,7 +41,8 @@ internal class PidRegistryService
     /// <param name="pid">The launcher process ID to update.</param>
     /// <param name="sessionId">The session ID to associate with the process.</param>
     /// <param name="copilotPid">The copilot CLI process ID.</param>
-    internal void UpdatePidSessionId(int pid, string sessionId, int copilotPid = 0) => UpdatePidSessionId(pid, sessionId, this._pidRegistryFile, copilotPid);
+    /// <param name="windowHandle">The terminal window handle for focus tracking.</param>
+    internal void UpdatePidSessionId(int pid, string sessionId, int copilotPid = 0, long windowHandle = 0) => UpdatePidSessionId(pid, sessionId, this._pidRegistryFile, copilotPid, windowHandle);
 
     /// <summary>
     /// Registers a process ID in the PID registry file, creating the directory and file if needed.
@@ -80,7 +81,8 @@ internal class PidRegistryService
     /// <param name="sessionId">The session ID to associate with the process.</param>
     /// <param name="pidRegistryFile">Path to the PID registry JSON file.</param>
     /// <param name="copilotPid">The copilot CLI process ID.</param>
-    internal static void UpdatePidSessionId(int pid, string sessionId, string pidRegistryFile, int copilotPid = 0)
+    /// <param name="windowHandle">The terminal window handle for focus tracking.</param>
+    internal static void UpdatePidSessionId(int pid, string sessionId, string pidRegistryFile, int copilotPid = 0, long windowHandle = 0)
     {
         try
         {
@@ -93,7 +95,7 @@ internal class PidRegistryService
             var registry = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? [];
 
             registry[pid.ToString()] = JsonSerializer.Deserialize<JsonElement>(
-                JsonSerializer.Serialize(new { started = System.DateTime.Now.ToString("o"), sessionId, copilotPid }));
+                JsonSerializer.Serialize(new { started = System.DateTime.Now.ToString("o"), sessionId, copilotPid, windowHandle }));
 
             File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(registry));
         }

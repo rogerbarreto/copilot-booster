@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
@@ -53,7 +54,7 @@ internal static partial class WindowFocusService
     [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int GetWindowText(IntPtr hWnd, [Out] char[] lpString, int nMaxCount);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextLengthW")]
     private static partial int GetWindowTextLength(IntPtr hWnd);
 
     [LibraryImport("user32.dll")]
@@ -154,6 +155,53 @@ internal static partial class WindowFocusService
         {
             SetWindowText(hwnd, newTitle);
         }
+    }
+
+    /// <summary>
+    /// Finds all visible windows with the specified exact title.
+    /// </summary>
+    /// <param name="title">The window title to search for.</param>
+    /// <returns>A set of window handles matching the title.</returns>
+    internal static HashSet<IntPtr> FindWindowsByTitle(string title)
+    {
+        var handles = new HashSet<IntPtr>();
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd))
+            {
+                return true;
+            }
+
+            int len = GetWindowTextLength(hwnd);
+            if (len > 0)
+            {
+                var buf = new char[len + 1];
+                GetWindowText(hwnd, buf, buf.Length);
+                var windowTitle = new string(buf, 0, len);
+                if (windowTitle == title)
+                {
+                    handles.Add(hwnd);
+                }
+            }
+
+            return true;
+        }, IntPtr.Zero);
+        return handles;
+    }
+
+    /// <summary>
+    /// Attempts to focus a window by its handle.
+    /// </summary>
+    /// <param name="hwnd">The window handle to focus.</param>
+    /// <returns><c>true</c> if the window was focused; otherwise <c>false</c>.</returns>
+    internal static bool TryFocusWindowHandle(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd))
+        {
+            return false;
+        }
+
+        return FocusWindow(hwnd);
     }
 
     /// <summary>
