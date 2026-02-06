@@ -9,7 +9,7 @@ using System.Windows.Forms;
 namespace CopilotApp.Forms;
 
 [ExcludeFromCodeCoverage]
-static class CwdPickerForm
+internal static class CwdPickerForm
 {
     internal static string? ShowCwdPicker(string defaultWorkDir)
     {

@@ -1,6 +1,6 @@
 ﻿namespace CopilotApp.Models;
 
-class SessionInfo
+internal class SessionInfo
 {
     public string Id { get; set; } = "";
     public string Cwd { get; set; } = "";

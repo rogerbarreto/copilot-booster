@@ -11,20 +11,20 @@ using CopilotApp.Services;
 namespace CopilotApp.Forms;
 
 [ExcludeFromCodeCoverage]
-class MainForm : Form
+internal class MainForm : Form
 {
-    readonly TabControl _mainTabs;
-    readonly TabPage _sessionsTab;
-    readonly TabPage _settingsTab;
+    private readonly TabControl _mainTabs;
+    private readonly TabPage _sessionsTab;
+    private readonly TabPage _settingsTab;
 
     // Sessions tab controls
-    readonly ListView _sessionListView;
+    private readonly ListView _sessionListView;
 
     // Settings tab controls
-    readonly ListBox _toolsList;
-    readonly ListBox _dirsList;
-    readonly ListView _idesList;
-    readonly TextBox _workDirBox;
+    private readonly ListBox _toolsList;
+    private readonly ListBox _dirsList;
+    private readonly ListView _idesList;
+    private readonly TextBox _workDirBox;
 
     public string? SelectedSessionId { get; private set; }
 
@@ -252,7 +252,7 @@ class MainForm : Form
         }
     }
 
-    void LaunchSessionAndClose()
+    private void LaunchSessionAndClose()
     {
         if (this.SelectedSessionId != null)
         {
@@ -286,7 +286,7 @@ class MainForm : Form
         this.Activate();
     }
 
-    void RefreshSessionList()
+    private void RefreshSessionList()
     {
         this._sessionListView.Items.Clear();
         var sessions = LoadNamedSessions();
@@ -299,7 +299,7 @@ class MainForm : Form
         }
     }
 
-    void ReloadSettingsUI()
+    private void ReloadSettingsUI()
     {
         var fresh = LauncherSettings.Load();
 
@@ -330,7 +330,7 @@ class MainForm : Form
 
     internal static List<NamedSession> LoadNamedSessions(string sessionStateDir) => SessionService.LoadNamedSessions(sessionStateDir);
 
-    Panel CreateListButtons(ListBox listBox, string promptText, string addTitle, bool addBrowse)
+    private FlowLayoutPanel CreateListButtons(ListBox listBox, string promptText, string addTitle, bool addBrowse)
     {
         var panel = new FlowLayoutPanel
         {
@@ -441,7 +441,7 @@ class MainForm : Form
         return panel;
     }
 
-    Panel CreateIdeButtons()
+    private FlowLayoutPanel CreateIdeButtons()
     {
         var panel = new FlowLayoutPanel
         {
@@ -503,7 +503,7 @@ class MainForm : Form
         return panel;
     }
 
-    static (string path, string desc)? PromptIdeEntry(string title, string defaultPath, string defaultDesc)
+    private static (string path, string desc)? PromptIdeEntry(string title, string defaultPath, string defaultDesc)
     {
         var form = new Form
         {
@@ -549,7 +549,7 @@ class MainForm : Form
         return null;
     }
 
-    static string? PromptInput(string title, string label, string defaultValue)
+    private static string? PromptInput(string title, string label, string defaultValue)
     {
         var form = new Form
         {

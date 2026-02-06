@@ -3,12 +3,12 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
-using Microsoft.WindowsAPICodePack.Shell;
 using Microsoft.WindowsAPICodePack.Taskbar;
+using Microsoft.WindowsAPICodePack.Shell;
 
 namespace CopilotApp.Services;
 
-class JumpListService
+internal class JumpListService
 {
     [ExcludeFromCodeCoverage]
     internal static void TryUpdateJumpListWithLock(string updateLockName, string lastUpdateFile, string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, string logFile, Form? hiddenForm)
@@ -29,7 +29,10 @@ class JumpListService
                 }
             }
         }
-        catch (Exception ex) { LogService.Log($"TryUpdateJumpListWithLock error: {ex.Message}", logFile); }
+        catch (Exception ex)
+        {
+            LogService.Log($"TryUpdateJumpListWithLock error: {ex.Message}", logFile);
+        }
     }
 
     internal static bool ShouldBackgroundUpdate(TimeSpan minInterval, string lastUpdateFile)
@@ -44,7 +47,10 @@ class JumpListService
             var lastUpdate = DateTime.Parse(File.ReadAllText(lastUpdateFile).Trim());
             return DateTime.UtcNow - lastUpdate > minInterval;
         }
-        catch { return true; }
+        catch
+        {
+            return true;
+        }
     }
 
     [ExcludeFromCodeCoverage]

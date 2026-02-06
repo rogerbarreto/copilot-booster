@@ -3,7 +3,7 @@ using System.IO;
 
 namespace CopilotApp.Services;
 
-class LogService
+internal class LogService
 {
     private readonly string _logFile;
 

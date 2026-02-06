@@ -6,9 +6,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CopilotApp.Models;
-class LauncherSettings
+
+internal class LauncherSettings
 {
-    static readonly string SettingsFile = Path.Combine(
+    private static readonly string s_settingsFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot", "launcher-settings.json");
 
     [JsonPropertyName("allowedTools")]
@@ -23,7 +24,7 @@ class LauncherSettings
     [JsonPropertyName("ides")]
     public List<IdeEntry> Ides { get; set; } = new();
 
-    public static LauncherSettings Load() => Load(SettingsFile);
+    public static LauncherSettings Load() => Load(s_settingsFile);
 
     internal static LauncherSettings Load(string settingsFile)
     {
@@ -42,7 +43,7 @@ class LauncherSettings
         return settings;
     }
 
-    public void Save() => this.Save(SettingsFile);
+    public void Save() => this.Save(s_settingsFile);
 
     internal void Save(string settingsFile)
     {
@@ -92,7 +93,7 @@ class LauncherSettings
     }
 }
 
-class IdeEntry
+internal class IdeEntry
 {
     [JsonPropertyName("path")]
     public string Path { get; set; } = "";

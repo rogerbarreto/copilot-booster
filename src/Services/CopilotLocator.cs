@@ -4,7 +4,7 @@ using System.IO;
 
 namespace CopilotApp.Services;
 
-class CopilotLocator
+internal class CopilotLocator
 {
     internal static string FindCopilotExe() => FindCopilotExe(null);
 

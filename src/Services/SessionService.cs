@@ -7,7 +7,7 @@ using CopilotApp.Models;
 
 namespace CopilotApp.Services;
 
-class SessionService
+internal class SessionService
 {
     private readonly string _pidRegistryFile;
     private readonly string _sessionStateDir;
@@ -33,7 +33,10 @@ class SessionService
         {
             pidRegistry = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(pidRegistryFile));
         }
-        catch { return sessions; }
+        catch
+        {
+            return sessions;
+        }
 
         if (pidRegistry == null)
         {
@@ -81,7 +84,10 @@ class SessionService
                     sessions.Add(session);
                 }
             }
-            catch { toRemove.Add(pidStr); }
+            catch
+            {
+                toRemove.Add(pidStr);
+            }
         }
 
         if (toRemove.Count > 0)
@@ -91,7 +97,11 @@ class SessionService
                 pidRegistry.Remove(pid);
             }
 
-            try { File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(pidRegistry)); } catch { }
+            try
+            {
+                File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(pidRegistry));
+            }
+            catch { }
         }
 
         return sessions;
@@ -134,7 +144,10 @@ class SessionService
                 Pid = pid
             };
         }
-        catch { return null; }
+        catch
+        {
+            return null;
+        }
     }
 
     internal static List<NamedSession> LoadNamedSessions(string sessionStateDir)
@@ -189,7 +202,10 @@ class SessionService
                         LastModified = Directory.GetLastWriteTime(d)
                     };
                 }
-                catch { return null; }
+                catch
+                {
+                    return null;
+                }
             })
             .Where(s => s != null)
             .Take(50)

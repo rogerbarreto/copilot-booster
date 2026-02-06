@@ -1,4 +1,4 @@
-﻿public class LogTests : IDisposable
+﻿public sealed class LogTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _logFile;

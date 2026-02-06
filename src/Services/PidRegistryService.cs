@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace CopilotApp.Services;
 
-class PidRegistryService
+internal class PidRegistryService
 {
     private readonly string _copilotDir;
     private readonly string _pidRegistryFile;
@@ -31,7 +31,10 @@ class PidRegistryService
             Dictionary<string, object> registry = new();
             if (File.Exists(pidRegistryFile))
             {
-                try { registry = JsonSerializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(pidRegistryFile)) ?? new(); }
+                try
+                {
+                    registry = JsonSerializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(pidRegistryFile)) ?? new();
+                }
                 catch { }
             }
             registry[pid.ToString()] = new { started = System.DateTime.Now.ToString("o"), sessionId = (string?)null };

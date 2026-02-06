@@ -1,4 +1,4 @@
-﻿public class ShouldBackgroundUpdateTests : IDisposable
+﻿public sealed class ShouldBackgroundUpdateTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _lastUpdateFile;

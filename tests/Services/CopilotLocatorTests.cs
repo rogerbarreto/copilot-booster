@@ -1,4 +1,4 @@
-﻿public class FindCopilotExeTests : IDisposable
+﻿public sealed class FindCopilotExeTests : IDisposable
 {
     private readonly string _tempDir;
 

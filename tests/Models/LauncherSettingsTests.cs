@@ -1,6 +1,6 @@
 ﻿using System.Text.Json;
 
-public class LauncherSettingsTests : IDisposable
+public sealed class LauncherSettingsTests : IDisposable
 {
     private readonly string _tempDir;
 

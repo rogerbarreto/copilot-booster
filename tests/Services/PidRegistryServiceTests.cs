@@ -1,4 +1,4 @@
-﻿public class PidRegistryTests : IDisposable
+﻿public sealed class PidRegistryTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _pidFile;

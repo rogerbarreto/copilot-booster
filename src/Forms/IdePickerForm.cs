@@ -9,7 +9,7 @@ using CopilotApp.Services;
 namespace CopilotApp.Forms;
 
 [ExcludeFromCodeCoverage]
-static class IdePickerForm
+internal static class IdePickerForm
 {
     internal static void OpenIdeForSession(string sessionId)
     {
@@ -31,7 +31,11 @@ static class IdePickerForm
         string? cwd = null;
         foreach (var line in File.ReadAllLines(workspaceFile))
         {
-            if (line.StartsWith("cwd:")) { cwd = line[4..].Trim(); break; }
+            if (line.StartsWith("cwd:"))
+            {
+                cwd = line[4..].Trim();
+                break;
+            }
         }
 
         if (string.IsNullOrEmpty(cwd))
@@ -124,7 +128,13 @@ static class IdePickerForm
         form.Controls.Add(layout);
         form.CancelButton = null;
         form.KeyPreview = true;
-        form.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) { form.Close(); } };
+        form.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                form.Close();
+            }
+        };
         form.ShowDialog();
     }
 
