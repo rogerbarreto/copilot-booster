@@ -797,7 +797,7 @@ class Program
                 IconReference = new IconReference(CopilotExePath, 0)
             };
 
-            var openExistingTask = new JumpListLink(LauncherExePath, "Open Existing Session")
+            var openExistingTask = new JumpListLink(LauncherExePath, "Existing Sessions")
             {
                 Arguments = "--open-existing",
                 IconReference = new IconReference(CopilotExePath, 0)
@@ -821,16 +821,6 @@ class Program
                     WorkingDirectory = session.Cwd
                 };
                 category.AddJumpListItems(link);
-
-                if (_settings.Ides.Count > 0)
-                {
-                    var ideLink = new JumpListLink(LauncherExePath, $"  ↗ Open in IDE: {session.Summary}")
-                    {
-                        Arguments = $"--open-ide {session.Id}",
-                        IconReference = new IconReference(CopilotExePath, 0)
-                    };
-                    category.AddJumpListItems(ideLink);
-                }
             }
             jumpList.AddCustomCategories(category);
 
@@ -1156,13 +1146,13 @@ class Program
 
         if (sessions.Count == 0)
         {
-            MessageBox.Show("No named sessions found.", "Open Existing Session", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("No named sessions found.", "Existing Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return null;
         }
 
         var form = new Form
         {
-            Text = "Open Existing Session",
+            Text = "Existing Sessions",
             Size = new System.Drawing.Size(600, 500),
             StartPosition = FormStartPosition.CenterScreen,
             FormBorderStyle = FormBorderStyle.Sizable,
@@ -1187,6 +1177,9 @@ class Program
         listView.Columns.Add("Session");
         listView.Columns.Add("Details");
 
+        // Store session CWD in a lookup for IDE button
+        var sessionCwdMap = new Dictionary<string, string>();
+
         foreach (var session in sessions)
         {
             if (session == null) continue;
@@ -1194,6 +1187,7 @@ class Program
             var item = new ListViewItem(session.Summary) { Tag = session.Id };
             item.SubItems.Add($"[{session.Folder}]  •  {lastWrite:yyyy-MM-dd HH:mm}");
             listView.Items.Add(item);
+            sessionCwdMap[session.Id] = session.Cwd;
         }
 
         string? selectedId = null;
@@ -1219,7 +1213,7 @@ class Program
         var btnCancel = new Button { Text = "Cancel", Width = 80 };
         btnCancel.Click += (s, e) => { form.DialogResult = DialogResult.Cancel; form.Close(); };
 
-        var btnOpen = new Button { Text = "Open", Width = 80 };
+        var btnOpen = new Button { Text = "Open Session", Width = 100 };
         btnOpen.Click += (s, e) =>
         {
             if (listView.SelectedItems.Count > 0)
@@ -1232,6 +1226,21 @@ class Program
 
         buttonPanel.Controls.Add(btnCancel);
         buttonPanel.Controls.Add(btnOpen);
+
+        if (_settings.Ides.Count > 0)
+        {
+            var btnIde = new Button { Text = "Open in IDE", Width = 100 };
+            btnIde.Click += (s, e) =>
+            {
+                if (listView.SelectedItems.Count > 0)
+                {
+                    var sid = listView.SelectedItems[0].Tag as string;
+                    if (sid != null)
+                        OpenIdeForSession(sid);
+                }
+            };
+            buttonPanel.Controls.Add(btnIde);
+        }
 
         form.Controls.Add(listView);
         form.Controls.Add(buttonPanel);
