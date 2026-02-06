@@ -602,15 +602,17 @@ class Program
 
         Log($"WorkDir: {workDir}, Resume: {resumeSessionId ?? "none"}");
 
-        // Create form - visible in taskbar for jump list
+        // Create form - visible in taskbar for jump list but no visible window
         _hiddenForm = new Form
         {
             Text = "Copilot App",
             ShowInTaskbar = true,
             WindowState = FormWindowState.Minimized,
-            FormBorderStyle = FormBorderStyle.FixedSingle,
+            FormBorderStyle = FormBorderStyle.SizableToolWindow,
             MinimizeBox = true,
-            Size = new System.Drawing.Size(1, 1)
+            Size = new System.Drawing.Size(0, 0),
+            Opacity = 0,
+            ShowIcon = false
         };
 
         // Set window icon
@@ -624,6 +626,7 @@ class Program
         _hiddenForm.Load += (s, e) =>
         {
             _hiddenForm.WindowState = FormWindowState.Minimized;
+            _hiddenForm.Visible = false;
             _hiddenForm.ShowInTaskbar = true;
             StartCopilotSession(workDir, resumeSessionId);
         };
