@@ -1,4 +1,4 @@
-namespace CopilotApp.Models;
+﻿namespace CopilotApp.Models;
 
 class SessionInfo
 {

@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
+﻿using System.Text.Json;
 
 public class LauncherSettingsTests : IDisposable
 {
@@ -9,20 +6,20 @@ public class LauncherSettingsTests : IDisposable
 
     public LauncherSettingsTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(_tempDir);
+        this._tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(this._tempDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, true); } catch { }
+        try { Directory.Delete(this._tempDir, true); } catch { }
     }
 
     [Fact]
     public void Load_WhenFileNotExists_CreatesDefaultFile()
     {
-        var file = Path.Combine(_tempDir, "sub", "settings.json");
-        var settings = LauncherSettings.Load(file);
+        var file = Path.Combine(this._tempDir, "sub", "settings.json");
+        _ = LauncherSettings.Load(file);
 
         Assert.True(File.Exists(file));
         var loaded = JsonSerializer.Deserialize<LauncherSettings>(File.ReadAllText(file));
@@ -33,7 +30,7 @@ public class LauncherSettingsTests : IDisposable
     [Fact]
     public void Load_WhenFileNotExists_ReturnsDefault()
     {
-        var file = Path.Combine(_tempDir, "nonexistent", "settings.json");
+        var file = Path.Combine(this._tempDir, "nonexistent", "settings.json");
         var settings = LauncherSettings.Load(file);
 
         Assert.NotNull(settings);
@@ -45,7 +42,7 @@ public class LauncherSettingsTests : IDisposable
     [Fact]
     public void Load_WhenFileExists_DeserializesCorrectly()
     {
-        var file = Path.Combine(_tempDir, "settings.json");
+        var file = Path.Combine(this._tempDir, "settings.json");
         var json = JsonSerializer.Serialize(new
         {
             allowedTools = new[] { "tool1", "tool2" },
@@ -71,7 +68,7 @@ public class LauncherSettingsTests : IDisposable
     [Fact]
     public void Load_WhenFileCorrupt_ReturnsDefault()
     {
-        var file = Path.Combine(_tempDir, "settings.json");
+        var file = Path.Combine(this._tempDir, "settings.json");
         File.WriteAllText(file, "not valid json {{{");
 
         var settings = LauncherSettings.Load(file);
@@ -84,7 +81,7 @@ public class LauncherSettingsTests : IDisposable
     [Fact]
     public void Save_CreatesDirectoryAndFile()
     {
-        var file = Path.Combine(_tempDir, "sub", "deep", "settings.json");
+        var file = Path.Combine(this._tempDir, "sub", "deep", "settings.json");
         var settings = new LauncherSettings
         {
             AllowedTools = new List<string> { "mytool" },
@@ -103,7 +100,7 @@ public class LauncherSettingsTests : IDisposable
     [Fact]
     public void Save_OverwritesExisting()
     {
-        var file = Path.Combine(_tempDir, "settings.json");
+        var file = Path.Combine(this._tempDir, "settings.json");
         var s1 = new LauncherSettings { DefaultWorkDir = "first" };
         s1.Save(file);
 

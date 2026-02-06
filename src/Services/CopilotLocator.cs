@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 
@@ -19,7 +19,12 @@ class CopilotLocator
         };
 
         foreach (var path in candidatePaths)
-            if (File.Exists(path)) return path;
+        {
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
 
         // Fallback: try to find copilot in PATH
         try
@@ -34,7 +39,9 @@ class CopilotLocator
             var output = proc?.StandardOutput.ReadToEnd().Trim();
             proc?.WaitForExit();
             if (!string.IsNullOrEmpty(output) && File.Exists(output.Split('\n')[0].Trim()))
+            {
                 return output.Split('\n')[0].Trim();
+            }
         }
         catch { }
 

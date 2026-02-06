@@ -1,12 +1,11 @@
-namespace CopilotApp.Models;
-
+﻿
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+namespace CopilotApp.Models;
 class LauncherSettings
 {
     static readonly string SettingsFile = Path.Combine(
@@ -43,14 +42,17 @@ class LauncherSettings
         return settings;
     }
 
-    public void Save() => Save(SettingsFile);
+    public void Save() => this.Save(SettingsFile);
 
     internal void Save(string settingsFile)
     {
         try
         {
             var dir = Path.GetDirectoryName(settingsFile)!;
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             File.WriteAllText(settingsFile, JsonSerializer.Serialize(this, options));
@@ -71,12 +73,21 @@ class LauncherSettings
     public string BuildCopilotArgs(string[] extraArgs)
     {
         var parts = new List<string>();
-        foreach (var tool in AllowedTools)
+        foreach (var tool in this.AllowedTools)
+        {
             parts.Add($"\"--allow-tool={tool}\"");
-        foreach (var dir in AllowedDirs)
+        }
+
+        foreach (var dir in this.AllowedDirs)
+        {
             parts.Add($"\"--add-dir={dir}\"");
+        }
+
         foreach (var arg in extraArgs)
+        {
             parts.Add(arg);
+        }
+
         return string.Join(" ", parts);
     }
 }
@@ -89,5 +100,5 @@ class IdeEntry
     [JsonPropertyName("description")]
     public string Description { get; set; } = "";
 
-    public override string ToString() => string.IsNullOrEmpty(Description) ? Path : $"{Description}  —  {Path}";
+    public override string ToString() => string.IsNullOrEmpty(this.Description) ? this.Path : $"{this.Description}  —  {this.Path}";
 }

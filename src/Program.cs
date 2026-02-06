@@ -1,20 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Windows.Forms;
-using Microsoft.WindowsAPICodePack.Taskbar;
-using Microsoft.WindowsAPICodePack.Shell;
+using CopilotApp.Forms;
 using CopilotApp.Models;
 using CopilotApp.Services;
-using CopilotApp.Forms;
 
 [assembly: InternalsVisibleTo("CopilotApp.Tests")]
 
@@ -131,14 +126,16 @@ class Program
                         var content = File.ReadAllText(SignalFile).Trim();
                         File.Delete(SignalFile);
                         if (int.TryParse(content, out int tab))
+                        {
                             _mainForm.SwitchToTab(tab);
+                        }
                     }
                 }
                 catch { }
             };
             signalTimer.Start();
 
-            try { if (File.Exists(SignalFile)) File.Delete(SignalFile); } catch { }
+            try { if (File.Exists(SignalFile)) { File.Delete(SignalFile); } } catch { }
 
             Application.Run(_mainForm);
             signalTimer.Stop();
@@ -154,7 +151,10 @@ class Program
         if (workDir == null && resumeSessionId == null)
         {
             workDir = CwdPickerForm.ShowCwdPicker(defaultWorkDir);
-            if (workDir == null) return;
+            if (workDir == null)
+            {
+                return;
+            }
         }
 
         // When resuming, always use the session's original CWD
@@ -191,7 +191,10 @@ class Program
         try
         {
             var icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null) _hiddenForm.Icon = icon;
+            if (icon != null)
+            {
+                _hiddenForm.Icon = icon;
+            }
         }
         catch { }
 
@@ -240,7 +243,10 @@ class Program
         // Launch copilot directly with allowed tools/dirs from settings
         var copilotArgs = new List<string>();
         if (resumeSessionId != null)
+        {
             copilotArgs.Add($"--resume {resumeSessionId}");
+        }
+
         var settingsArgs = _settings.BuildCopilotArgs(copilotArgs.ToArray());
 
         var psi = new ProcessStartInfo
@@ -294,7 +300,8 @@ class Program
                 updaterMutex?.Dispose();
 
                 _hiddenForm?.Invoke(() => Application.Exit());
-            }) { IsBackground = true };
+            })
+            { IsBackground = true };
             exitWatcher.Start();
         };
         timer.Start();

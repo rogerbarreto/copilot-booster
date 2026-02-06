@@ -1,6 +1,4 @@
-using System;
-
-public class ParseArgumentsTests
+﻿public class ParseArgumentsTests
 {
     [Fact]
     public void ParseArguments_EmptyArgs_AllDefaults()

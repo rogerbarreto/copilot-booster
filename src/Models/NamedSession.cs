@@ -1,7 +1,7 @@
-namespace CopilotApp.Models;
-
+﻿
 using System;
 
+namespace CopilotApp.Models;
 class NamedSession
 {
     public string Id { get; set; } = "";

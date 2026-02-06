@@ -1,4 +1,4 @@
-public class SessionInfoTests
+﻿public class SessionInfoTests
 {
     [Fact]
     public void SessionInfo_DefaultPropertyValues()

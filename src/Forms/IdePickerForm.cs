@@ -1,10 +1,9 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using CopilotApp.Models;
 using CopilotApp.Services;
 
 namespace CopilotApp.Forms;
@@ -60,7 +59,10 @@ static class IdePickerForm
         try
         {
             var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null) form.Icon = icon;
+            if (icon != null)
+            {
+                form.Icon = icon;
+            }
         }
         catch { }
 
@@ -122,7 +124,7 @@ static class IdePickerForm
         form.Controls.Add(layout);
         form.CancelButton = null;
         form.KeyPreview = true;
-        form.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) form.Close(); };
+        form.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) { form.Close(); } };
         form.ShowDialog();
     }
 

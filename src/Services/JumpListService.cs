@@ -1,11 +1,10 @@
-using System;
+﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
-using Microsoft.WindowsAPICodePack.Taskbar;
 using Microsoft.WindowsAPICodePack.Shell;
-using CopilotApp.Models;
+using Microsoft.WindowsAPICodePack.Taskbar;
 
 namespace CopilotApp.Services;
 
@@ -37,7 +36,11 @@ class JumpListService
     {
         try
         {
-            if (!File.Exists(lastUpdateFile)) return true;
+            if (!File.Exists(lastUpdateFile))
+            {
+                return true;
+            }
+
             var lastUpdate = DateTime.Parse(File.ReadAllText(lastUpdateFile).Trim());
             return DateTime.UtcNow - lastUpdate > minInterval;
         }
@@ -55,7 +58,9 @@ class JumpListService
             }
 
             for (int i = 0; i < 300 && !ct.IsCancellationRequested; i++)
+            {
                 Thread.Sleep(1000);
+            }
         }
     }
 

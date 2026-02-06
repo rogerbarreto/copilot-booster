@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -11,20 +11,22 @@ class PidRegistryService
 
     internal PidRegistryService(string copilotDir, string pidRegistryFile)
     {
-        _copilotDir = copilotDir;
-        _pidRegistryFile = pidRegistryFile;
+        this._copilotDir = copilotDir;
+        this._pidRegistryFile = pidRegistryFile;
     }
 
-    internal void RegisterPid(int pid) => RegisterPid(pid, _copilotDir, _pidRegistryFile);
-    internal void UnregisterPid(int pid) => UnregisterPid(pid, _pidRegistryFile);
-    internal void UpdatePidSessionId(int pid, string sessionId) => UpdatePidSessionId(pid, sessionId, _pidRegistryFile);
+    internal void RegisterPid(int pid) => RegisterPid(pid, this._copilotDir, this._pidRegistryFile);
+    internal void UnregisterPid(int pid) => UnregisterPid(pid, this._pidRegistryFile);
+    internal void UpdatePidSessionId(int pid, string sessionId) => UpdatePidSessionId(pid, sessionId, this._pidRegistryFile);
 
     internal static void RegisterPid(int pid, string copilotDir, string pidRegistryFile)
     {
         try
         {
             if (!Directory.Exists(copilotDir))
+            {
                 Directory.CreateDirectory(copilotDir);
+            }
 
             Dictionary<string, object> registry = new();
             if (File.Exists(pidRegistryFile))
@@ -42,7 +44,11 @@ class PidRegistryService
     {
         try
         {
-            if (!File.Exists(pidRegistryFile)) return;
+            if (!File.Exists(pidRegistryFile))
+            {
+                return;
+            }
+
             var json = File.ReadAllText(pidRegistryFile);
             var registry = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? new();
 
@@ -58,7 +64,11 @@ class PidRegistryService
     {
         try
         {
-            if (!File.Exists(pidRegistryFile)) return;
+            if (!File.Exists(pidRegistryFile))
+            {
+                return;
+            }
+
             var registry = JsonSerializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(pidRegistryFile)) ?? new();
             registry.Remove(pid.ToString());
             File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(registry));

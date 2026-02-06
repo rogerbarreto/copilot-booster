@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
@@ -20,7 +20,11 @@ static class CwdPickerForm
             foreach (var dir in Directory.GetDirectories(Program.SessionStateDir))
             {
                 var wsFile = Path.Combine(dir, "workspace.yaml");
-                if (!File.Exists(wsFile)) continue;
+                if (!File.Exists(wsFile))
+                {
+                    continue;
+                }
+
                 try
                 {
                     foreach (var line in File.ReadAllLines(wsFile))
@@ -58,7 +62,10 @@ static class CwdPickerForm
         try
         {
             var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null) form.Icon = icon;
+            if (icon != null)
+            {
+                form.Icon = icon;
+            }
         }
         catch { }
 
@@ -81,7 +88,9 @@ static class CwdPickerForm
         }
 
         if (listView.Items.Count > 0)
+        {
             listView.Items[0].Selected = true;
+        }
 
         string? selectedPath = null;
 

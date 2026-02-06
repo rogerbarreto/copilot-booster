@@ -1,4 +1,4 @@
-public class IdeEntryTests
+﻿public class IdeEntryTests
 {
     [Fact]
     public void ToString_WithDescription_ReturnsDescriptionAndPath()

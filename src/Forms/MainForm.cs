@@ -1,9 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using CopilotApp.Models;
@@ -20,7 +19,6 @@ class MainForm : Form
 
     // Sessions tab controls
     readonly ListView _sessionListView;
-    string? _selectedSessionId;
 
     // Settings tab controls
     readonly ListBox _toolsList;
@@ -28,29 +26,32 @@ class MainForm : Form
     readonly ListView _idesList;
     readonly TextBox _workDirBox;
 
-    public string? SelectedSessionId => _selectedSessionId;
+    public string? SelectedSessionId { get; private set; }
 
     public MainForm(int initialTab = 0)
     {
-        Text = "Copilot App";
-        Size = new Size(700, 550);
-        MinimumSize = new Size(550, 400);
-        StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.Sizable;
+        this.Text = "Copilot App";
+        this.Size = new Size(700, 550);
+        this.MinimumSize = new Size(550, 400);
+        this.StartPosition = FormStartPosition.CenterScreen;
+        this.FormBorderStyle = FormBorderStyle.Sizable;
 
         try
         {
             var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null) Icon = icon;
+            if (icon != null)
+            {
+                this.Icon = icon;
+            }
         }
         catch { }
 
-        _mainTabs = new TabControl { Dock = DockStyle.Fill };
+        this._mainTabs = new TabControl { Dock = DockStyle.Fill };
 
         // ===== Sessions Tab =====
-        _sessionsTab = new TabPage("Existing Sessions");
+        this._sessionsTab = new TabPage("Existing Sessions");
 
-        _sessionListView = new ListView
+        this._sessionListView = new ListView
         {
             Dock = DockStyle.Fill,
             View = View.Tile,
@@ -58,16 +59,16 @@ class MainForm : Form
             MultiSelect = false,
             TileSize = new Size(560, 65)
         };
-        _sessionListView.Columns.Add("Session");
-        _sessionListView.Columns.Add("CWD");
-        _sessionListView.Columns.Add("Date");
+        this._sessionListView.Columns.Add("Session");
+        this._sessionListView.Columns.Add("CWD");
+        this._sessionListView.Columns.Add("Date");
 
-        _sessionListView.DoubleClick += (s, e) =>
+        this._sessionListView.DoubleClick += (s, e) =>
         {
-            if (_sessionListView.SelectedItems.Count > 0)
+            if (this._sessionListView.SelectedItems.Count > 0)
             {
-                _selectedSessionId = _sessionListView.SelectedItems[0].Tag as string;
-                LaunchSessionAndClose();
+                this.SelectedSessionId = this._sessionListView.SelectedItems[0].Tag as string;
+                this.LaunchSessionAndClose();
             }
         };
 
@@ -82,15 +83,15 @@ class MainForm : Form
         var btnOpenSession = new Button { Text = "Open Session", Width = 100 };
         btnOpenSession.Click += (s, e) =>
         {
-            if (_sessionListView.SelectedItems.Count > 0)
+            if (this._sessionListView.SelectedItems.Count > 0)
             {
-                _selectedSessionId = _sessionListView.SelectedItems[0].Tag as string;
-                LaunchSessionAndClose();
+                this.SelectedSessionId = this._sessionListView.SelectedItems[0].Tag as string;
+                this.LaunchSessionAndClose();
             }
         };
 
         var btnRefresh = new Button { Text = "Refresh", Width = 80 };
-        btnRefresh.Click += (s, e) => RefreshSessionList();
+        btnRefresh.Click += (s, e) => this.RefreshSessionList();
 
         sessionButtonPanel.Controls.Add(btnOpenSession);
 
@@ -99,11 +100,13 @@ class MainForm : Form
             var btnIde = new Button { Text = "Open in IDE", Width = 100 };
             btnIde.Click += (s, e) =>
             {
-                if (_sessionListView.SelectedItems.Count > 0)
+                if (this._sessionListView.SelectedItems.Count > 0)
                 {
-                    var sid = _sessionListView.SelectedItems[0].Tag as string;
+                    var sid = this._sessionListView.SelectedItems[0].Tag as string;
                     if (sid != null)
+                    {
                         IdePickerForm.OpenIdeForSession(sid);
+                    }
                 }
             };
             sessionButtonPanel.Controls.Add(btnIde);
@@ -111,13 +114,13 @@ class MainForm : Form
 
         sessionButtonPanel.Controls.Add(btnRefresh);
 
-        _sessionsTab.Controls.Add(_sessionListView);
-        _sessionsTab.Controls.Add(sessionButtonPanel);
+        this._sessionsTab.Controls.Add(this._sessionListView);
+        this._sessionsTab.Controls.Add(sessionButtonPanel);
 
-        RefreshSessionList();
+        this.RefreshSessionList();
 
         // ===== Settings Tab =====
-        _settingsTab = new TabPage("Settings");
+        this._settingsTab = new TabPage("Settings");
 
         var settingsContainer = new Panel { Dock = DockStyle.Fill };
 
@@ -125,27 +128,31 @@ class MainForm : Form
 
         // --- Allowed Tools tab ---
         var toolsTab = new TabPage("Allowed Tools");
-        _toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
+        this._toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
         foreach (var tool in Program._settings.AllowedTools)
-            _toolsList.Items.Add(tool);
+        {
+            this._toolsList.Items.Add(tool);
+        }
 
-        var toolsButtons = CreateListButtons(_toolsList, "Tool name:", "Add Tool", addBrowse: false);
-        toolsTab.Controls.Add(_toolsList);
+        var toolsButtons = this.CreateListButtons(this._toolsList, "Tool name:", "Add Tool", addBrowse: false);
+        toolsTab.Controls.Add(this._toolsList);
         toolsTab.Controls.Add(toolsButtons);
 
         // --- Allowed Directories tab ---
         var dirsTab = new TabPage("Allowed Directories");
-        _dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
+        this._dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
         foreach (var dir in Program._settings.AllowedDirs)
-            _dirsList.Items.Add(dir);
+        {
+            this._dirsList.Items.Add(dir);
+        }
 
-        var dirsButtons = CreateListButtons(_dirsList, "Directory path:", "Add Directory", addBrowse: true);
-        dirsTab.Controls.Add(_dirsList);
+        var dirsButtons = this.CreateListButtons(this._dirsList, "Directory path:", "Add Directory", addBrowse: true);
+        dirsTab.Controls.Add(this._dirsList);
         dirsTab.Controls.Add(dirsButtons);
 
         // --- IDEs tab ---
         var idesTab = new TabPage("IDEs");
-        _idesList = new ListView
+        this._idesList = new ListView
         {
             Dock = DockStyle.Fill,
             View = View.Details,
@@ -153,17 +160,17 @@ class MainForm : Form
             MultiSelect = false,
             GridLines = true
         };
-        _idesList.Columns.Add("Description", 200);
-        _idesList.Columns.Add("Path", 400);
+        this._idesList.Columns.Add("Description", 200);
+        this._idesList.Columns.Add("Path", 400);
         foreach (var ide in Program._settings.Ides)
         {
             var item = new ListViewItem(ide.Description);
             item.SubItems.Add(ide.Path);
-            _idesList.Items.Add(item);
+            this._idesList.Items.Add(item);
         }
 
-        var ideButtons = CreateIdeButtons();
-        idesTab.Controls.Add(_idesList);
+        var ideButtons = this.CreateIdeButtons();
+        idesTab.Controls.Add(this._idesList);
         idesTab.Controls.Add(ideButtons);
 
         settingsTabs.TabPages.Add(toolsTab);
@@ -173,7 +180,7 @@ class MainForm : Form
         // --- Default Work Dir ---
         var workDirPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
         var workDirLabel = new Label { Text = "Default Work Dir:", AutoSize = true, Location = new Point(8, 12) };
-        _workDirBox = new TextBox
+        this._workDirBox = new TextBox
         {
             Text = Program._settings.DefaultWorkDir,
             Location = new Point(130, 9),
@@ -189,11 +196,13 @@ class MainForm : Form
         };
         workDirBrowse.Click += (s, e) =>
         {
-            using var fbd = new FolderBrowserDialog { SelectedPath = _workDirBox.Text };
+            using var fbd = new FolderBrowserDialog { SelectedPath = this._workDirBox.Text };
             if (fbd.ShowDialog() == DialogResult.OK)
-                _workDirBox.Text = fbd.SelectedPath;
+            {
+                this._workDirBox.Text = fbd.SelectedPath;
+            }
         };
-        workDirPanel.Controls.AddRange(new Control[] { workDirLabel, _workDirBox, workDirBrowse });
+        workDirPanel.Controls.AddRange(new Control[] { workDirLabel, this._workDirBox, workDirBrowse });
 
         // --- Bottom buttons ---
         var settingsBottomPanel = new FlowLayoutPanel
@@ -205,17 +214,20 @@ class MainForm : Form
         };
 
         var btnCancel = new Button { Text = "Cancel", Width = 90 };
-        btnCancel.Click += (s, e) => ReloadSettingsUI();
+        btnCancel.Click += (s, e) => this.ReloadSettingsUI();
 
         var btnSave = new Button { Text = "Save", Width = 90 };
         btnSave.Click += (s, e) =>
         {
-            Program._settings.AllowedTools = _toolsList.Items.Cast<string>().ToList();
-            Program._settings.AllowedDirs = _dirsList.Items.Cast<string>().ToList();
-            Program._settings.DefaultWorkDir = _workDirBox.Text.Trim();
+            Program._settings.AllowedTools = this._toolsList.Items.Cast<string>().ToList();
+            Program._settings.AllowedDirs = this._dirsList.Items.Cast<string>().ToList();
+            Program._settings.DefaultWorkDir = this._workDirBox.Text.Trim();
             Program._settings.Ides = new List<IdeEntry>();
-            foreach (ListViewItem item in _idesList.Items)
+            foreach (ListViewItem item in this._idesList.Items)
+            {
                 Program._settings.Ides.Add(new IdeEntry { Description = item.Text, Path = item.SubItems[1].Text });
+            }
+
             Program._settings.Save();
             MessageBox.Show("Settings saved.", "Copilot App", MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
@@ -227,54 +239,63 @@ class MainForm : Form
         settingsContainer.Controls.Add(workDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
 
-        _settingsTab.Controls.Add(settingsContainer);
+        this._settingsTab.Controls.Add(settingsContainer);
 
         // ===== Add tabs to main control =====
-        _mainTabs.TabPages.Add(_sessionsTab);
-        _mainTabs.TabPages.Add(_settingsTab);
-        Controls.Add(_mainTabs);
+        this._mainTabs.TabPages.Add(this._sessionsTab);
+        this._mainTabs.TabPages.Add(this._settingsTab);
+        this.Controls.Add(this._mainTabs);
 
-        if (initialTab >= 0 && initialTab < _mainTabs.TabPages.Count)
-            _mainTabs.SelectedIndex = initialTab;
+        if (initialTab >= 0 && initialTab < this._mainTabs.TabPages.Count)
+        {
+            this._mainTabs.SelectedIndex = initialTab;
+        }
     }
 
     void LaunchSessionAndClose()
     {
-        if (_selectedSessionId != null)
+        if (this.SelectedSessionId != null)
         {
             var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-            Process.Start(new ProcessStartInfo(exePath, $"--resume {_selectedSessionId}")
+            Process.Start(new ProcessStartInfo(exePath, $"--resume {this.SelectedSessionId}")
             {
                 UseShellExecute = false
             });
         }
-        Close();
+        this.Close();
     }
 
     public void SwitchToTab(int tabIndex)
     {
-        if (tabIndex >= 0 && tabIndex < _mainTabs.TabPages.Count)
-            _mainTabs.SelectedIndex = tabIndex;
+        if (tabIndex >= 0 && tabIndex < this._mainTabs.TabPages.Count)
+        {
+            this._mainTabs.SelectedIndex = tabIndex;
+        }
 
         if (tabIndex == 0)
-            RefreshSessionList();
+        {
+            this.RefreshSessionList();
+        }
 
-        if (WindowState == FormWindowState.Minimized)
-            WindowState = FormWindowState.Normal;
-        BringToFront();
-        Activate();
+        if (this.WindowState == FormWindowState.Minimized)
+        {
+            this.WindowState = FormWindowState.Normal;
+        }
+
+        this.BringToFront();
+        this.Activate();
     }
 
     void RefreshSessionList()
     {
-        _sessionListView.Items.Clear();
+        this._sessionListView.Items.Clear();
         var sessions = LoadNamedSessions();
         foreach (var session in sessions)
         {
             var item = new ListViewItem(session.Summary) { Tag = session.Id };
             item.SubItems.Add(session.Cwd);
             item.SubItems.Add(session.LastModified.ToString("yyyy-MM-dd HH:mm"));
-            _sessionListView.Items.Add(item);
+            this._sessionListView.Items.Add(item);
         }
     }
 
@@ -282,23 +303,27 @@ class MainForm : Form
     {
         var fresh = LauncherSettings.Load();
 
-        _toolsList.Items.Clear();
+        this._toolsList.Items.Clear();
         foreach (var tool in fresh.AllowedTools)
-            _toolsList.Items.Add(tool);
+        {
+            this._toolsList.Items.Add(tool);
+        }
 
-        _dirsList.Items.Clear();
+        this._dirsList.Items.Clear();
         foreach (var dir in fresh.AllowedDirs)
-            _dirsList.Items.Add(dir);
+        {
+            this._dirsList.Items.Add(dir);
+        }
 
-        _idesList.Items.Clear();
+        this._idesList.Items.Clear();
         foreach (var ide in fresh.Ides)
         {
             var item = new ListViewItem(ide.Description);
             item.SubItems.Add(ide.Path);
-            _idesList.Items.Add(item);
+            this._idesList.Items.Add(item);
         }
 
-        _workDirBox.Text = fresh.DefaultWorkDir;
+        this._workDirBox.Text = fresh.DefaultWorkDir;
     }
 
     internal static List<NamedSession> LoadNamedSessions() => SessionService.LoadNamedSessions(Program.SessionStateDir);
@@ -342,20 +367,28 @@ class MainForm : Form
         var btnEdit = new Button { Text = "Edit", Width = 88 };
         btnEdit.Click += (s, e) =>
         {
-            if (listBox.SelectedIndex < 0) return;
+            if (listBox.SelectedIndex < 0)
+            {
+                return;
+            }
+
             var current = listBox.SelectedItem?.ToString() ?? "";
 
             if (addBrowse)
             {
                 using var fbd = new FolderBrowserDialog { SelectedPath = current };
                 if (fbd.ShowDialog() == DialogResult.OK)
+                {
                     listBox.Items[listBox.SelectedIndex] = fbd.SelectedPath;
+                }
             }
             else
             {
                 var value = PromptInput("Edit", promptText, current);
                 if (value != null)
+                {
                     listBox.Items[listBox.SelectedIndex] = value;
+                }
             }
             listBox.Focus();
         };
@@ -368,7 +401,10 @@ class MainForm : Form
             {
                 listBox.Items.RemoveAt(idx);
                 if (listBox.Items.Count > 0)
+                {
                     listBox.SelectedIndex = Math.Min(idx, listBox.Items.Count - 1);
+                }
+
                 listBox.Focus();
             }
         };
@@ -423,39 +459,43 @@ class MainForm : Form
             {
                 var item = new ListViewItem(result.Value.desc);
                 item.SubItems.Add(result.Value.path);
-                _idesList.Items.Add(item);
+                this._idesList.Items.Add(item);
                 item.Selected = true;
-                _idesList.Focus();
+                this._idesList.Focus();
             }
         };
 
         var btnEdit = new Button { Text = "Edit", Width = 88 };
         btnEdit.Click += (s, e) =>
         {
-            if (_idesList.SelectedItems.Count == 0) return;
-            var sel = _idesList.SelectedItems[0];
+            if (this._idesList.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            var sel = this._idesList.SelectedItems[0];
             var result = PromptIdeEntry("Edit IDE", sel.SubItems[1].Text, sel.Text);
             if (result != null)
             {
                 sel.Text = result.Value.desc;
                 sel.SubItems[1].Text = result.Value.path;
             }
-            _idesList.Focus();
+            this._idesList.Focus();
         };
 
         var btnRemove = new Button { Text = "Remove", Width = 88 };
         btnRemove.Click += (s, e) =>
         {
-            if (_idesList.SelectedItems.Count > 0)
+            if (this._idesList.SelectedItems.Count > 0)
             {
-                int idx = _idesList.SelectedIndices[0];
-                _idesList.Items.RemoveAt(idx);
-                if (_idesList.Items.Count > 0)
+                int idx = this._idesList.SelectedIndices[0];
+                this._idesList.Items.RemoveAt(idx);
+                if (this._idesList.Items.Count > 0)
                 {
-                    int newIdx = Math.Min(idx, _idesList.Items.Count - 1);
-                    _idesList.Items[newIdx].Selected = true;
+                    int newIdx = Math.Min(idx, this._idesList.Items.Count - 1);
+                    this._idesList.Items[newIdx].Selected = true;
                 }
-                _idesList.Focus();
+                this._idesList.Focus();
             }
         };
 
@@ -489,7 +529,9 @@ class MainForm : Form
                 FileName = txtPath.Text
             };
             if (ofd.ShowDialog() == DialogResult.OK)
+            {
                 txtPath.Text = ofd.FileName;
+            }
         };
 
         var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(310, 118), Width = 75 };
@@ -500,7 +542,10 @@ class MainForm : Form
         form.CancelButton = btnCancel;
 
         if (form.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(txtPath.Text))
+        {
             return (txtPath.Text, txtDesc.Text);
+        }
+
         return null;
     }
 

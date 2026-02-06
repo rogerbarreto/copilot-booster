@@ -1,6 +1,4 @@
-using System;
-
-public class NamedSessionTests
+﻿public class NamedSessionTests
 {
     [Fact]
     public void NamedSession_DefaultPropertyValues()
@@ -10,7 +8,7 @@ public class NamedSessionTests
         Assert.Equal("", session.Id);
         Assert.Equal("", session.Cwd);
         Assert.Equal("", session.Summary);
-        Assert.Equal(default(DateTime), session.LastModified);
+        Assert.Equal(default, session.LastModified);
     }
 
     [Fact]

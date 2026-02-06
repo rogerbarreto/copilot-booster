@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text.Json;
+﻿using System.Text.Json;
 
 public class ParseWorkspaceTests : IDisposable
 {
@@ -9,19 +6,19 @@ public class ParseWorkspaceTests : IDisposable
 
     public ParseWorkspaceTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(_tempDir);
+        this._tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(this._tempDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, true); } catch { }
+        try { Directory.Delete(this._tempDir, true); } catch { }
     }
 
     [Fact]
     public void ParseWorkspace_ValidFile_ReturnsSessionInfo()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "id: session-123\ncwd: C:\\myproject\nsummary: Fix the bug");
 
         var result = SessionService.ParseWorkspace(wsFile, 42);
@@ -36,7 +33,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_MissingId_ReturnsNull()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "cwd: C:\\myproject\nsummary: Fix the bug");
 
         var result = SessionService.ParseWorkspace(wsFile, 1);
@@ -47,7 +44,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_MissingSummary_ReturnsFolderOnlyBrackets()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "id: session-456\ncwd: C:\\myproject");
 
         var result = SessionService.ParseWorkspace(wsFile, 1);
@@ -59,7 +56,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_WithSummary_ReturnsFolderAndSummary()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "id: s1\ncwd: D:\\repos\\app\nsummary: Implement feature X");
 
         var result = SessionService.ParseWorkspace(wsFile, 5);
@@ -71,7 +68,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_FileNotFound_ReturnsNull()
     {
-        var result = SessionService.ParseWorkspace(Path.Combine(_tempDir, "missing.yaml"), 1);
+        var result = SessionService.ParseWorkspace(Path.Combine(this._tempDir, "missing.yaml"), 1);
 
         Assert.Null(result);
     }
@@ -79,7 +76,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_EmptyCwd_ReturnsEmptyFolder()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "id: s1\ncwd: \nsummary: test");
 
         var result = SessionService.ParseWorkspace(wsFile, 1);
@@ -91,7 +88,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_CwdWithTrailingBackslash_StripsIt()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "id: s1\ncwd: C:\\myproject\\\nsummary: test");
 
         var result = SessionService.ParseWorkspace(wsFile, 1);
@@ -103,7 +100,7 @@ public class ParseWorkspaceTests : IDisposable
     [Fact]
     public void ParseWorkspace_NoCwd_ReturnsUnknown()
     {
-        var wsFile = Path.Combine(_tempDir, "workspace.yaml");
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
         File.WriteAllText(wsFile, "id: s1\nsummary: test");
 
         var result = SessionService.ParseWorkspace(wsFile, 1);
@@ -119,19 +116,19 @@ public class LoadNamedSessionsTests : IDisposable
 
     public LoadNamedSessionsTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(_tempDir);
+        this._tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(this._tempDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, true); } catch { }
+        try { Directory.Delete(this._tempDir, true); } catch { }
     }
 
     [Fact]
     public void LoadNamedSessions_NoSessionStateDir_ReturnsEmpty()
     {
-        var nonExistent = Path.Combine(_tempDir, "nonexistent");
+        var nonExistent = Path.Combine(this._tempDir, "nonexistent");
         var result = SessionService.LoadNamedSessions(nonExistent);
         Assert.Empty(result);
     }
@@ -139,12 +136,12 @@ public class LoadNamedSessionsTests : IDisposable
     [Fact]
     public void LoadNamedSessions_WithValidSessions_ReturnsParsedSessions()
     {
-        var sessionDir = Path.Combine(_tempDir, "session1");
+        var sessionDir = Path.Combine(this._tempDir, "session1");
         Directory.CreateDirectory(sessionDir);
         File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
             "id: session1\ncwd: C:\\project\nsummary: My session");
 
-        var result = SessionService.LoadNamedSessions(_tempDir);
+        var result = SessionService.LoadNamedSessions(this._tempDir);
 
         Assert.Single(result);
         Assert.Equal("session1", result[0].Id);
@@ -154,15 +151,15 @@ public class LoadNamedSessionsTests : IDisposable
     [Fact]
     public void LoadNamedSessions_SkipsSessionsWithoutSummary()
     {
-        var s1 = Path.Combine(_tempDir, "s1");
+        var s1 = Path.Combine(this._tempDir, "s1");
         Directory.CreateDirectory(s1);
         File.WriteAllText(Path.Combine(s1, "workspace.yaml"), "id: s1\ncwd: C:\\a\nsummary: Has summary");
 
-        var s2 = Path.Combine(_tempDir, "s2");
+        var s2 = Path.Combine(this._tempDir, "s2");
         Directory.CreateDirectory(s2);
         File.WriteAllText(Path.Combine(s2, "workspace.yaml"), "id: s2\ncwd: C:\\b");
 
-        var result = SessionService.LoadNamedSessions(_tempDir);
+        var result = SessionService.LoadNamedSessions(this._tempDir);
 
         Assert.Single(result);
         Assert.Equal("s1", result[0].Id);
@@ -173,13 +170,13 @@ public class LoadNamedSessionsTests : IDisposable
     {
         for (int i = 0; i < 60; i++)
         {
-            var dir = Path.Combine(_tempDir, $"session-{i:D3}");
+            var dir = Path.Combine(this._tempDir, $"session-{i:D3}");
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, "workspace.yaml"),
                 $"id: session-{i:D3}\ncwd: C:\\proj{i}\nsummary: Session {i}");
         }
 
-        var result = SessionService.LoadNamedSessions(_tempDir);
+        var result = SessionService.LoadNamedSessions(this._tempDir);
 
         Assert.Equal(50, result.Count);
     }
@@ -187,19 +184,19 @@ public class LoadNamedSessionsTests : IDisposable
     [Fact]
     public void LoadNamedSessions_OrderedByLastModified()
     {
-        var s1 = Path.Combine(_tempDir, "old-session");
+        var s1 = Path.Combine(this._tempDir, "old-session");
         Directory.CreateDirectory(s1);
         File.WriteAllText(Path.Combine(s1, "workspace.yaml"),
             "id: old\ncwd: C:\\old\nsummary: Old session");
         Directory.SetLastWriteTime(s1, DateTime.Now.AddHours(-2));
 
-        var s2 = Path.Combine(_tempDir, "new-session");
+        var s2 = Path.Combine(this._tempDir, "new-session");
         Directory.CreateDirectory(s2);
         File.WriteAllText(Path.Combine(s2, "workspace.yaml"),
             "id: new\ncwd: C:\\new\nsummary: New session");
         Directory.SetLastWriteTime(s2, DateTime.Now);
 
-        var result = SessionService.LoadNamedSessions(_tempDir);
+        var result = SessionService.LoadNamedSessions(this._tempDir);
 
         Assert.Equal(2, result.Count);
         Assert.Equal("new", result[0].Id);
@@ -215,39 +212,39 @@ public class GetActiveSessionsTests : IDisposable
 
     public GetActiveSessionsTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(_tempDir);
-        _pidFile = Path.Combine(_tempDir, "active-pids.json");
-        _sessionStateDir = Path.Combine(_tempDir, "session-state");
-        Directory.CreateDirectory(_sessionStateDir);
+        this._tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(this._tempDir);
+        this._pidFile = Path.Combine(this._tempDir, "active-pids.json");
+        this._sessionStateDir = Path.Combine(this._tempDir, "session-state");
+        Directory.CreateDirectory(this._sessionStateDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, true); } catch { }
+        try { Directory.Delete(this._tempDir, true); } catch { }
     }
 
     [Fact]
     public void GetActiveSessions_NoPidFile_ReturnsEmpty()
     {
         var result = SessionService.GetActiveSessions(
-            Path.Combine(_tempDir, "nonexistent.json"), _sessionStateDir);
+            Path.Combine(this._tempDir, "nonexistent.json"), this._sessionStateDir);
         Assert.Empty(result);
     }
 
     [Fact]
     public void GetActiveSessions_EmptyRegistry_ReturnsEmpty()
     {
-        File.WriteAllText(_pidFile, "{}");
-        var result = SessionService.GetActiveSessions(_pidFile, _sessionStateDir);
+        File.WriteAllText(this._pidFile, "{}");
+        var result = SessionService.GetActiveSessions(this._pidFile, this._sessionStateDir);
         Assert.Empty(result);
     }
 
     [Fact]
     public void GetActiveSessions_InvalidJson_ReturnsEmpty()
     {
-        File.WriteAllText(_pidFile, "not json at all");
-        var result = SessionService.GetActiveSessions(_pidFile, _sessionStateDir);
+        File.WriteAllText(this._pidFile, "not json at all");
+        var result = SessionService.GetActiveSessions(this._pidFile, this._sessionStateDir);
         Assert.Empty(result);
     }
 
@@ -259,12 +256,12 @@ public class GetActiveSessionsTests : IDisposable
         {
             [fakePid.ToString()] = new { started = DateTime.Now.ToString("o"), sessionId = "s1" }
         };
-        File.WriteAllText(_pidFile, JsonSerializer.Serialize(registry));
+        File.WriteAllText(this._pidFile, JsonSerializer.Serialize(registry));
 
-        var result = SessionService.GetActiveSessions(_pidFile, _sessionStateDir);
+        var result = SessionService.GetActiveSessions(this._pidFile, this._sessionStateDir);
 
         Assert.Empty(result);
-        var updatedJson = File.ReadAllText(_pidFile);
+        var updatedJson = File.ReadAllText(this._pidFile);
         Assert.DoesNotContain(fakePid.ToString(), updatedJson);
     }
 
@@ -275,9 +272,9 @@ public class GetActiveSessionsTests : IDisposable
         {
             ["not-a-number"] = new { started = DateTime.Now.ToString("o"), sessionId = "s1" }
         };
-        File.WriteAllText(_pidFile, JsonSerializer.Serialize(registry));
+        File.WriteAllText(this._pidFile, JsonSerializer.Serialize(registry));
 
-        var result = SessionService.GetActiveSessions(_pidFile, _sessionStateDir);
+        var result = SessionService.GetActiveSessions(this._pidFile, this._sessionStateDir);
 
         Assert.Empty(result);
     }
@@ -291,9 +288,9 @@ public class GetActiveSessionsTests : IDisposable
         {
             [myPid.ToString()] = new { started = DateTime.Now.ToString("o"), sessionId = (string?)null }
         };
-        File.WriteAllText(_pidFile, JsonSerializer.Serialize(registry));
+        File.WriteAllText(this._pidFile, JsonSerializer.Serialize(registry));
 
-        var result = SessionService.GetActiveSessions(_pidFile, _sessionStateDir);
+        var result = SessionService.GetActiveSessions(this._pidFile, this._sessionStateDir);
 
         // Process is running but not CopilotApp, so it gets removed
         // OR sessionId is null so it gets skipped — either way empty
@@ -308,9 +305,9 @@ public class GetActiveSessionsTests : IDisposable
         {
             [myPid.ToString()] = new { started = DateTime.Now.ToString("o"), sessionId = "nonexistent-session" }
         };
-        File.WriteAllText(_pidFile, JsonSerializer.Serialize(registry));
+        File.WriteAllText(this._pidFile, JsonSerializer.Serialize(registry));
 
-        var result = SessionService.GetActiveSessions(_pidFile, _sessionStateDir);
+        var result = SessionService.GetActiveSessions(this._pidFile, this._sessionStateDir);
 
         Assert.Empty(result);
     }
@@ -322,29 +319,29 @@ public class FindGitRootTests : IDisposable
 
     public FindGitRootTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(_tempDir);
+        this._tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(this._tempDir);
     }
 
     public void Dispose()
     {
-        try { Directory.Delete(_tempDir, true); } catch { }
+        try { Directory.Delete(this._tempDir, true); } catch { }
     }
 
     [Fact]
     public void FindGitRoot_HasGitDir_ReturnsRoot()
     {
-        Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
+        Directory.CreateDirectory(Path.Combine(this._tempDir, ".git"));
 
-        var result = SessionService.FindGitRoot(_tempDir);
+        var result = SessionService.FindGitRoot(this._tempDir);
 
-        Assert.Equal(_tempDir, result);
+        Assert.Equal(this._tempDir, result);
     }
 
     [Fact]
     public void FindGitRoot_NoGitDir_ReturnsNull()
     {
-        var subDir = Path.Combine(_tempDir, "sub");
+        var subDir = Path.Combine(this._tempDir, "sub");
         Directory.CreateDirectory(subDir);
 
         var result = SessionService.FindGitRoot(subDir);
@@ -355,13 +352,13 @@ public class FindGitRootTests : IDisposable
     [Fact]
     public void FindGitRoot_NestedDir_FindsParent()
     {
-        Directory.CreateDirectory(Path.Combine(_tempDir, ".git"));
-        var child = Path.Combine(_tempDir, "src", "deep");
+        Directory.CreateDirectory(Path.Combine(this._tempDir, ".git"));
+        var child = Path.Combine(this._tempDir, "src", "deep");
         Directory.CreateDirectory(child);
 
         var result = SessionService.FindGitRoot(child);
 
-        Assert.Equal(_tempDir, result);
+        Assert.Equal(this._tempDir, result);
     }
 
     [Fact]
