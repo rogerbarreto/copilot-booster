@@ -1325,10 +1325,11 @@ class Program
             View = View.Tile,
             FullRowSelect = true,
             MultiSelect = false,
-            TileSize = new System.Drawing.Size(560, 50)
+            TileSize = new System.Drawing.Size(560, 65)
         };
         listView.Columns.Add("Session");
-        listView.Columns.Add("Details");
+        listView.Columns.Add("CWD");
+        listView.Columns.Add("Date");
 
         // Store session CWD in a lookup for IDE button
         var sessionCwdMap = new Dictionary<string, string>();
@@ -1338,7 +1339,8 @@ class Program
             if (session == null) continue;
             var lastWrite = Directory.GetLastWriteTime(session.Dir);
             var item = new ListViewItem(session.Summary) { Tag = session.Id };
-            item.SubItems.Add($"[{session.Folder}]  •  {lastWrite:yyyy-MM-dd HH:mm}");
+            item.SubItems.Add(session.Cwd);
+            item.SubItems.Add(lastWrite.ToString("yyyy-MM-dd HH:mm"));
             listView.Items.Add(item);
             sessionCwdMap[session.Id] = session.Cwd;
         }
