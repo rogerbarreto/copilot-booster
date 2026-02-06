@@ -301,11 +301,17 @@ internal class Program
             FileName = CopilotExePath,
             Arguments = settingsArgs,
             WorkingDirectory = workDir,
-            UseShellExecute = true
+            UseShellExecute = false,
+            CreateNoWindow = false
         };
 
         s_copilotProcess = Process.Start(psi);
         LogService.Log($"Started copilot with PID: {s_copilotProcess?.Id}", s_logFile);
+
+        // Wait briefly for the console window to be created, then capture its handle
+        Thread.Sleep(500);
+        IntPtr copilotWindowHandle = s_copilotProcess?.MainWindowHandle ?? IntPtr.Zero;
+        LogService.Log($"Copilot window handle: {copilotWindowHandle}", s_logFile);
 
         // Update jump list after session creation delay
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };
