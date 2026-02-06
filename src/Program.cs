@@ -97,20 +97,29 @@ class IdeEntry
 
 #endregion
 
-#region Settings Dialog
+#region MainForm
 
-class SettingsForm : Form
+class MainForm : Form
 {
-    readonly LauncherSettings _settings;
+    readonly TabControl _mainTabs;
+    readonly TabPage _sessionsTab;
+    readonly TabPage _settingsTab;
+
+    // Sessions tab controls
+    readonly ListView _sessionListView;
+    string? _selectedSessionId;
+
+    // Settings tab controls
     readonly ListBox _toolsList;
     readonly ListBox _dirsList;
     readonly ListView _idesList;
+    readonly TextBox _workDirBox;
 
-    public SettingsForm(LauncherSettings settings, string copilotExePath)
+    public string? SelectedSessionId => _selectedSessionId;
+
+    public MainForm(int initialTab = 0)
     {
-        _settings = settings;
-
-        Text = "Copilot Launcher Settings";
+        Text = "Copilot App";
         Size = new Size(700, 550);
         MinimumSize = new Size(550, 400);
         StartPosition = FormStartPosition.CenterScreen;
@@ -118,18 +127,95 @@ class SettingsForm : Form
 
         try
         {
-            var icon = Icon.ExtractAssociatedIcon(copilotExePath);
+            var icon = Icon.ExtractAssociatedIcon(Program.CopilotExePath);
             if (icon != null) Icon = icon;
         }
         catch { }
 
-        // Tab control for tools vs dirs vs ides
-        var tabs = new TabControl { Dock = DockStyle.Fill };
+        _mainTabs = new TabControl { Dock = DockStyle.Fill };
+
+        // ===== Sessions Tab =====
+        _sessionsTab = new TabPage("Existing Sessions");
+
+        _sessionListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Tile,
+            FullRowSelect = true,
+            MultiSelect = false,
+            TileSize = new Size(560, 65)
+        };
+        _sessionListView.Columns.Add("Session");
+        _sessionListView.Columns.Add("CWD");
+        _sessionListView.Columns.Add("Date");
+
+        _sessionListView.DoubleClick += (s, e) =>
+        {
+            if (_sessionListView.SelectedItems.Count > 0)
+            {
+                _selectedSessionId = _sessionListView.SelectedItems[0].Tag as string;
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+        };
+
+        var sessionButtonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 40,
+            FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(5)
+        };
+
+        var btnOpenSession = new Button { Text = "Open Session", Width = 100 };
+        btnOpenSession.Click += (s, e) =>
+        {
+            if (_sessionListView.SelectedItems.Count > 0)
+            {
+                _selectedSessionId = _sessionListView.SelectedItems[0].Tag as string;
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+        };
+
+        var btnRefresh = new Button { Text = "Refresh", Width = 80 };
+        btnRefresh.Click += (s, e) => RefreshSessionList();
+
+        sessionButtonPanel.Controls.Add(btnOpenSession);
+
+        if (Program._settings.Ides.Count > 0)
+        {
+            var btnIde = new Button { Text = "Open in IDE", Width = 100 };
+            btnIde.Click += (s, e) =>
+            {
+                if (_sessionListView.SelectedItems.Count > 0)
+                {
+                    var sid = _sessionListView.SelectedItems[0].Tag as string;
+                    if (sid != null)
+                        Program.OpenIdeForSession(sid);
+                }
+            };
+            sessionButtonPanel.Controls.Add(btnIde);
+        }
+
+        sessionButtonPanel.Controls.Add(btnRefresh);
+
+        _sessionsTab.Controls.Add(_sessionListView);
+        _sessionsTab.Controls.Add(sessionButtonPanel);
+
+        RefreshSessionList();
+
+        // ===== Settings Tab =====
+        _settingsTab = new TabPage("Settings");
+
+        var settingsContainer = new Panel { Dock = DockStyle.Fill };
+
+        var settingsTabs = new TabControl { Dock = DockStyle.Fill };
 
         // --- Allowed Tools tab ---
         var toolsTab = new TabPage("Allowed Tools");
         _toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
-        foreach (var tool in _settings.AllowedTools)
+        foreach (var tool in Program._settings.AllowedTools)
             _toolsList.Items.Add(tool);
 
         var toolsButtons = CreateListButtons(_toolsList, "Tool name:", "Add Tool", addBrowse: false);
@@ -139,7 +225,7 @@ class SettingsForm : Form
         // --- Allowed Directories tab ---
         var dirsTab = new TabPage("Allowed Directories");
         _dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
-        foreach (var dir in _settings.AllowedDirs)
+        foreach (var dir in Program._settings.AllowedDirs)
             _dirsList.Items.Add(dir);
 
         var dirsButtons = CreateListButtons(_dirsList, "Directory path:", "Add Directory", addBrowse: true);
@@ -158,7 +244,7 @@ class SettingsForm : Form
         };
         _idesList.Columns.Add("Description", 200);
         _idesList.Columns.Add("Path", 400);
-        foreach (var ide in _settings.Ides)
+        foreach (var ide in Program._settings.Ides)
         {
             var item = new ListViewItem(ide.Description);
             item.SubItems.Add(ide.Path);
@@ -169,16 +255,16 @@ class SettingsForm : Form
         idesTab.Controls.Add(_idesList);
         idesTab.Controls.Add(ideButtons);
 
-        tabs.TabPages.Add(toolsTab);
-        tabs.TabPages.Add(dirsTab);
-        tabs.TabPages.Add(idesTab);
+        settingsTabs.TabPages.Add(toolsTab);
+        settingsTabs.TabPages.Add(dirsTab);
+        settingsTabs.TabPages.Add(idesTab);
 
         // --- Default Work Dir ---
         var workDirPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
         var workDirLabel = new Label { Text = "Default Work Dir:", AutoSize = true, Location = new Point(8, 12) };
-        var workDirBox = new TextBox
+        _workDirBox = new TextBox
         {
-            Text = _settings.DefaultWorkDir,
+            Text = Program._settings.DefaultWorkDir,
             Location = new Point(130, 9),
             Width = 400,
             Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
@@ -192,14 +278,14 @@ class SettingsForm : Form
         };
         workDirBrowse.Click += (s, e) =>
         {
-            using var fbd = new FolderBrowserDialog { SelectedPath = workDirBox.Text };
+            using var fbd = new FolderBrowserDialog { SelectedPath = _workDirBox.Text };
             if (fbd.ShowDialog() == DialogResult.OK)
-                workDirBox.Text = fbd.SelectedPath;
+                _workDirBox.Text = fbd.SelectedPath;
         };
-        workDirPanel.Controls.AddRange(new Control[] { workDirLabel, workDirBox, workDirBrowse });
+        workDirPanel.Controls.AddRange(new Control[] { workDirLabel, _workDirBox, workDirBrowse });
 
         // --- Bottom buttons ---
-        var bottomPanel = new FlowLayoutPanel
+        var settingsBottomPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
             Height = 45,
@@ -208,31 +294,133 @@ class SettingsForm : Form
         };
 
         var btnCancel = new Button { Text = "Cancel", Width = 90 };
-        btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+        btnCancel.Click += (s, e) => ReloadSettingsUI();
 
         var btnSave = new Button { Text = "Save", Width = 90 };
         btnSave.Click += (s, e) =>
         {
-            _settings.AllowedTools = _toolsList.Items.Cast<string>().ToList();
-            _settings.AllowedDirs = _dirsList.Items.Cast<string>().ToList();
-            _settings.DefaultWorkDir = workDirBox.Text.Trim();
-            _settings.Ides = new List<IdeEntry>();
+            Program._settings.AllowedTools = _toolsList.Items.Cast<string>().ToList();
+            Program._settings.AllowedDirs = _dirsList.Items.Cast<string>().ToList();
+            Program._settings.DefaultWorkDir = _workDirBox.Text.Trim();
+            Program._settings.Ides = new List<IdeEntry>();
             foreach (ListViewItem item in _idesList.Items)
-                _settings.Ides.Add(new IdeEntry { Description = item.Text, Path = item.SubItems[1].Text });
-            _settings.Save();
-            DialogResult = DialogResult.OK;
-            Close();
+                Program._settings.Ides.Add(new IdeEntry { Description = item.Text, Path = item.SubItems[1].Text });
+            Program._settings.Save();
+            MessageBox.Show("Settings saved.", "Copilot App", MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
 
-        bottomPanel.Controls.Add(btnCancel);
-        bottomPanel.Controls.Add(btnSave);
+        settingsBottomPanel.Controls.Add(btnCancel);
+        settingsBottomPanel.Controls.Add(btnSave);
 
-        Controls.Add(tabs);
-        Controls.Add(workDirPanel);
-        Controls.Add(bottomPanel);
+        settingsContainer.Controls.Add(settingsTabs);
+        settingsContainer.Controls.Add(workDirPanel);
+        settingsContainer.Controls.Add(settingsBottomPanel);
 
-        AcceptButton = btnSave;
-        CancelButton = btnCancel;
+        _settingsTab.Controls.Add(settingsContainer);
+
+        // ===== Add tabs to main control =====
+        _mainTabs.TabPages.Add(_sessionsTab);
+        _mainTabs.TabPages.Add(_settingsTab);
+        Controls.Add(_mainTabs);
+
+        if (initialTab >= 0 && initialTab < _mainTabs.TabPages.Count)
+            _mainTabs.SelectedIndex = initialTab;
+    }
+
+    public void SwitchToTab(int tabIndex)
+    {
+        if (tabIndex >= 0 && tabIndex < _mainTabs.TabPages.Count)
+            _mainTabs.SelectedIndex = tabIndex;
+
+        if (tabIndex == 0)
+            RefreshSessionList();
+
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+        BringToFront();
+        Activate();
+    }
+
+    void RefreshSessionList()
+    {
+        _sessionListView.Items.Clear();
+        var sessions = LoadNamedSessions();
+        foreach (var session in sessions)
+        {
+            var item = new ListViewItem(session.Summary) { Tag = session.Id };
+            item.SubItems.Add(session.Cwd);
+            item.SubItems.Add(session.LastModified.ToString("yyyy-MM-dd HH:mm"));
+            _sessionListView.Items.Add(item);
+        }
+    }
+
+    void ReloadSettingsUI()
+    {
+        var fresh = LauncherSettings.Load();
+
+        _toolsList.Items.Clear();
+        foreach (var tool in fresh.AllowedTools)
+            _toolsList.Items.Add(tool);
+
+        _dirsList.Items.Clear();
+        foreach (var dir in fresh.AllowedDirs)
+            _dirsList.Items.Add(dir);
+
+        _idesList.Items.Clear();
+        foreach (var ide in fresh.Ides)
+        {
+            var item = new ListViewItem(ide.Description);
+            item.SubItems.Add(ide.Path);
+            _idesList.Items.Add(item);
+        }
+
+        _workDirBox.Text = fresh.DefaultWorkDir;
+    }
+
+    internal static List<NamedSession> LoadNamedSessions()
+    {
+        var results = new List<NamedSession>();
+        if (!Directory.Exists(Program.SessionStateDir)) return results;
+
+        var sessions = Directory.GetDirectories(Program.SessionStateDir)
+            .OrderByDescending(d => Directory.GetLastWriteTime(d))
+            .Select(d =>
+            {
+                var wsFile = Path.Combine(d, "workspace.yaml");
+                if (!File.Exists(wsFile)) return null;
+
+                try
+                {
+                    var lines = File.ReadAllLines(wsFile);
+                    string? id = null, cwd = null, summary = null;
+                    foreach (var line in lines)
+                    {
+                        if (line.StartsWith("id:")) id = line[3..].Trim();
+                        else if (line.StartsWith("cwd:")) cwd = line[4..].Trim();
+                        else if (line.StartsWith("summary:")) summary = line[8..].Trim();
+                    }
+
+                    if (id == null || string.IsNullOrWhiteSpace(summary)) return null;
+
+                    var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
+                    return new NamedSession
+                    {
+                        Id = id,
+                        Cwd = cwd ?? "",
+                        Summary = $"[{folder}] {summary}",
+                        LastModified = Directory.GetLastWriteTime(d)
+                    };
+                }
+                catch { return null; }
+            })
+            .Where(s => s != null)
+            .Take(50)
+            .ToList();
+
+        foreach (var s in sessions)
+            if (s != null) results.Add(s);
+
+        return results;
     }
 
     Panel CreateListButtons(ListBox listBox, string promptText, string addTitle, bool addBrowse)
@@ -459,6 +647,14 @@ class SettingsForm : Form
     }
 }
 
+class NamedSession
+{
+    public string Id { get; set; } = "";
+    public string Cwd { get; set; } = "";
+    public string Summary { get; set; } = "";
+    public DateTime LastModified { get; set; }
+}
+
 #endregion
 
 class Program
@@ -468,16 +664,17 @@ class Program
     const string UpdateLockName = "Global\\CopilotJumpListUpdateLock";
 
     static readonly string CopilotDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot");
-    static readonly string SessionStateDir = Path.Combine(CopilotDir, "session-state");
+    internal static readonly string SessionStateDir = Path.Combine(CopilotDir, "session-state");
     static readonly string PidRegistryFile = Path.Combine(CopilotDir, "active-pids.json");
     static readonly string LastUpdateFile = Path.Combine(CopilotDir, "jumplist-lastupdate.txt");
     static readonly string LogFile = Path.Combine(CopilotDir, "launcher.log");
     static readonly string LauncherExePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-    static readonly string CopilotExePath = FindCopilotExe();
+    internal static readonly string CopilotExePath = FindCopilotExe();
 
-    static LauncherSettings _settings = null!;
+    internal static LauncherSettings _settings = null!;
     static Form? _hiddenForm;
     static Process? _copilotProcess;
+    static MainForm? _mainForm;
 
     [DllImport("shell32.dll", SetLastError = true)]
     static extern void SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
@@ -573,11 +770,18 @@ class Program
             }
         }
 
-        // If settings mode, show settings dialog and exit
+        // If settings mode, show MainForm on Settings tab and exit
         if (showSettings)
         {
-            var settingsForm = new SettingsForm(_settings, CopilotExePath);
-            settingsForm.ShowDialog();
+            if (_mainForm != null && !_mainForm.IsDisposed)
+            {
+                _mainForm.SwitchToTab(1);
+            }
+            else
+            {
+                _mainForm = new MainForm(initialTab: 1);
+                Application.Run(_mainForm);
+            }
             return;
         }
 
@@ -997,7 +1201,7 @@ class Program
 
     #region Open IDE
 
-    static void OpenIdeForSession(string sessionId)
+    internal static void OpenIdeForSession(string sessionId)
     {
         if (_settings.Ides.Count == 0)
         {
@@ -1283,139 +1487,15 @@ class Program
 
     static string? ShowSessionPicker()
     {
-        if (!Directory.Exists(SessionStateDir)) return null;
-
-        var sessions = Directory.GetDirectories(SessionStateDir)
-            .OrderByDescending(d => Directory.GetLastWriteTime(d))
-            .Select(d =>
-            {
-                var wsFile = Path.Combine(d, "workspace.yaml");
-                if (!File.Exists(wsFile)) return null;
-
-                var lines = File.ReadAllLines(wsFile);
-                string? id = null, cwd = null, summary = null;
-                foreach (var line in lines)
-                {
-                    if (line.StartsWith("id:")) id = line[3..].Trim();
-                    else if (line.StartsWith("cwd:")) cwd = line[4..].Trim();
-                    else if (line.StartsWith("summary:")) summary = line[8..].Trim();
-                }
-
-                if (id == null || string.IsNullOrWhiteSpace(summary)) return null;
-
-                var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
-                return new { Id = id, Cwd = cwd ?? "", Folder = folder, Summary = summary, Dir = d };
-            })
-            .Where(s => s != null)
-            .Take(50)
-            .ToList();
-
+        var sessions = MainForm.LoadNamedSessions();
         if (sessions.Count == 0)
         {
             MessageBox.Show("No named sessions found.", "Existing Sessions", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return null;
         }
 
-        var form = new Form
-        {
-            Text = "Existing Sessions",
-            Size = new System.Drawing.Size(600, 500),
-            StartPosition = FormStartPosition.CenterScreen,
-            FormBorderStyle = FormBorderStyle.Sizable,
-            MinimumSize = new System.Drawing.Size(400, 300)
-        };
-
-        try
-        {
-            var icon = System.Drawing.Icon.ExtractAssociatedIcon(CopilotExePath);
-            if (icon != null) form.Icon = icon;
-        }
-        catch { }
-
-        var listView = new ListView
-        {
-            Dock = DockStyle.Fill,
-            View = View.Tile,
-            FullRowSelect = true,
-            MultiSelect = false,
-            TileSize = new System.Drawing.Size(560, 65)
-        };
-        listView.Columns.Add("Session");
-        listView.Columns.Add("CWD");
-        listView.Columns.Add("Date");
-
-        // Store session CWD in a lookup for IDE button
-        var sessionCwdMap = new Dictionary<string, string>();
-
-        foreach (var session in sessions)
-        {
-            if (session == null) continue;
-            var lastWrite = Directory.GetLastWriteTime(session.Dir);
-            var item = new ListViewItem(session.Summary) { Tag = session.Id };
-            item.SubItems.Add(session.Cwd);
-            item.SubItems.Add(lastWrite.ToString("yyyy-MM-dd HH:mm"));
-            listView.Items.Add(item);
-            sessionCwdMap[session.Id] = session.Cwd;
-        }
-
-        string? selectedId = null;
-
-        listView.DoubleClick += (s, e) =>
-        {
-            if (listView.SelectedItems.Count > 0)
-            {
-                selectedId = listView.SelectedItems[0].Tag as string;
-                form.DialogResult = DialogResult.OK;
-                form.Close();
-            }
-        };
-
-        var buttonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 40,
-            FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(5)
-        };
-
-        var btnCancel = new Button { Text = "Cancel", Width = 80 };
-        btnCancel.Click += (s, e) => { form.DialogResult = DialogResult.Cancel; form.Close(); };
-
-        var btnOpen = new Button { Text = "Open Session", Width = 100 };
-        btnOpen.Click += (s, e) =>
-        {
-            if (listView.SelectedItems.Count > 0)
-            {
-                selectedId = listView.SelectedItems[0].Tag as string;
-                form.DialogResult = DialogResult.OK;
-                form.Close();
-            }
-        };
-
-        buttonPanel.Controls.Add(btnCancel);
-        buttonPanel.Controls.Add(btnOpen);
-
-        if (_settings.Ides.Count > 0)
-        {
-            var btnIde = new Button { Text = "Open in IDE", Width = 100 };
-            btnIde.Click += (s, e) =>
-            {
-                if (listView.SelectedItems.Count > 0)
-                {
-                    var sid = listView.SelectedItems[0].Tag as string;
-                    if (sid != null)
-                        OpenIdeForSession(sid);
-                }
-            };
-            buttonPanel.Controls.Add(btnIde);
-        }
-
-        form.Controls.Add(listView);
-        form.Controls.Add(buttonPanel);
-        form.AcceptButton = btnOpen;
-        form.CancelButton = btnCancel;
-
-        return form.ShowDialog() == DialogResult.OK ? selectedId : null;
+        var form = new MainForm(initialTab: 0);
+        return form.ShowDialog() == DialogResult.OK ? form.SelectedSessionId : null;
     }
 
     #endregion
