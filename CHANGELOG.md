@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.3] - 2026-02-10
+
+### Added
+
+- **Session search** — search box in the Existing Sessions tab filters sessions as you type, matching title/summary first and falling back to metadata (cwd, session id).
+- 10 new unit tests for search functionality.
+
 ## [0.0.2] - 2026-02-06
 
 ### Added
@@ -44,5 +51,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
+[0.0.3]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/rogerbarreto/copilot-app/releases/tag/v0.0.1

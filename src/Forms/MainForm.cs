@@ -21,6 +21,7 @@ internal class MainForm : Form
     private readonly TabPage _settingsTab;
 
     // Sessions tab controls
+    private readonly TextBox _searchBox;
     private readonly ListView _sessionListView;
 
     // Settings tab controls
@@ -73,6 +74,18 @@ internal class MainForm : Form
         this._sessionListView.Columns.Add("CWD");
         this._sessionListView.Columns.Add("Date");
 
+        var searchPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(5, 5, 5, 2) };
+        var searchLabel = new Label { Text = "Search:", AutoSize = true, Location = new Point(5, 7) };
+        this._searchBox = new TextBox
+        {
+            Location = new Point(55, 4),
+            Width = 400,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+            PlaceholderText = "Filter sessions..."
+        };
+        this._searchBox.TextChanged += (s, e) => this.RefreshSessionList();
+        searchPanel.Controls.AddRange([searchLabel, this._searchBox]);
+
         this._sessionListView.DoubleClick += (s, e) =>
         {
             if (this._sessionListView.SelectedItems.Count > 0)
@@ -124,6 +137,7 @@ internal class MainForm : Form
         sessionButtonPanel.Controls.Add(btnRefresh);
 
         this._sessionsTab.Controls.Add(this._sessionListView);
+        this._sessionsTab.Controls.Add(searchPanel);
         this._sessionsTab.Controls.Add(sessionButtonPanel);
 
         this.RefreshSessionList();
@@ -303,7 +317,9 @@ internal class MainForm : Form
     {
         this._sessionListView.Items.Clear();
         var sessions = LoadNamedSessions();
-        foreach (var session in sessions)
+        var query = this._searchBox.Text;
+        var filtered = SessionService.SearchSessions(sessions, query);
+        foreach (var session in filtered)
         {
             var item = new ListViewItem(session.Summary) { Tag = session.Id };
             item.SubItems.Add(session.Cwd);

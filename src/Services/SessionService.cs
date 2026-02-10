@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -256,6 +257,39 @@ internal class SessionService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Searches named sessions by query text, prioritizing summary/title matches over other metadata (cwd, id).
+    /// </summary>
+    /// <param name="sessions">The list of sessions to search.</param>
+    /// <param name="query">The search text to match against session fields.</param>
+    /// <returns>Sessions matching the query, with title matches first followed by metadata-only matches.</returns>
+    internal static List<NamedSession> SearchSessions(List<NamedSession> sessions, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return sessions;
+        }
+
+        var titleMatches = new List<NamedSession>();
+        var metadataMatches = new List<NamedSession>();
+
+        foreach (var session in sessions)
+        {
+            if (session.Summary.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                titleMatches.Add(session);
+            }
+            else if (session.Cwd.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                     session.Id.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                metadataMatches.Add(session);
+            }
+        }
+
+        titleMatches.AddRange(metadataMatches);
+        return titleMatches;
     }
 
     /// <summary>
