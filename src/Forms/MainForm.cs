@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using CopilotApp.Models;
@@ -29,7 +29,7 @@ internal class MainForm : Form
 
     // New Session tab controls
     private readonly ListView _cwdListView;
-    private Button _btnCreateWorkspace = null!;
+    private readonly Button _btnCreateWorkspace = null!;
     private readonly Dictionary<string, bool> _cwdGitStatus = new(StringComparer.OrdinalIgnoreCase);
 
     // Settings tab controls
