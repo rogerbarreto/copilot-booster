@@ -117,7 +117,7 @@ internal class Program
                 return;
             }
 
-            int desiredTab = showSettings ? 1 : 0;
+            int desiredTab = showSettings ? 2 : 1;
 
             // Check if another CopilotApp MainForm is already open
             var existing = Process.GetProcessesByName("CopilotApp")
@@ -177,11 +177,15 @@ internal class Program
             : Environment.GetEnvironmentVariable("COPILOT_WORK_DIR")
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        // For new sessions (no explicit workDir, not resuming), show CWD picker
+        // For new sessions (no explicit workDir, not resuming), show MainForm
         if (workDir == null && resumeSessionId == null)
         {
-            workDir = CwdPickerForm.ShowCwdPicker(defaultWorkDir);
-            if (workDir == null)
+            var mainForm = new MainForm(initialTab: 0);
+            if (mainForm.ShowDialog() == DialogResult.OK && mainForm.NewSessionCwd != null)
+            {
+                workDir = mainForm.NewSessionCwd;
+            }
+            else
             {
                 return;
             }

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using CopilotApp.Services;
 
 namespace CopilotApp.Forms;
 
@@ -85,13 +86,15 @@ internal static class CwdPickerForm
             MultiSelect = false,
             GridLines = true
         };
-        listView.Columns.Add("Directory", 420);
-        listView.Columns.Add("Sessions", 80, HorizontalAlignment.Center);
+        listView.Columns.Add("Directory", 350);
+        listView.Columns.Add("# Sessions created", 120, HorizontalAlignment.Center);
+        listView.Columns.Add("Git", 50, HorizontalAlignment.Center);
 
         foreach (var cwd in sortedCwds)
         {
             var item = new ListViewItem(cwd) { Tag = cwd };
             item.SubItems.Add(cwdCounts[cwd].ToString());
+            item.SubItems.Add(GitService.IsGitRepository(cwd) ? "Yes" : "");
             listView.Items.Add(item);
         }
 

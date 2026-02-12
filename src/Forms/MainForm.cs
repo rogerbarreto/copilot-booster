@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -18,11 +19,17 @@ internal class MainForm : Form
 {
     private readonly TabControl _mainTabs;
     private readonly TabPage _sessionsTab;
+    private readonly TabPage _newSessionTab;
     private readonly TabPage _settingsTab;
 
     // Sessions tab controls
     private readonly TextBox _searchBox;
     private readonly ListView _sessionListView;
+
+    // New Session tab controls
+    private readonly ListView _cwdListView;
+    private Button _btnCreateWorkspace = null!;
+    private readonly Dictionary<string, bool> _cwdGitStatus = new(StringComparer.OrdinalIgnoreCase);
 
     // Settings tab controls
     private readonly ListBox _toolsList;
@@ -34,6 +41,11 @@ internal class MainForm : Form
     /// Gets the identifier of the currently selected session.
     /// </summary>
     public string? SelectedSessionId { get; private set; }
+
+    /// <summary>
+    /// Gets the working directory chosen from the New Session tab.
+    /// </summary>
+    public string? NewSessionCwd { get; private set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainForm"/> class.
@@ -113,10 +125,115 @@ internal class MainForm : Form
             }
         };
 
+        var openSessionMenu = new ContextMenuStrip();
+        var menuOpenNewSession = new ToolStripMenuItem("Open as New Session");
+        menuOpenNewSession.Click += (s, e) =>
+        {
+            if (this._sessionListView.SelectedItems.Count > 0
+                && this._sessionListView.SelectedItems[0].Tag is string sessionId)
+            {
+                var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+                string? selectedCwd = null;
+                if (File.Exists(workspaceFile))
+                {
+                    foreach (var line in File.ReadLines(workspaceFile))
+                    {
+                        if (line.StartsWith("cwd:"))
+                        {
+                            selectedCwd = line.Substring("cwd:".Length).Trim();
+                            break;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(selectedCwd))
+                {
+                    var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                    Process.Start(new ProcessStartInfo(exePath, selectedCwd) { UseShellExecute = false });
+                    this.Close();
+                }
+            }
+        };
+        openSessionMenu.Items.Add(menuOpenNewSession);
+
+        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Session Workspace");
+        menuOpenNewSessionWorkspace.Click += (s, e) =>
+        {
+            if (this._sessionListView.SelectedItems.Count > 0
+                && this._sessionListView.SelectedItems[0].Tag is string sessionId)
+            {
+                var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+                string? selectedCwd = null;
+                if (File.Exists(workspaceFile))
+                {
+                    foreach (var line in File.ReadLines(workspaceFile))
+                    {
+                        if (line.StartsWith("cwd:"))
+                        {
+                            selectedCwd = line.Substring("cwd:".Length).Trim();
+                            break;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(selectedCwd))
+                {
+                    var gitRoot = SessionService.FindGitRoot(selectedCwd);
+                    if (gitRoot != null)
+                    {
+                        var worktreePath = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
+                        if (worktreePath != null)
+                        {
+                            var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                            Process.Start(new ProcessStartInfo(exePath, worktreePath) { UseShellExecute = false });
+                            this.Close();
+                        }
+                    }
+                }
+            }
+        };
+        openSessionMenu.Items.Add(menuOpenNewSessionWorkspace);
+
+        openSessionMenu.Opening += (s, e) =>
+        {
+            bool isGit = false;
+            if (this._sessionListView.SelectedItems.Count > 0
+                && this._sessionListView.SelectedItems[0].Tag is string sessionId)
+            {
+                var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+                if (File.Exists(workspaceFile))
+                {
+                    foreach (var line in File.ReadLines(workspaceFile))
+                    {
+                        if (line.StartsWith("cwd:"))
+                        {
+                            var cwd = line.Substring("cwd:".Length).Trim();
+                            isGit = !string.IsNullOrEmpty(cwd) && GitService.IsGitRepository(cwd);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            menuOpenNewSessionWorkspace.Visible = isGit;
+        };
+
+        var btnOpenArrow = new Button { Text = "▾", Width = 20 };
+        btnOpenArrow.Click += (s, e) =>
+        {
+            openSessionMenu.Show(btnOpenArrow, new Point(0, btnOpenArrow.Height));
+        };
+
+        var splitOpenPanel = new Panel { Width = 122, Height = btnOpenSession.Height };
+        splitOpenPanel.Controls.Add(btnOpenArrow);
+        splitOpenPanel.Controls.Add(btnOpenSession);
+        btnOpenSession.Location = new Point(0, 0);
+        btnOpenArrow.Location = new Point(btnOpenSession.Width, 0);
+
         var btnRefresh = new Button { Text = "Refresh", Width = 80 };
         btnRefresh.Click += (s, e) => this.RefreshSessionList();
 
-        sessionButtonPanel.Controls.Add(btnOpenSession);
+        sessionButtonPanel.Controls.Add(splitOpenPanel);
 
         if (Program._settings.Ides.Count > 0)
         {
@@ -264,7 +381,111 @@ internal class MainForm : Form
 
         this._settingsTab.Controls.Add(settingsContainer);
 
+        // ===== New Session Tab =====
+        this._newSessionTab = new TabPage("New Session");
+
+        this._cwdListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            MultiSelect = false,
+            GridLines = true
+        };
+        this._cwdListView.Columns.Add("Directory", 350);
+        this._cwdListView.Columns.Add("# Sessions created", 120, HorizontalAlignment.Center);
+        this._cwdListView.Columns.Add("Git", 50, HorizontalAlignment.Center);
+
+        this._cwdListView.DoubleClick += (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0)
+            {
+                this.NewSessionCwd = this._cwdListView.SelectedItems[0].Tag as string;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            }
+        };
+
+        this._cwdListView.SelectedIndexChanged += (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0
+                && this._cwdListView.SelectedItems[0].Tag is string path
+                && this._cwdGitStatus.TryGetValue(path, out bool isGit))
+            {
+                this._btnCreateWorkspace.Enabled = isGit;
+            }
+            else
+            {
+                this._btnCreateWorkspace.Enabled = false;
+            }
+        };
+
+        var newSessionButtonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 40,
+            FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(5)
+        };
+
+        var btnNsCancel = new Button { Text = "Cancel", Width = 80 };
+        btnNsCancel.Click += (s, e) => this.Close();
+
+        var btnNsStart = new Button { Text = "Start", Width = 80 };
+        btnNsStart.Click += (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0)
+            {
+                this.NewSessionCwd = this._cwdListView.SelectedItems[0].Tag as string;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            }
+        };
+
+        var btnNsBrowse = new Button { Text = "Browse...", Width = 90 };
+        btnNsBrowse.Click += (s, e) =>
+        {
+            using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
+            if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
+            {
+                this.NewSessionCwd = fbd.SelectedPath;
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            }
+        };
+
+        this._btnCreateWorkspace = new Button { Text = "Create Workspace", Width = 130, Enabled = false };
+        this._btnCreateWorkspace.Click += (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0
+                && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
+            {
+                var gitRoot = SessionService.FindGitRoot(selectedCwd);
+                if (gitRoot != null)
+                {
+                    var worktreePath = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
+                    if (worktreePath != null)
+                    {
+                        this.NewSessionCwd = worktreePath;
+                        this.DialogResult = DialogResult.OK;
+                        this.Close();
+                    }
+                }
+            }
+        };
+
+        newSessionButtonPanel.Controls.Add(btnNsCancel);
+        newSessionButtonPanel.Controls.Add(btnNsStart);
+        newSessionButtonPanel.Controls.Add(btnNsBrowse);
+        newSessionButtonPanel.Controls.Add(this._btnCreateWorkspace);
+
+        this._newSessionTab.Controls.Add(this._cwdListView);
+        this._newSessionTab.Controls.Add(newSessionButtonPanel);
+
+        this.RefreshNewSessionList();
+
         // ===== Add tabs to main control =====
+        this._mainTabs.TabPages.Add(this._newSessionTab);
         this._mainTabs.TabPages.Add(this._sessionsTab);
         this._mainTabs.TabPages.Add(this._settingsTab);
         this.Controls.Add(this._mainTabs);
@@ -301,6 +522,11 @@ internal class MainForm : Form
 
         if (tabIndex == 0)
         {
+            this.RefreshNewSessionList();
+        }
+
+        if (tabIndex == 1)
+        {
             this.RefreshSessionList();
         }
 
@@ -323,8 +549,72 @@ internal class MainForm : Form
         {
             var item = new ListViewItem(session.Summary) { Tag = session.Id };
             item.SubItems.Add(session.Cwd);
-            item.SubItems.Add(session.LastModified.ToString("yyyy-MM-dd HH:mm"));
+            var dateText = session.LastModified.ToString("yyyy-MM-dd HH:mm");
+            if (!string.IsNullOrEmpty(session.Cwd) && GitService.IsGitRepository(session.Cwd))
+            {
+                dateText += " - Git";
+            }
+
+            item.SubItems.Add(dateText);
             this._sessionListView.Items.Add(item);
+        }
+    }
+
+    private void RefreshNewSessionList()
+    {
+        this._cwdListView.Items.Clear();
+        this._cwdGitStatus.Clear();
+
+        var cwdCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (Directory.Exists(Program.SessionStateDir))
+        {
+            foreach (var dir in Directory.GetDirectories(Program.SessionStateDir))
+            {
+                var wsFile = Path.Combine(dir, "workspace.yaml");
+                if (!File.Exists(wsFile))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    foreach (var line in File.ReadAllLines(wsFile))
+                    {
+                        if (line.StartsWith("cwd:"))
+                        {
+                            var cwd = line[4..].Trim();
+                            if (!string.IsNullOrEmpty(cwd) && Directory.Exists(cwd))
+                            {
+                                cwdCounts.TryGetValue(cwd, out int count);
+                                cwdCounts[cwd] = count + 1;
+                            }
+                            break;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        var sortedCwds = cwdCounts
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var cwd in sortedCwds)
+        {
+            var isGit = GitService.IsGitRepository(cwd);
+            this._cwdGitStatus[cwd] = isGit;
+
+            var item = new ListViewItem(cwd) { Tag = cwd };
+            item.SubItems.Add(cwdCounts[cwd].ToString());
+            item.SubItems.Add(isGit ? "Yes" : "");
+            this._cwdListView.Items.Add(item);
+        }
+
+        if (this._cwdListView.Items.Count > 0)
+        {
+            this._cwdListView.Items[0].Selected = true;
         }
     }
 

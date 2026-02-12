@@ -302,7 +302,7 @@ internal class SessionService
         var dir = startPath;
         while (!string.IsNullOrEmpty(dir))
         {
-            if (Directory.Exists(Path.Combine(dir, ".git")))
+            if (Directory.Exists(Path.Combine(dir, ".git")) || File.Exists(Path.Combine(dir, ".git")))
             {
                 return dir;
             }
