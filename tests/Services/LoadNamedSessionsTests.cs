@@ -37,7 +37,7 @@
     }
 
     [Fact]
-    public void LoadNamedSessions_SkipsSessionsWithoutSummary()
+    public void LoadNamedSessions_IncludesSessionsWithoutSummary()
     {
         var s1 = Path.Combine(this._tempDir, "s1");
         Directory.CreateDirectory(s1);
@@ -49,12 +49,13 @@
 
         var result = SessionService.LoadNamedSessions(this._tempDir);
 
-        Assert.Single(result);
-        Assert.Equal("s1", result[0].Id);
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, s => s.Id == "s1" && s.Summary.Contains("Has summary"));
+        Assert.Contains(result, s => s.Id == "s2" && s.Summary == "[b]");
     }
 
     [Fact]
-    public void LoadNamedSessions_MaxFiftySessions()
+    public void LoadNamedSessions_ReturnsAllSessions()
     {
         for (int i = 0; i < 60; i++)
         {
@@ -66,7 +67,7 @@
 
         var result = SessionService.LoadNamedSessions(this._tempDir);
 
-        Assert.Equal(50, result.Count);
+        Assert.Equal(60, result.Count);
     }
 
     [Fact]

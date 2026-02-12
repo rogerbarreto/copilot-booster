@@ -25,6 +25,7 @@ internal class MainForm : Form
     // Sessions tab controls
     private readonly TextBox _searchBox;
     private readonly ListView _sessionListView;
+    private List<NamedSession> _cachedSessions = new();
 
     // New Session tab controls
     private readonly ListView _cwdListView;
@@ -231,7 +232,11 @@ internal class MainForm : Form
         btnOpenArrow.Location = new Point(btnOpenSession.Width, 0);
 
         var btnRefresh = new Button { Text = "Refresh", Width = 80 };
-        btnRefresh.Click += (s, e) => this.RefreshSessionList();
+        btnRefresh.Click += (s, e) =>
+        {
+            this._cachedSessions = LoadNamedSessions();
+            this.RefreshSessionList();
+        };
 
         sessionButtonPanel.Controls.Add(splitOpenPanel);
 
@@ -257,6 +262,7 @@ internal class MainForm : Form
         this._sessionsTab.Controls.Add(searchPanel);
         this._sessionsTab.Controls.Add(sessionButtonPanel);
 
+        this._cachedSessions = LoadNamedSessions();
         this.RefreshSessionList();
 
         // ===== Settings Tab =====
@@ -527,6 +533,7 @@ internal class MainForm : Form
 
         if (tabIndex == 1)
         {
+            this._cachedSessions = LoadNamedSessions();
             this.RefreshSessionList();
         }
 
@@ -542,10 +549,14 @@ internal class MainForm : Form
     private void RefreshSessionList()
     {
         this._sessionListView.Items.Clear();
-        var sessions = LoadNamedSessions();
         var query = this._searchBox.Text;
-        var filtered = SessionService.SearchSessions(sessions, query);
-        foreach (var session in filtered)
+        var isSearching = !string.IsNullOrWhiteSpace(query);
+
+        var displayed = isSearching
+            ? SessionService.SearchSessions(this._cachedSessions, query)
+            : this._cachedSessions.Take(50).ToList();
+
+        foreach (var session in displayed)
         {
             var item = new ListViewItem(session.Summary) { Tag = session.Id };
             item.SubItems.Add(session.Cwd);

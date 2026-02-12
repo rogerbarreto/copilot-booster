@@ -225,17 +225,20 @@ internal class SessionService
                         }
                     }
 
-                    if (id == null || string.IsNullOrWhiteSpace(summary))
+                    if (id == null)
                     {
                         return null;
                     }
 
                     var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
+                    var displaySummary = string.IsNullOrWhiteSpace(summary)
+                        ? $"[{folder}]"
+                        : $"[{folder}] {summary}";
                     return new NamedSession
                     {
                         Id = id,
                         Cwd = cwd ?? "",
-                        Summary = $"[{folder}] {summary}",
+                        Summary = displaySummary,
                         LastModified = Directory.GetLastWriteTime(d)
                     };
                 }
@@ -245,7 +248,6 @@ internal class SessionService
                 }
             })
             .Where(s => s != null)
-            .Take(50)
             .ToList();
 
         foreach (var s in sessions)
