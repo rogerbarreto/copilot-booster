@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2026-02-12
+
+### Fixed
+
+- **Session list showing incomplete results** — sessions without a summary were silently dropped; now uses the folder name as a fallback display title.
+- **Search scope** — search now queries across all sessions (cached), not just the visible 50.
+- **Refresh button** — now reloads the full session cache before updating the display.
+
 ## [0.1.0] - 2026-02-12
 
 ### Added
@@ -69,6 +77,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
+[0.1.1]: https://github.com/rogerbarreto/copilot-app/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.3...v0.1.0
 [0.0.3]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.1...v0.0.2
