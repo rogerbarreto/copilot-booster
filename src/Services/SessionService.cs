@@ -167,12 +167,14 @@ internal class SessionService
                 return null;
             }
 
-            var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "Unknown");
+            var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
             return new SessionInfo
             {
                 Id = id,
                 Cwd = cwd ?? "Unknown",
-                Summary = string.IsNullOrEmpty(summary) ? $"[{folder}]" : $"[{folder}] {summary}",
+                Summary = string.IsNullOrWhiteSpace(folder)
+                    ? (string.IsNullOrEmpty(summary) ? "(no folder)" : summary)
+                    : (string.IsNullOrEmpty(summary) ? $"{folder}" : summary),
                 Pid = pid
             };
         }
@@ -184,15 +186,23 @@ internal class SessionService
 
     /// <summary>
     /// Loads named sessions from the session state directory, ordered by most recently modified.
+    /// Automatically deletes empty sessions (no events.jsonl) that are not currently active.
     /// </summary>
     /// <param name="sessionStateDir">Path to the directory containing session state.</param>
-    /// <returns>A list of up to 50 named sessions with summaries.</returns>
-    internal static List<NamedSession> LoadNamedSessions(string sessionStateDir)
+    /// <param name="pidRegistryFile">Path to the PID registry JSON file for active session detection.</param>
+    /// <returns>A list of named sessions with summaries.</returns>
+    internal static List<NamedSession> LoadNamedSessions(string sessionStateDir, string? pidRegistryFile = null)
     {
         var results = new List<NamedSession>();
         if (!Directory.Exists(sessionStateDir))
         {
             return results;
+        }
+
+        HashSet<string>? activeIds = null;
+        if (pidRegistryFile != null)
+        {
+            activeIds = GetActiveSessionIds(pidRegistryFile, sessionStateDir);
         }
 
         var sessions = Directory.GetDirectories(sessionStateDir)
@@ -230,14 +240,25 @@ internal class SessionService
                         return null;
                     }
 
+                    // Delete empty, non-active sessions
+                    var hasEvents = File.Exists(Path.Combine(d, "events.jsonl"));
+                    if (!hasEvents && activeIds != null && !activeIds.Contains(id))
+                    {
+                        try { Directory.Delete(d, recursive: true); } catch { }
+                        return null;
+                    }
+
                     var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
                     var displaySummary = string.IsNullOrWhiteSpace(summary)
-                        ? $"[{folder}]"
-                        : $"[{folder}] {summary}";
+                        ? (string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "")
+                        : summary;
+                    var isGitRepo = !string.IsNullOrEmpty(cwd) && GitService.IsGitRepository(cwd);
                     return new NamedSession
                     {
                         Id = id,
                         Cwd = cwd ?? "",
+                        Folder = folder,
+                        IsGitRepo = isGitRepo,
                         Summary = displaySummary,
                         LastModified = Directory.GetLastWriteTime(d)
                     };
@@ -262,6 +283,23 @@ internal class SessionService
     }
 
     /// <summary>
+    /// Gets the set of session IDs that are currently active (have a running process).
+    /// </summary>
+    private static HashSet<string> GetActiveSessionIds(string pidRegistryFile, string sessionStateDir)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var s in GetActiveSessions(pidRegistryFile, sessionStateDir))
+            {
+                ids.Add(s.Id);
+            }
+        }
+        catch { }
+        return ids;
+    }
+
+    /// <summary>
     /// Searches named sessions by query text, prioritizing summary/title matches over other metadata (cwd, id).
     /// </summary>
     /// <param name="sessions">The list of sessions to search.</param>
@@ -279,7 +317,8 @@ internal class SessionService
 
         foreach (var session in sessions)
         {
-            if (session.Summary.Contains(query, StringComparison.OrdinalIgnoreCase))
+            if (session.Summary.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                session.Folder.Contains(query, StringComparison.OrdinalIgnoreCase))
             {
                 titleMatches.Add(session);
             }

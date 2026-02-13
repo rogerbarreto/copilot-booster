@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Windows.Forms;
@@ -14,9 +14,9 @@ internal class ListViewColumnSorter : IComparer
 
     public ListViewColumnSorter(int column = 1, SortOrder order = SortOrder.Descending, HashSet<int>? numericColumns = null)
     {
-        SortColumn = column;
-        Order = order;
-        _numericColumns = numericColumns ?? new HashSet<int> { 1 };
+        this.SortColumn = column;
+        this.Order = order;
+        this._numericColumns = numericColumns ?? new HashSet<int> { 1 };
     }
 
     public int Compare(object? x, object? y)
@@ -26,11 +26,11 @@ internal class ListViewColumnSorter : IComparer
             return 0;
         }
 
-        string textX = SortColumn < itemX.SubItems.Count ? itemX.SubItems[SortColumn].Text : "";
-        string textY = SortColumn < itemY.SubItems.Count ? itemY.SubItems[SortColumn].Text : "";
+        string textX = this.SortColumn < itemX.SubItems.Count ? itemX.SubItems[this.SortColumn].Text : "";
+        string textY = this.SortColumn < itemY.SubItems.Count ? itemY.SubItems[this.SortColumn].Text : "";
 
         int result;
-        if (_numericColumns.Contains(SortColumn))
+        if (this._numericColumns.Contains(this.SortColumn))
         {
             int.TryParse(textX, out int numX);
             int.TryParse(textY, out int numY);
@@ -41,6 +41,6 @@ internal class ListViewColumnSorter : IComparer
             result = string.Compare(textX, textY, StringComparison.OrdinalIgnoreCase);
         }
 
-        return Order == SortOrder.Descending ? -result : result;
+        return this.Order == SortOrder.Descending ? -result : result;
     }
 }

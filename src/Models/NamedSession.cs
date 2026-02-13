@@ -24,6 +24,16 @@ internal class NamedSession
     public string Summary { get; set; } = "";
 
     /// <summary>
+    /// Gets or sets the folder name extracted from the CWD path.
+    /// </summary>
+    public string Folder { get; set; } = "";
+
+    /// <summary>
+    /// Gets or sets whether the session CWD is inside a Git repository.
+    /// </summary>
+    public bool IsGitRepo { get; set; }
+
+    /// <summary>
     /// Gets or sets the timestamp when the session was last modified.
     /// </summary>
     public DateTime LastModified { get; set; }

@@ -2,9 +2,9 @@
 {
     private static List<NamedSession> CreateTestSessions() =>
     [
-        new NamedSession { Id = "abc-123", Cwd = @"C:\projects\webapp", Summary = "[webapp] Fix login bug", LastModified = DateTime.Now },
-        new NamedSession { Id = "def-456", Cwd = @"C:\projects\api", Summary = "[api] Add REST endpoints", LastModified = DateTime.Now.AddMinutes(-10) },
-        new NamedSession { Id = "ghi-789", Cwd = @"C:\projects\login-service", Summary = "[login-service] Refactor auth", LastModified = DateTime.Now.AddMinutes(-20) },
+        new NamedSession { Id = "abc-123", Cwd = @"C:\projects\webapp", Folder = "webapp", Summary = "Fix login bug", LastModified = DateTime.Now },
+        new NamedSession { Id = "def-456", Cwd = @"C:\projects\api", Folder = "api", Summary = "Add REST endpoints", LastModified = DateTime.Now.AddMinutes(-10) },
+        new NamedSession { Id = "ghi-789", Cwd = @"C:\projects\login-service", Folder = "login-service", Summary = "Refactor auth", LastModified = DateTime.Now.AddMinutes(-20) },
     ];
 
     [Fact]
@@ -38,8 +38,8 @@
         var result = SessionService.SearchSessions(sessions, "login");
 
         Assert.Equal(2, result.Count);
-        Assert.Equal("abc-123", result[0].Id); // "Fix login bug" - title match
-        Assert.Equal("ghi-789", result[1].Id); // "login-service" in summary
+        Assert.Equal("abc-123", result[0].Id); // "Fix login bug" - summary match
+        Assert.Equal("ghi-789", result[1].Id); // "login-service" - folder match
     }
 
     [Fact]
@@ -48,7 +48,7 @@
         var sessions = CreateTestSessions();
         var result = SessionService.SearchSessions(sessions, "webapp");
 
-        // "webapp" appears in both summary and cwd of first session
+        // "webapp" appears in Folder (title match) and Cwd
         Assert.Single(result);
         Assert.Equal("abc-123", result[0].Id);
     }
@@ -86,8 +86,8 @@
     {
         var sessions = new List<NamedSession>
         {
-            new() { Id = "session-api", Cwd = @"C:\code", Summary = "[code] Database work" },
-            new() { Id = "session-db", Cwd = @"C:\api-project", Summary = "[api-project] Fix api tests" },
+            new() { Id = "session-api", Cwd = @"C:\code", Folder = "code", Summary = "Database work" },
+            new() { Id = "session-db", Cwd = @"C:\api-project", Folder = "api-project", Summary = "Fix api tests" },
         };
 
         var result = SessionService.SearchSessions(sessions, "api");

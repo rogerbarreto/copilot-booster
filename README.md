@@ -56,13 +56,21 @@ Workspaces are stored in `%APPDATA%\CopilotApp\Workspaces\` and named after the 
 
 ### 🔄 Session Browser
 
-Resume any previous session with full context. Each entry shows the session name, working directory, and last-used date. Git-enabled sessions are tagged with **- Git** in the date column.
+Resume any previous session with full context. The session list shows four columns:
+
+- **Session** — the session summary/title
+- **CWD** — the working directory folder name, with a ⎇ icon for Git-enabled sessions
+- **Date** — when the session was last modified
+- **Active** — clickable links showing running terminals and IDEs (highlighted in blue)
 
 <p align="center">
-  <img src="images/existing-sessions-with-search.png" alt="Existing sessions browser with search" width="500">
+  <img src="images/existing-sessions-with-search.png" alt="Existing sessions browser with active tracking" width="500">
 </p>
 
-- **Search** — filter sessions by title, summary, or metadata as you type
+- **Search** — filter sessions by title, folder, or metadata as you type
+- **Active session tracking** — open terminals and IDEs are shown as clickable links; click to focus the window
+- **Persistent window** — the app stays open after launching sessions so you can manage multiple at once
+- **Auto-cleanup** — empty sessions with no activity are automatically removed
 - **Open Session** — resumes the session in its original working directory
 - **Open Session ▾** — dropdown with additional options:
   - **Open as New Session** — starts a fresh session in the same directory
@@ -110,6 +118,12 @@ Register your IDEs for the "Open in IDE" feature:
 <p align="center">
   <img src="images/settings-IDEs.png" alt="IDE settings" width="500">
 </p>
+
+---
+
+### 🔄 In-App Updates
+
+Copilot App checks for new versions on startup via the GitHub Releases API. When an update is available, a banner appears at the bottom of the window — click to download and install the latest version automatically.
 
 ---
 

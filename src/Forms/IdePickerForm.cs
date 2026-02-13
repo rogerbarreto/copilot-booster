@@ -18,7 +18,8 @@ internal static class IdePickerForm
     /// Displays an IDE picker dialog and opens the selected IDE for the specified session.
     /// </summary>
     /// <param name="sessionId">The identifier of the session to open in an IDE.</param>
-    internal static void OpenIdeForSession(string sessionId)
+    /// <param name="onLaunched">Optional callback invoked with the IDE description, process ID, and folder path when an IDE is launched.</param>
+    internal static void OpenIdeForSession(string sessionId, Action<string, int, string>? onLaunched = null)
     {
         if (Program._settings.Ides.Count == 0)
         {
@@ -113,7 +114,11 @@ internal static class IdePickerForm
             var capturedIde = ide;
             btnCwd.Click += (s, e) =>
             {
-                LaunchIde(capturedIde.Path, cwd);
+                var proc = LaunchIde(capturedIde.Path, cwd);
+                if (proc != null)
+                {
+                    onLaunched?.Invoke(capturedIde.Description, proc.Id, cwd);
+                }
                 form.Close();
             };
             layout.Controls.Add(btnCwd, 1, row);
@@ -123,7 +128,11 @@ internal static class IdePickerForm
                 var btnRepo = new Button { Text = "Open Repo", Width = 100, Height = 28 };
                 btnRepo.Click += (s, e) =>
                 {
-                    LaunchIde(capturedIde.Path, repoRoot!);
+                    var proc = LaunchIde(capturedIde.Path, repoRoot!);
+                    if (proc != null)
+                    {
+                        onLaunched?.Invoke(capturedIde.Description, proc.Id, repoRoot!);
+                    }
                     form.Close();
                 };
                 layout.Controls.Add(btnRepo, 2, row);
@@ -150,11 +159,12 @@ internal static class IdePickerForm
     /// </summary>
     /// <param name="idePath">The file path to the IDE executable.</param>
     /// <param name="folderPath">The folder path to open in the IDE.</param>
-    internal static void LaunchIde(string idePath, string folderPath)
+    /// <returns>The launched process, or null if the launch failed.</returns>
+    internal static Process? LaunchIde(string idePath, string folderPath)
     {
         try
         {
-            Process.Start(new ProcessStartInfo
+            return Process.Start(new ProcessStartInfo
             {
                 FileName = idePath,
                 Arguments = $"\"{folderPath}\"",
@@ -164,6 +174,7 @@ internal static class IdePickerForm
         catch (Exception ex)
         {
             MessageBox.Show($"Failed to launch IDE: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return null;
         }
     }
 }

@@ -26,7 +26,7 @@ internal class Program
     /// Directory path for persisted session state.
     /// </summary>
     internal static readonly string SessionStateDir = Path.Combine(s_copilotDir, "session-state");
-    private static readonly string s_pidRegistryFile = Path.Combine(s_copilotDir, "active-pids.json");
+    internal static readonly string PidRegistryFile = Path.Combine(s_copilotDir, "active-pids.json");
     private static readonly string s_signalFile = Path.Combine(s_copilotDir, "ui-signal.txt");
     private static readonly string s_lastUpdateFile = Path.Combine(s_copilotDir, "jumplist-lastupdate.txt");
     private static readonly string s_logFile = Path.Combine(s_copilotDir, "launcher.log");
@@ -194,7 +194,7 @@ internal class Program
         // If resuming a session that is already running, focus its terminal window
         if (resumeSessionId != null)
         {
-            var activeSessions = SessionService.GetActiveSessions(s_pidRegistryFile, SessionStateDir);
+            var activeSessions = SessionService.GetActiveSessions(PidRegistryFile, SessionStateDir);
             var existing = activeSessions.FirstOrDefault(s => s.Id == resumeSessionId);
             if (existing != null && existing.CopilotPid > 0)
             {
@@ -266,7 +266,7 @@ internal class Program
     private static void StartCopilotSession(string workDir, string? resumeSessionId)
     {
         var myPid = Environment.ProcessId;
-        PidRegistryService.RegisterPid(myPid, s_copilotDir, s_pidRegistryFile);
+        PidRegistryService.RegisterPid(myPid, s_copilotDir, PidRegistryFile);
         LogService.Log($"Registered PID: {myPid}", s_logFile);
 
         // Try to become the jump list updater (single instance)
@@ -285,7 +285,7 @@ internal class Program
         var cts = new CancellationTokenSource();
         if (isUpdater)
         {
-            var updaterThread = new Thread(() => JumpListService.UpdaterLoop(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, s_pidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm, cts.Token)) { IsBackground = true };
+            var updaterThread = new Thread(() => JumpListService.UpdaterLoop(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm, cts.Token)) { IsBackground = true };
             updaterThread.Start();
         }
 
@@ -336,12 +336,12 @@ internal class Program
             if (sessionId != null)
             {
                 int cmdPid = s_copilotProcess?.Id ?? 0;
-                PidRegistryService.UpdatePidSessionId(myPid, sessionId, s_pidRegistryFile, copilotPid: cmdPid);
+                PidRegistryService.UpdatePidSessionId(myPid, sessionId, PidRegistryFile, copilotPid: cmdPid);
                 LogService.Log($"Mapped PID {myPid} to session {sessionId}, cmd PID {cmdPid}", s_logFile);
             }
 
             LogService.Log("Updating jump list...", s_logFile);
-            JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, s_pidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm);
+            JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm);
             LogService.Log("Jump list updated", s_logFile);
 
             // Watch for copilot exit
@@ -350,8 +350,8 @@ internal class Program
                 s_copilotProcess?.WaitForExit();
                 LogService.Log("copilot exited", s_logFile);
 
-                PidRegistryService.UnregisterPid(myPid, s_pidRegistryFile);
-                JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, s_pidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm);
+                PidRegistryService.UnregisterPid(myPid, PidRegistryFile);
+                JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm);
 
                 cts.Cancel();
                 updaterMutex?.ReleaseMutex();

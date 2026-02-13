@@ -7,7 +7,9 @@
 
         Assert.Equal("", session.Id);
         Assert.Equal("", session.Cwd);
+        Assert.Equal("", session.Folder);
         Assert.Equal("", session.Summary);
+        Assert.False(session.IsGitRepo);
         Assert.Equal(default, session.LastModified);
     }
 
@@ -19,13 +21,17 @@
         {
             Id = "ns-1",
             Cwd = @"D:\work",
-            Summary = "[work] Fix bug",
+            Folder = "work",
+            Summary = "Fix bug",
+            IsGitRepo = true,
             LastModified = now
         };
 
         Assert.Equal("ns-1", session.Id);
         Assert.Equal(@"D:\work", session.Cwd);
-        Assert.Equal("[work] Fix bug", session.Summary);
+        Assert.Equal("work", session.Folder);
+        Assert.Equal("Fix bug", session.Summary);
+        Assert.True(session.IsGitRepo);
         Assert.Equal(now, session.LastModified);
     }
 }

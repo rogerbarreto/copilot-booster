@@ -33,7 +33,8 @@
 
         Assert.Single(result);
         Assert.Equal("session1", result[0].Id);
-        Assert.Equal("[project] My session", result[0].Summary);
+        Assert.Equal("My session", result[0].Summary);
+        Assert.Equal("project", result[0].Folder);
     }
 
     [Fact]
@@ -51,7 +52,7 @@
 
         Assert.Equal(2, result.Count);
         Assert.Contains(result, s => s.Id == "s1" && s.Summary.Contains("Has summary"));
-        Assert.Contains(result, s => s.Id == "s2" && s.Summary == "[b]");
+        Assert.Contains(result, s => s.Id == "s2" && s.Summary == "" && s.Folder == "b");
     }
 
     [Fact]

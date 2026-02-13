@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -15,7 +15,7 @@ internal sealed class UpdateService
 {
     private const string ReleasesUrl = "https://api.github.com/repos/community/copilot-app/releases/latest";
 
-    private static readonly HttpClient HttpClient = new()
+    private static readonly HttpClient s_httpClient = new()
     {
         DefaultRequestHeaders =
         {
@@ -39,7 +39,7 @@ internal sealed class UpdateService
     {
         try
         {
-            var json = await HttpClient.GetStringAsync(ReleasesUrl).ConfigureAwait(false);
+            var json = await s_httpClient.GetStringAsync(ReleasesUrl).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
@@ -89,7 +89,7 @@ internal sealed class UpdateService
     {
         var tempPath = Path.Combine(Path.GetTempPath(), "CopilotApp-Setup.exe");
 
-        using (var response = await HttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
+        using (var response = await s_httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false))
         {
             response.EnsureSuccessStatusCode();
             using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -111,8 +111,8 @@ internal sealed class UpdateInfo
 
     public UpdateInfo(Version version, string tagName, string? installerUrl)
     {
-        Version = version;
-        TagName = tagName;
-        InstallerUrl = installerUrl;
+        this.Version = version;
+        this.TagName = tagName;
+        this.InstallerUrl = installerUrl;
     }
 }

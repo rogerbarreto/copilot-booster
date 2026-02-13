@@ -33,6 +33,18 @@ internal static partial class WindowFocusService
     [LibraryImport("user32.dll")]
     private static partial void keybd_event(byte bVk, byte bScan, uint dwFlags, nuint dwExtraInfo);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+#pragma warning disable SYSLIB1054
+    private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+#pragma warning restore SYSLIB1054
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -69,6 +81,77 @@ internal static partial class WindowFocusService
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Finds a visible window whose title contains the specified text and brings it to the foreground.
+    /// </summary>
+    /// <param name="titleSubstring">Text to search for in window titles (case-insensitive).</param>
+    /// <returns><c>true</c> if a matching window was found and focused; otherwise <c>false</c>.</returns>
+    internal static bool TryFocusWindowByTitle(string titleSubstring)
+    {
+        IntPtr found = IntPtr.Zero;
+
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd))
+            {
+                return true;
+            }
+
+            int len = GetWindowTextLength(hwnd);
+            if (len == 0)
+            {
+                return true;
+            }
+
+            var sb = new System.Text.StringBuilder(len + 1);
+            GetWindowText(hwnd, sb, sb.Capacity);
+            if (sb.ToString().Contains(titleSubstring, StringComparison.OrdinalIgnoreCase))
+            {
+                found = hwnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return found != IntPtr.Zero && FocusWindow(found);
+    }
+
+    /// <summary>
+    /// Finds a process ID that owns a visible window whose title contains the specified text.
+    /// </summary>
+    /// <param name="titleSubstring">Text to search for in window titles (case-insensitive).</param>
+    /// <returns>The process ID if found; otherwise <c>-1</c>.</returns>
+    internal static int FindProcessIdByWindowTitle(string titleSubstring)
+    {
+        int resultPid = -1;
+
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd))
+            {
+                return true;
+            }
+
+            int len = GetWindowTextLength(hwnd);
+            if (len == 0)
+            {
+                return true;
+            }
+
+            var sb = new System.Text.StringBuilder(len + 1);
+            GetWindowText(hwnd, sb, sb.Capacity);
+            if (sb.ToString().Contains(titleSubstring, StringComparison.OrdinalIgnoreCase))
+            {
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                resultPid = (int)pid;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return resultPid;
     }
 
     /// <summary>

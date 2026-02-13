@@ -25,8 +25,11 @@ internal class MainForm : Form
 
     // Sessions tab controls
     private readonly TextBox _searchBox;
-    private readonly ListView _sessionListView;
+    private readonly DataGridView _sessionGrid;
     private List<NamedSession> _cachedSessions = new();
+    private HashSet<string> _activeSessionIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Timer? _activeStatusTimer;
 
     // New Session tab controls
     private readonly ListView _cwdListView;
@@ -80,17 +83,33 @@ internal class MainForm : Form
         // ===== Sessions Tab =====
         this._sessionsTab = new TabPage("Existing Sessions");
 
-        this._sessionListView = new ListView
+        this._sessionGrid = new DataGridView
         {
             Dock = DockStyle.Fill,
-            View = View.Tile,
-            FullRowSelect = true,
+            ReadOnly = true,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
-            TileSize = new Size(560, 65)
+            RowHeadersVisible = false,
+            BackgroundColor = SystemColors.Window,
+            BorderStyle = BorderStyle.None,
+            AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
+            CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+            DefaultCellStyle = new DataGridViewCellStyle { WrapMode = DataGridViewTriState.True, Padding = new Padding(4, 4, 4, 4) },
+            ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold) },
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
         };
-        this._sessionListView.Columns.Add("Session");
-        this._sessionListView.Columns.Add("CWD");
-        this._sessionListView.Columns.Add("Date");
+        this._sessionGrid.Columns.Add("Session", "Session");
+        this._sessionGrid.Columns.Add("CWD", "CWD");
+        this._sessionGrid.Columns.Add("Date", "Date");
+        this._sessionGrid.Columns.Add("Active", "Active");
+        this._sessionGrid.Columns["Session"]!.Width = 300;
+        this._sessionGrid.Columns["Session"]!.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+        this._sessionGrid.Columns["CWD"]!.Width = 110;
+        this._sessionGrid.Columns["Date"]!.Width = 130;
+        this._sessionGrid.Columns["Active"]!.Width = 100;
 
         var searchPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(5, 5, 5, 2) };
         var searchLabel = new Label { Text = "Search:", AutoSize = true, Location = new Point(5, 7) };
@@ -104,13 +123,47 @@ internal class MainForm : Form
         this._searchBox.TextChanged += (s, e) => this.RefreshSessionList();
         searchPanel.Controls.AddRange([searchLabel, this._searchBox]);
 
-        this._sessionListView.DoubleClick += (s, e) =>
+        this._sessionGrid.CellDoubleClick += (s, e) =>
         {
-            if (this._sessionListView.SelectedItems.Count > 0)
+            if (e.RowIndex >= 0)
             {
-                this.SelectedSessionId = this._sessionListView.SelectedItems[0].Tag as string;
-                this.LaunchSessionAndClose();
+                this.SelectedSessionId = this._sessionGrid.Rows[e.RowIndex].Tag as string;
+                this.LaunchSession();
             }
+        };
+
+        this._sessionGrid.CellClick += (s, e) =>
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex != 3)
+            {
+                return;
+            }
+
+            var row = this._sessionGrid.Rows[e.RowIndex];
+            var activeText = row.Cells[3].Value as string;
+            if (!string.IsNullOrEmpty(activeText) && row.Tag is string sessionId)
+            {
+                var cellRect = this._sessionGrid.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+                this.FocusActiveProcess(sessionId, cellRect.Location);
+            }
+        };
+
+        this._sessionGrid.CellMouseMove += (s, e) =>
+        {
+            if (e.RowIndex >= 0 && e.ColumnIndex == 3)
+            {
+                var activeText = this._sessionGrid.Rows[e.RowIndex].Cells[3].Value as string;
+                this._sessionGrid.Cursor = !string.IsNullOrEmpty(activeText) ? Cursors.Hand : Cursors.Default;
+            }
+            else
+            {
+                this._sessionGrid.Cursor = Cursors.Default;
+            }
+        };
+
+        this._sessionGrid.CellMouseLeave += (s, e) =>
+        {
+            this._sessionGrid.Cursor = Cursors.Default;
         };
 
         var sessionButtonPanel = new FlowLayoutPanel
@@ -124,10 +177,11 @@ internal class MainForm : Form
         var btnOpenSession = new Button { Text = "Open Session", Width = 100 };
         btnOpenSession.Click += (s, e) =>
         {
-            if (this._sessionListView.SelectedItems.Count > 0)
+            var sid = this.GetSelectedSessionId();
+            if (sid != null)
             {
-                this.SelectedSessionId = this._sessionListView.SelectedItems[0].Tag as string;
-                this.LaunchSessionAndClose();
+                this.SelectedSessionId = sid;
+                this.LaunchSession();
             }
         };
 
@@ -135,8 +189,8 @@ internal class MainForm : Form
         var menuOpenNewSession = new ToolStripMenuItem("Open as New Session");
         menuOpenNewSession.Click += (s, e) =>
         {
-            if (this._sessionListView.SelectedItems.Count > 0
-                && this._sessionListView.SelectedItems[0].Tag is string sessionId)
+            var sessionId = this.GetSelectedSessionId();
+            if (sessionId != null)
             {
                 var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
                 string? selectedCwd = null;
@@ -156,7 +210,6 @@ internal class MainForm : Form
                 {
                     var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                     Process.Start(new ProcessStartInfo(exePath, selectedCwd) { UseShellExecute = false });
-                    this.Close();
                 }
             }
         };
@@ -165,8 +218,8 @@ internal class MainForm : Form
         var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Session Workspace");
         menuOpenNewSessionWorkspace.Click += (s, e) =>
         {
-            if (this._sessionListView.SelectedItems.Count > 0
-                && this._sessionListView.SelectedItems[0].Tag is string sessionId)
+            var sessionId = this.GetSelectedSessionId();
+            if (sessionId != null)
             {
                 var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
                 string? selectedCwd = null;
@@ -192,7 +245,6 @@ internal class MainForm : Form
                         {
                             var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                             Process.Start(new ProcessStartInfo(exePath, worktreePath) { UseShellExecute = false });
-                            this.Close();
                         }
                     }
                 }
@@ -203,8 +255,8 @@ internal class MainForm : Form
         openSessionMenu.Opening += (s, e) =>
         {
             bool isGit = false;
-            if (this._sessionListView.SelectedItems.Count > 0
-                && this._sessionListView.SelectedItems[0].Tag is string sessionId)
+            var sessionId = this.GetSelectedSessionId();
+            if (sessionId != null)
             {
                 var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
                 if (File.Exists(workspaceFile))
@@ -250,12 +302,18 @@ internal class MainForm : Form
             var btnIde = new Button { Text = "Open in IDE", Width = 100 };
             btnIde.Click += (s, e) =>
             {
-                if (this._sessionListView.SelectedItems.Count > 0)
+                var sid = this.GetSelectedSessionId();
+                if (sid != null)
                 {
-                    if (this._sessionListView.SelectedItems[0].Tag is string sid)
+                    IdePickerForm.OpenIdeForSession(sid, (ideName, pid, folderPath) =>
                     {
-                        IdePickerForm.OpenIdeForSession(sid);
-                    }
+                        if (!this._trackedProcesses.ContainsKey(sid))
+                        {
+                            this._trackedProcesses[sid] = new List<ActiveProcess>();
+                        }
+                        this._trackedProcesses[sid].Add(new ActiveProcess(ideName, pid, folderPath));
+                        this.RefreshActiveStatus();
+                    });
                 }
             };
             sessionButtonPanel.Controls.Add(btnIde);
@@ -263,7 +321,7 @@ internal class MainForm : Form
 
         sessionButtonPanel.Controls.Add(btnRefresh);
 
-        this._sessionsTab.Controls.Add(this._sessionListView);
+        this._sessionsTab.Controls.Add(this._sessionGrid);
         this._sessionsTab.Controls.Add(searchPanel);
         this._sessionsTab.Controls.Add(sessionButtonPanel);
 
@@ -511,7 +569,7 @@ internal class MainForm : Form
             Visible = false,
             Padding = new Padding(0, 4, 0, 4)
         };
-        this._updateLabel.LinkClicked += this.OnUpdateLabelClicked;
+        this._updateLabel.LinkClicked += this.OnUpdateLabelClickedAsync;
 
         this.Controls.Add(this._mainTabs);
         this.Controls.Add(this._updateLabel);
@@ -521,7 +579,12 @@ internal class MainForm : Form
             this._mainTabs.SelectedIndex = initialTab;
         }
 
-        this.Shown += (s, e) => _ = CheckForUpdateInBackgroundAsync();
+        this._activeStatusTimer = new Timer { Interval = 3000 };
+        this._activeStatusTimer.Tick += (s, e) => this.RefreshActiveStatus();
+        this._activeStatusTimer.Start();
+
+        this.Shown += (s, e) => _ = this.CheckForUpdateInBackgroundAsync();
+        this.FormClosed += (s, e) => this._activeStatusTimer?.Stop();
     }
 
     private async Task CheckForUpdateInBackgroundAsync()
@@ -538,7 +601,7 @@ internal class MainForm : Form
         }
     }
 
-    private async void OnUpdateLabelClicked(object? sender, LinkLabelLinkClickedEventArgs e)
+    private async void OnUpdateLabelClickedAsync(object? sender, LinkLabelLinkClickedEventArgs e)
     {
         if (this._updateLabel.Tag is not string url)
         {
@@ -563,7 +626,7 @@ internal class MainForm : Form
         }
     }
 
-    private void LaunchSessionAndClose()
+    private void LaunchSession()
     {
         if (this.SelectedSessionId != null)
         {
@@ -573,7 +636,80 @@ internal class MainForm : Form
                 UseShellExecute = false
             });
         }
-        this.Close();
+    }
+
+    private void FocusActiveProcess(string sessionId, Point clickLocation)
+    {
+        var focusTargets = new List<(string name, int pid, string? folderPath)>();
+
+        if (this._activeSessionIds.Contains(sessionId))
+        {
+            var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
+            var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
+            if (session != null && session.CopilotPid > 0)
+            {
+                focusTargets.Add(("Terminal", session.CopilotPid, null));
+            }
+        }
+
+        if (this._trackedProcesses.TryGetValue(sessionId, out var procs))
+        {
+            foreach (var proc in procs)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(proc.Pid);
+                    if (!p.HasExited)
+                    {
+                        focusTargets.Add((proc.Name, proc.Pid, proc.FolderPath));
+                    }
+                }
+                catch { }
+            }
+        }
+
+        if (focusTargets.Count == 0)
+        {
+            return;
+        }
+
+        if (focusTargets.Count == 1)
+        {
+            var target = focusTargets[0];
+            if (target.folderPath != null)
+            {
+                var folderName = Path.GetFileName(target.folderPath.TrimEnd('\\'));
+                WindowFocusService.TryFocusWindowByTitle(folderName);
+            }
+            else
+            {
+                WindowFocusService.TryFocusProcessWindow(target.pid);
+            }
+            return;
+        }
+
+        // Multiple targets — show context menu
+        var menu = new ContextMenuStrip();
+        foreach (var (name, pid, folderPath) in focusTargets)
+        {
+            var menuItem = new ToolStripMenuItem($"Focus: {name}");
+            var capturedPid = pid;
+            var capturedFolder = folderPath;
+            menuItem.Click += (s, e) =>
+            {
+                if (capturedFolder != null)
+                {
+                    var folderName = Path.GetFileName(capturedFolder.TrimEnd('\\'));
+                    WindowFocusService.TryFocusWindowByTitle(folderName);
+                }
+                else
+                {
+                    WindowFocusService.TryFocusProcessWindow(capturedPid);
+                }
+            };
+            menu.Items.Add(menuItem);
+        }
+        menu.Show(this._sessionGrid, clickLocation);
     }
 
     /// <summary>
@@ -607,9 +743,12 @@ internal class MainForm : Form
         this.Activate();
     }
 
+    private static readonly Color s_activeRowColor = Color.FromArgb(232, 245, 255);
+
     private void RefreshSessionList()
     {
-        this._sessionListView.Items.Clear();
+        this._sessionGrid.Rows.Clear();
+        this._activeSessionIds = LoadActiveSessionIds();
         var query = this._searchBox.Text;
         var isSearching = !string.IsNullOrWhiteSpace(query);
 
@@ -619,16 +758,124 @@ internal class MainForm : Form
 
         foreach (var session in displayed)
         {
-            var item = new ListViewItem(session.Summary) { Tag = session.Id };
-            item.SubItems.Add(session.Cwd);
             var dateText = session.LastModified.ToString("yyyy-MM-dd HH:mm");
-            if (!string.IsNullOrEmpty(session.Cwd) && GitService.IsGitRepository(session.Cwd))
+            var cwdText = session.Folder;
+            if (session.IsGitRepo)
             {
-                dateText += " - Git";
+                cwdText += " \u2387";
             }
 
-            item.SubItems.Add(dateText);
-            this._sessionListView.Items.Add(item);
+            var activeText = this.BuildActiveText(session.Id);
+            var rowIndex = this._sessionGrid.Rows.Add(session.Summary, cwdText, dateText, activeText);
+            var row = this._sessionGrid.Rows[rowIndex];
+            row.Tag = session.Id;
+
+            if (!string.IsNullOrEmpty(activeText))
+            {
+                row.DefaultCellStyle.BackColor = s_activeRowColor;
+                row.Cells[3].Style.ForeColor = Color.FromArgb(0, 102, 204);
+                row.Cells[3].Style.Font = new Font(this._sessionGrid.Font, FontStyle.Underline);
+            }
+        }
+    }
+
+    private string BuildActiveText(string sessionId)
+    {
+        var parts = new List<string>();
+
+        if (this._activeSessionIds.Contains(sessionId))
+        {
+            parts.Add("Terminal");
+        }
+
+        if (this._trackedProcesses.TryGetValue(sessionId, out var procs))
+        {
+            foreach (var proc in procs)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(proc.Pid);
+                    if (!p.HasExited)
+                    {
+                        parts.Add(proc.Name);
+                    }
+                }
+                catch { }
+            }
+        }
+
+        return string.Join("\n", parts);
+    }
+
+    private static HashSet<string> LoadActiveSessionIds()
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
+            foreach (var s in activeSessions)
+            {
+                ids.Add(s.Id);
+            }
+        }
+        catch { }
+        return ids;
+    }
+
+    private void RefreshActiveStatus()
+    {
+        this._activeSessionIds = LoadActiveSessionIds();
+
+        // Clean up dead IDE processes — try to re-match by window title for IDEs that use launcher shims (e.g. VSCode)
+        foreach (var kvp in this._trackedProcesses)
+        {
+            for (int i = kvp.Value.Count - 1; i >= 0; i--)
+            {
+                var proc = kvp.Value[i];
+                bool alive;
+                try { alive = !Process.GetProcessById(proc.Pid).HasExited; }
+                catch { alive = false; }
+
+                if (!alive && proc.FolderPath != null)
+                {
+                    var folderName = Path.GetFileName(proc.FolderPath.TrimEnd('\\'));
+                    var matchPid = WindowFocusService.FindProcessIdByWindowTitle(folderName);
+                    if (matchPid > 0)
+                    {
+                        proc.Pid = matchPid;
+                    }
+                    else
+                    {
+                        kvp.Value.RemoveAt(i);
+                    }
+                }
+                else if (!alive)
+                {
+                    kvp.Value.RemoveAt(i);
+                }
+            }
+        }
+
+        foreach (DataGridViewRow row in this._sessionGrid.Rows)
+        {
+            if (row.Tag is not string sessionId)
+            {
+                continue;
+            }
+
+            var activeText = this.BuildActiveText(sessionId);
+            row.Cells[3].Value = activeText;
+            row.DefaultCellStyle.BackColor = string.IsNullOrEmpty(activeText) ? SystemColors.Window : s_activeRowColor;
+            if (!string.IsNullOrEmpty(activeText))
+            {
+                row.Cells[3].Style.ForeColor = Color.FromArgb(0, 102, 204);
+                row.Cells[3].Style.Font = new Font(this._sessionGrid.Font, FontStyle.Underline);
+            }
+            else
+            {
+                row.Cells[3].Style.ForeColor = SystemColors.ControlText;
+                row.Cells[3].Style.Font = this._sessionGrid.Font;
+            }
         }
     }
 
@@ -688,7 +935,7 @@ internal class MainForm : Form
         }
     }
 
-    private static readonly string[] CwdColumnBaseNames = { "Directory", "# Sessions created", "Git" };
+    private static readonly string[] s_cwdColumnBaseNames = { "Directory", "# Sessions created", "Git" };
 
     private void OnCwdColumnClick(object? sender, ColumnClickEventArgs e)
     {
@@ -705,14 +952,23 @@ internal class MainForm : Form
             this._cwdSorter.Order = e.Column == 1 ? SortOrder.Descending : SortOrder.Ascending;
         }
 
-        for (int i = 0; i < CwdColumnBaseNames.Length; i++)
+        for (int i = 0; i < s_cwdColumnBaseNames.Length; i++)
         {
             this._cwdListView.Columns[i].Text = i == this._cwdSorter.SortColumn
-                ? CwdColumnBaseNames[i] + (this._cwdSorter.Order == SortOrder.Ascending ? " ▲" : " ▼")
-                : CwdColumnBaseNames[i];
+                ? s_cwdColumnBaseNames[i] + (this._cwdSorter.Order == SortOrder.Ascending ? " ▲" : " ▼")
+                : s_cwdColumnBaseNames[i];
         }
 
         this._cwdListView.Sort();
+    }
+
+    private string? GetSelectedSessionId()
+    {
+        if (this._sessionGrid.CurrentRow != null)
+        {
+            return this._sessionGrid.CurrentRow.Tag as string;
+        }
+        return null;
     }
 
     private void ReloadSettingsUI()
@@ -746,7 +1002,7 @@ internal class MainForm : Form
     /// Loads all named sessions from the default session state directory.
     /// </summary>
     /// <returns>A list of named sessions.</returns>
-    internal static List<NamedSession> LoadNamedSessions() => SessionService.LoadNamedSessions(Program.SessionStateDir);
+    internal static List<NamedSession> LoadNamedSessions() => SessionService.LoadNamedSessions(Program.SessionStateDir, Program.PidRegistryFile);
 
     /// <summary>
     /// Loads all named sessions from the specified session state directory.

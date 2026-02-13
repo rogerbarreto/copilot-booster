@@ -24,7 +24,7 @@
         Assert.NotNull(result);
         Assert.Equal("session-123", result!.Id);
         Assert.Equal(@"C:\myproject", result.Cwd);
-        Assert.Equal("[myproject] Fix the bug", result.Summary);
+        Assert.Equal("Fix the bug", result.Summary);
         Assert.Equal(42, result.Pid);
     }
 
@@ -48,7 +48,7 @@
         var result = SessionService.ParseWorkspace(wsFile, 1);
 
         Assert.NotNull(result);
-        Assert.Equal("[myproject]", result!.Summary);
+        Assert.Equal("myproject", result!.Summary);
     }
 
     [Fact]
@@ -60,7 +60,7 @@
         var result = SessionService.ParseWorkspace(wsFile, 5);
 
         Assert.NotNull(result);
-        Assert.Equal("[app] Implement feature X", result!.Summary);
+        Assert.Equal("Implement feature X", result!.Summary);
     }
 
     [Fact]
@@ -80,7 +80,7 @@
         var result = SessionService.ParseWorkspace(wsFile, 1);
 
         Assert.NotNull(result);
-        Assert.Equal("[] test", result!.Summary);
+        Assert.Equal("test", result!.Summary);
     }
 
     [Fact]
@@ -92,7 +92,7 @@
         var result = SessionService.ParseWorkspace(wsFile, 1);
 
         Assert.NotNull(result);
-        Assert.Equal("[myproject] test", result!.Summary);
+        Assert.Equal("test", result!.Summary);
     }
 
     [Fact]
