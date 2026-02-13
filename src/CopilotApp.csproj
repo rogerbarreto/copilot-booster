@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>copilot.ico</ApplicationIcon>
     <AssemblyName>CopilotApp</AssemblyName>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <Nullable>enable</Nullable>

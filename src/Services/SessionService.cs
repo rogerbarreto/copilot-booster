@@ -334,6 +334,65 @@ internal class SessionService
     }
 
     /// <summary>
+    /// Updates the summary and cwd fields in a session's workspace.yaml file.
+    /// Preserves all other lines in the file.
+    /// </summary>
+    /// <param name="sessionDir">Path to the session directory containing workspace.yaml.</param>
+    /// <param name="newSummary">The new summary value.</param>
+    /// <param name="newCwd">The new current working directory value.</param>
+    /// <returns><c>true</c> if the update succeeded; otherwise, <c>false</c>.</returns>
+    internal static bool UpdateSession(string sessionDir, string newSummary, string newCwd)
+    {
+        var wsFile = Path.Combine(sessionDir, "workspace.yaml");
+        if (!File.Exists(wsFile))
+        {
+            return false;
+        }
+
+        try
+        {
+            var lines = File.ReadAllLines(wsFile);
+            var updatedLines = new List<string>();
+            bool foundSummary = false, foundCwd = false;
+
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("summary:"))
+                {
+                    updatedLines.Add($"summary: {newSummary}");
+                    foundSummary = true;
+                }
+                else if (line.StartsWith("cwd:"))
+                {
+                    updatedLines.Add($"cwd: {newCwd}");
+                    foundCwd = true;
+                }
+                else
+                {
+                    updatedLines.Add(line);
+                }
+            }
+
+            if (!foundSummary)
+            {
+                updatedLines.Add($"summary: {newSummary}");
+            }
+
+            if (!foundCwd)
+            {
+                updatedLines.Add($"cwd: {newCwd}");
+            }
+
+            File.WriteAllLines(wsFile, updatedLines);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Finds the Git repository root by traversing parent directories from the given path.
     /// </summary>
     /// <param name="startPath">The directory path to start searching from.</param>

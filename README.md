@@ -78,6 +78,7 @@ Resume any previous session with full context. The session list shows four colum
 - **Open in IDE** — jump straight into the code (see below)
 - **Open in Edge** — launch a managed Edge browser workspace linked to the session (see below)
 - **Refresh** — reload the session list without reopening the window
+- **Edit session** — right-click any session row to rename it or change its working directory
 
 ---
 

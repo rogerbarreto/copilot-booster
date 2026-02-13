@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-02-13
+
+### Added
+
+- **Edit session** — right-click any session in the Existing Sessions list to open an "Edit" context menu. The Edit Session dialog lets you rename the session summary and change the working directory (with a folder browser).
+- **SessionEditorForm** — new modal dialog with session name and CWD fields, including a Browse button that defaults to the current working directory.
+- **SessionService.UpdateSession()** — new method to persist session edits back to `workspace.yaml`, preserving all other fields.
+- 5 new unit tests for `UpdateSession` (99 total).
+
+### Changed
+
+- **Default tab** — the app now opens on "Existing Sessions" by default instead of "New Session".
+
 ## [0.1.1] - 2026-02-12
 
 ### Fixed
@@ -77,6 +90,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
+[0.4.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.3.0...v0.4.0
 [0.1.1]: https://github.com/rogerbarreto/copilot-app/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.3...v0.1.0
 [0.0.3]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.2...v0.0.3

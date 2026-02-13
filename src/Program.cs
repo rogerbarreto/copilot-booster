@@ -180,7 +180,7 @@ internal class Program
         // For new sessions (no explicit workDir, not resuming), show MainForm
         if (workDir == null && resumeSessionId == null)
         {
-            var mainForm = new MainForm(initialTab: 0);
+            var mainForm = new MainForm(initialTab: 1);
             if (mainForm.ShowDialog() == DialogResult.OK && mainForm.NewSessionCwd != null)
             {
                 workDir = mainForm.NewSessionCwd;

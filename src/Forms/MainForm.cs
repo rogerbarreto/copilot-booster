@@ -180,6 +180,47 @@ internal class MainForm : Form
             this._sessionGrid.Cursor = Cursors.Default;
         };
 
+        // Right-click context menu with Edit option
+        var gridContextMenu = new ContextMenuStrip();
+        var editMenuItem = new ToolStripMenuItem("Edit");
+        editMenuItem.Click += (s, e) =>
+        {
+            var sid = this.GetSelectedSessionId();
+            if (sid == null)
+            {
+                return;
+            }
+
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session == null)
+            {
+                return;
+            }
+
+            var edited = SessionEditorForm.ShowEditor(session.Summary, session.Cwd);
+            if (edited != null)
+            {
+                var sessionDir = Path.Combine(Program.SessionStateDir, sid);
+                if (SessionService.UpdateSession(sessionDir, edited.Value.Summary, edited.Value.Cwd))
+                {
+                    this._cachedSessions = LoadNamedSessions();
+                    this.RefreshSessionList();
+                }
+            }
+        };
+        gridContextMenu.Items.Add(editMenuItem);
+        this._sessionGrid.ContextMenuStrip = gridContextMenu;
+
+        this._sessionGrid.CellMouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                this._sessionGrid.ClearSelection();
+                this._sessionGrid.Rows[e.RowIndex].Selected = true;
+                this._sessionGrid.CurrentCell = this._sessionGrid.Rows[e.RowIndex].Cells[0];
+            }
+        };
+
         var sessionButtonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
