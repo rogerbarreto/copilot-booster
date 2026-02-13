@@ -76,7 +76,20 @@ Resume any previous session with full context. The session list shows four colum
   - **Open as New Session** — starts a fresh session in the same directory
   - **Open as New Session Workspace** — creates a Git worktree workspace (Git directories only)
 - **Open in IDE** — jump straight into the code (see below)
+- **Open in Edge** — launch a managed Edge browser workspace linked to the session (see below)
 - **Refresh** — reload the session list without reopening the window
+
+---
+
+### 🌐 Edge Browser Workspaces
+
+Open a managed Microsoft Edge window linked to any session. Each workspace gets a unique anchor tab that lets Copilot App track, focus, and detect whether the browser window is still open.
+
+- **Open in Edge** — launches a new Edge window with a session-linked anchor tab
+- **Active tracking** — the Edge workspace appears as a clickable link in the Active column; click to focus the window
+- **Tab-level detection** — uses UI Automation to find the anchor tab across all Edge windows, even when another tab is active
+- **Auto-cleanup** — when you close the anchor tab or the Edge window, the workspace is automatically removed from tracking
+- **Re-discovery** — if you restart Copilot App while an Edge workspace is still open, it will be re-detected on the next refresh
 
 ---
 

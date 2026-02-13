@@ -155,6 +155,21 @@ internal static partial class WindowFocusService
     }
 
     /// <summary>
+    /// Brings the specified window handle to the foreground.
+    /// </summary>
+    /// <param name="hwnd">The window handle to focus.</param>
+    /// <returns><c>true</c> if the window was focused; otherwise <c>false</c>.</returns>
+    internal static bool TryFocusWindowHandle(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        return FocusWindow(hwnd);
+    }
+
+    /// <summary>
     /// Restores (if minimized) and brings the specified window to the foreground.
     /// Uses a simulated Alt keypress to bypass Windows foreground restrictions.
     /// </summary>

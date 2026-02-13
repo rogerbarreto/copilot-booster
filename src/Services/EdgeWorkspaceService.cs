@@ -1,0 +1,225 @@
+﻿using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using System.Windows.Automation;
+
+namespace CopilotApp.Services;
+
+/// <summary>
+/// Manages Edge browser workspace windows identified by a unique GUID in the tab title.
+/// Uses UI Automation to find tabs even when they are not the active tab.
+/// </summary>
+[ExcludeFromCodeCoverage]
+internal partial class EdgeWorkspaceService
+{
+    private const string EdgeExe = "msedge.exe";
+    private const string TitlePrefix = "Copilot App Session [";
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr hWnd);
+
+    /// <summary>
+    /// Gets the unique identifier for this workspace.
+    /// </summary>
+    internal string WorkspaceId { get; }
+
+    /// <summary>
+    /// The title substring used to find the Edge tab/window.
+    /// </summary>
+    private string TitleMarker => $"{TitlePrefix}{this.WorkspaceId}]";
+
+    /// <summary>
+    /// Cached window handle of the Edge window containing the anchor tab.
+    /// </summary>
+    private IntPtr _cachedHwnd;
+
+    /// <summary>
+    /// Fires when the anchor tab is no longer found.
+    /// </summary>
+    internal event Action? WindowClosed;
+
+    /// <summary>
+    /// Returns true if an Edge tab with the anchor title still exists.
+    /// </summary>
+    internal bool IsOpen
+    {
+        get
+        {
+            // Fast path: check cached window first
+            if (this._cachedHwnd != IntPtr.Zero && IsWindow(this._cachedHwnd))
+            {
+                if (FindEdgeTabInWindow(this._cachedHwnd, this.TitleMarker))
+                {
+                    return true;
+                }
+            }
+
+            // Slow path: scan all Edge windows
+            var result = FindEdgeWindowWithTab(this.TitleMarker);
+            this._cachedHwnd = result;
+            return result != IntPtr.Zero;
+        }
+    }
+
+    /// <summary>
+    /// Creates a new workspace service with the given identifier.
+    /// </summary>
+    internal EdgeWorkspaceService(string workspaceId)
+    {
+        this.WorkspaceId = workspaceId;
+    }
+
+    /// <summary>
+    /// Launches Edge with a new window pointing to session.html with the workspace GUID.
+    /// Waits up to <paramref name="timeoutMs"/> milliseconds for the tab to appear.
+    /// </summary>
+    /// <returns>True if the tab was detected; false on timeout.</returns>
+    internal async Task<bool> OpenAsync(int timeoutMs = 10000)
+    {
+        var sessionHtml = GetSessionHtmlPath();
+        if (sessionHtml == null)
+        {
+            return false;
+        }
+
+        var url = $"file:///{sessionHtml.Replace('\\', '/')}#{this.WorkspaceId}";
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = EdgeExe,
+                Arguments = $"--new-window \"{url}\"",
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            return false;
+        }
+
+        // Poll for the tab to appear
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (this.IsOpen)
+            {
+                return true;
+            }
+
+            await Task.Delay(250).ConfigureAwait(false);
+        }
+
+        return this.IsOpen;
+    }
+
+    /// <summary>
+    /// Brings the Edge window containing the anchor tab to the foreground.
+    /// </summary>
+    /// <returns>True if a matching window was found and focused.</returns>
+    internal bool Focus()
+    {
+        if (this._cachedHwnd != IntPtr.Zero && IsWindow(this._cachedHwnd)
+            && FindEdgeTabInWindow(this._cachedHwnd, this.TitleMarker))
+        {
+            return WindowFocusService.TryFocusWindowHandle(this._cachedHwnd);
+        }
+
+        var hwnd = FindEdgeWindowWithTab(this.TitleMarker);
+        if (hwnd != IntPtr.Zero)
+        {
+            this._cachedHwnd = hwnd;
+            return WindowFocusService.TryFocusWindowHandle(hwnd);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if the workspace tab is still open. If not, fires <see cref="WindowClosed"/>.
+    /// </summary>
+    internal void CheckAlive()
+    {
+        if (!this.IsOpen)
+        {
+            this.WindowClosed?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Uses UI Automation to check if a specific Edge window contains a tab matching the title.
+    /// </summary>
+    private static bool FindEdgeTabInWindow(IntPtr hwnd, string titleMarker)
+    {
+        try
+        {
+            var element = AutomationElement.FromHandle(hwnd);
+            var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var tabs = element.FindAll(TreeScope.Descendants, tabCondition);
+            foreach (AutomationElement tab in tabs)
+            {
+                if (tab.Current.Name.Contains(titleMarker, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Scans all Edge windows to find one containing a tab with the given title marker.
+    /// Returns the window handle, or IntPtr.Zero if not found.
+    /// </summary>
+    private static IntPtr FindEdgeWindowWithTab(string titleMarker)
+    {
+        IntPtr result = IntPtr.Zero;
+
+        try
+        {
+            var root = AutomationElement.RootElement;
+            var edgeCondition = new PropertyCondition(AutomationElement.ClassNameProperty, "Chrome_WidgetWin_1");
+            var windows = root.FindAll(TreeScope.Children, edgeCondition);
+
+            foreach (AutomationElement win in windows)
+            {
+                try
+                {
+                    var name = win.Current.Name;
+                    if (!name.Contains("Edge", StringComparison.OrdinalIgnoreCase)
+                        && !name.Contains("Copilot App Session", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var hwnd = new IntPtr(win.Current.NativeWindowHandle);
+                    if (FindEdgeTabInWindow(hwnd, titleMarker))
+                    {
+                        result = hwnd;
+                        break;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Resolves the path to session.html next to the running executable.
+    /// </summary>
+    private static string? GetSessionHtmlPath()
+    {
+        var exeDir = AppContext.BaseDirectory;
+        var path = Path.Combine(exeDir, "session.html");
+        return File.Exists(path) ? path : null;
+    }
+}

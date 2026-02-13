@@ -29,6 +29,8 @@ internal class MainForm : Form
     private List<NamedSession> _cachedSessions = new();
     private HashSet<string> _activeSessionIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
+    private bool _edgeInitialScanDone;
     private readonly Timer? _activeStatusTimer;
 
     // New Session tab controls
@@ -112,16 +114,28 @@ internal class MainForm : Form
         this._sessionGrid.Columns["Active"]!.Width = 100;
 
         var searchPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(5, 5, 5, 2) };
-        var searchLabel = new Label { Text = "Search:", AutoSize = true, Location = new Point(5, 7) };
+        var searchLabel = new Label { Text = "Search:", AutoSize = true, Dock = DockStyle.Left, TextAlign = ContentAlignment.MiddleLeft };
+        var btnRefreshTop = new Button
+        {
+            Text = "Refresh",
+            Width = 65,
+            Dock = DockStyle.Right
+        };
+        btnRefreshTop.Click += (s, e) =>
+        {
+            this._cachedSessions = LoadNamedSessions();
+            this.RefreshSessionList();
+        };
         this._searchBox = new TextBox
         {
-            Location = new Point(55, 4),
-            Width = 400,
-            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+            Dock = DockStyle.Fill,
             PlaceholderText = "Filter sessions..."
         };
         this._searchBox.TextChanged += (s, e) => this.RefreshSessionList();
-        searchPanel.Controls.AddRange([searchLabel, this._searchBox]);
+        // Add Refresh and label first (Dock=Right/Left), then textbox fills remaining space
+        searchPanel.Controls.Add(this._searchBox);
+        searchPanel.Controls.Add(btnRefreshTop);
+        searchPanel.Controls.Add(searchLabel);
 
         this._sessionGrid.CellDoubleClick += (s, e) =>
         {
@@ -169,12 +183,12 @@ internal class MainForm : Form
         var sessionButtonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 40,
+            Height = 45,
             FlowDirection = FlowDirection.RightToLeft,
             Padding = new Padding(5)
         };
 
-        var btnOpenSession = new Button { Text = "Open Session", Width = 100 };
+        var btnOpenSession = new Button { Text = "Open Session", Width = 100, Height = 28 };
         btnOpenSession.Click += (s, e) =>
         {
             var sid = this.GetSelectedSessionId();
@@ -276,7 +290,7 @@ internal class MainForm : Form
             menuOpenNewSessionWorkspace.Visible = isGit;
         };
 
-        var btnOpenArrow = new Button { Text = "▾", Width = 20 };
+        var btnOpenArrow = new Button { Text = "▾", Width = 20, Height = 28 };
         btnOpenArrow.Click += (s, e) =>
         {
             openSessionMenu.Show(btnOpenArrow, new Point(0, btnOpenArrow.Height));
@@ -288,18 +302,11 @@ internal class MainForm : Form
         btnOpenSession.Location = new Point(0, 0);
         btnOpenArrow.Location = new Point(btnOpenSession.Width, 0);
 
-        var btnRefresh = new Button { Text = "Refresh", Width = 80 };
-        btnRefresh.Click += (s, e) =>
-        {
-            this._cachedSessions = LoadNamedSessions();
-            this.RefreshSessionList();
-        };
-
         sessionButtonPanel.Controls.Add(splitOpenPanel);
 
         if (Program._settings.Ides.Count > 0)
         {
-            var btnIde = new Button { Text = "Open in IDE", Width = 100 };
+            var btnIde = new Button { Text = "Open in IDE", Width = 100, Height = 28 };
             btnIde.Click += (s, e) =>
             {
                 var sid = this.GetSelectedSessionId();
@@ -319,7 +326,39 @@ internal class MainForm : Form
             sessionButtonPanel.Controls.Add(btnIde);
         }
 
-        sessionButtonPanel.Controls.Add(btnRefresh);
+        var btnEdge = new Button { Text = "Open in Edge", Width = 100, Height = 28 };
+        btnEdge.Click += async (s, e) =>
+        {
+            var sid = this.GetSelectedSessionId();
+            if (sid == null)
+            {
+                return;
+            }
+
+            if (this._edgeWorkspaces.TryGetValue(sid, out var existing) && existing.IsOpen)
+            {
+                existing.Focus();
+                return;
+            }
+
+            var workspace = new EdgeWorkspaceService(sid);
+            workspace.WindowClosed += () =>
+            {
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(() => this.OnEdgeWorkspaceClosed(sid));
+                }
+                else
+                {
+                    this.OnEdgeWorkspaceClosed(sid);
+                }
+            };
+            this._edgeWorkspaces[sid] = workspace;
+
+            await workspace.OpenAsync().ConfigureAwait(true);
+            this.RefreshActiveStatus();
+        };
+        sessionButtonPanel.Controls.Add(btnEdge);
 
         this._sessionsTab.Controls.Add(this._sessionGrid);
         this._sessionsTab.Controls.Add(searchPanel);
@@ -640,7 +679,7 @@ internal class MainForm : Form
 
     private void FocusActiveProcess(string sessionId, Point clickLocation)
     {
-        var focusTargets = new List<(string name, int pid, string? folderPath)>();
+        var focusTargets = new List<(string name, Action focus)>();
 
         if (this._activeSessionIds.Contains(sessionId))
         {
@@ -648,7 +687,8 @@ internal class MainForm : Form
             var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
             if (session != null && session.CopilotPid > 0)
             {
-                focusTargets.Add(("Terminal", session.CopilotPid, null));
+                var pid = session.CopilotPid;
+                focusTargets.Add(("Terminal", () => WindowFocusService.TryFocusProcessWindow(pid)));
             }
         }
 
@@ -661,11 +701,29 @@ internal class MainForm : Form
                     var p = Process.GetProcessById(proc.Pid);
                     if (!p.HasExited)
                     {
-                        focusTargets.Add((proc.Name, proc.Pid, proc.FolderPath));
+                        var capturedProc = proc;
+                        focusTargets.Add((proc.Name, () =>
+                        {
+                            if (capturedProc.FolderPath != null)
+                            {
+                                var folderName = Path.GetFileName(capturedProc.FolderPath.TrimEnd('\\'));
+                                WindowFocusService.TryFocusWindowByTitle(folderName);
+                            }
+                            else
+                            {
+                                WindowFocusService.TryFocusProcessWindow(capturedProc.Pid);
+                            }
+                        }
+                        ));
                     }
                 }
                 catch { }
             }
+        }
+
+        if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
+        {
+            focusTargets.Add(("Edge", () => ws.Focus()));
         }
 
         if (focusTargets.Count == 0)
@@ -675,38 +733,17 @@ internal class MainForm : Form
 
         if (focusTargets.Count == 1)
         {
-            var target = focusTargets[0];
-            if (target.folderPath != null)
-            {
-                var folderName = Path.GetFileName(target.folderPath.TrimEnd('\\'));
-                WindowFocusService.TryFocusWindowByTitle(folderName);
-            }
-            else
-            {
-                WindowFocusService.TryFocusProcessWindow(target.pid);
-            }
+            focusTargets[0].focus();
             return;
         }
 
         // Multiple targets — show context menu
         var menu = new ContextMenuStrip();
-        foreach (var (name, pid, folderPath) in focusTargets)
+        foreach (var (name, focus) in focusTargets)
         {
             var menuItem = new ToolStripMenuItem($"Focus: {name}");
-            var capturedPid = pid;
-            var capturedFolder = folderPath;
-            menuItem.Click += (s, e) =>
-            {
-                if (capturedFolder != null)
-                {
-                    var folderName = Path.GetFileName(capturedFolder.TrimEnd('\\'));
-                    WindowFocusService.TryFocusWindowByTitle(folderName);
-                }
-                else
-                {
-                    WindowFocusService.TryFocusProcessWindow(capturedPid);
-                }
-            };
+            var capturedFocus = focus;
+            menuItem.Click += (s, e) => capturedFocus();
             menu.Items.Add(menuItem);
         }
         menu.Show(this._sessionGrid, clickLocation);
@@ -804,7 +841,39 @@ internal class MainForm : Form
             }
         }
 
+        if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
+        {
+            parts.Add("Edge");
+        }
+        else if (!this._edgeInitialScanDone && !this._edgeWorkspaces.ContainsKey(sessionId))
+        {
+            // On first refresh, probe for Edge workspaces opened before app restart
+            var probe = new EdgeWorkspaceService(sessionId);
+            if (probe.IsOpen)
+            {
+                probe.WindowClosed += () =>
+                {
+                    if (this.InvokeRequired)
+                    {
+                        this.BeginInvoke(() => this.OnEdgeWorkspaceClosed(sessionId));
+                    }
+                    else
+                    {
+                        this.OnEdgeWorkspaceClosed(sessionId);
+                    }
+                };
+                this._edgeWorkspaces[sessionId] = probe;
+                parts.Add("Edge");
+            }
+        }
+
         return string.Join("\n", parts);
+    }
+
+    private void OnEdgeWorkspaceClosed(string sessionId)
+    {
+        this._edgeWorkspaces.Remove(sessionId);
+        this.RefreshActiveStatus();
     }
 
     private static HashSet<string> LoadActiveSessionIds()
@@ -856,6 +925,21 @@ internal class MainForm : Form
             }
         }
 
+        // Clean up closed Edge workspaces
+        var closedEdge = new List<string>();
+        foreach (var kvp in this._edgeWorkspaces)
+        {
+            if (!kvp.Value.IsOpen)
+            {
+                closedEdge.Add(kvp.Key);
+            }
+        }
+
+        foreach (var id in closedEdge)
+        {
+            this._edgeWorkspaces.Remove(id);
+        }
+
         foreach (DataGridViewRow row in this._sessionGrid.Rows)
         {
             if (row.Tag is not string sessionId)
@@ -877,6 +961,8 @@ internal class MainForm : Form
                 row.Cells[3].Style.Font = this._sessionGrid.Font;
             }
         }
+
+        this._edgeInitialScanDone = true;
     }
 
     private void RefreshNewSessionList()
