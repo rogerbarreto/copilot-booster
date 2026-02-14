@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace CopilotApp.Services;
@@ -211,10 +212,15 @@ internal static partial class WindowFocusService
                 }
             }
             // Match window title equal to a known session summary (Copilot CLI sets title to session name)
-            else if (sessionSummaries != null && sessionSummaries.TryGetValue(title, out var matchedId))
+            // Strip leading emoji/symbol prefixes (e.g. "🤖 " when Copilot is working)
+            else if (sessionSummaries != null)
             {
-                sessionId = matchedId;
-                label = "Copilot CLI";
+                var stripped = StripLeadingEmoji(title);
+                if (sessionSummaries.TryGetValue(stripped, out var matchedId))
+                {
+                    sessionId = matchedId;
+                    label = "Copilot CLI";
+                }
             }
 
             if (sessionId != null && sessionId.Length > 0 && label != null)
@@ -230,6 +236,35 @@ internal static partial class WindowFocusService
         }, IntPtr.Zero);
 
         return results;
+    }
+
+    /// <summary>
+    /// Strips leading emoji/symbol characters and whitespace from a window title.
+    /// Copilot CLI prefixes titles with emoji like "🤖 " while working.
+    /// </summary>
+    internal static string StripLeadingEmoji(string title)
+    {
+        int i = 0;
+        while (i < title.Length)
+        {
+            var category = char.GetUnicodeCategory(title, i);
+            if (category == UnicodeCategory.OtherSymbol
+                || category == UnicodeCategory.Surrogate
+                || category == UnicodeCategory.ModifierSymbol
+                || category == UnicodeCategory.Format
+                || category == UnicodeCategory.NonSpacingMark
+                || category == UnicodeCategory.SpaceSeparator
+                || title[i] == ' ')
+            {
+                i += char.IsSurrogatePair(title, i) ? 2 : 1;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return i > 0 ? title[i..] : title;
     }
 
     /// <summary>
