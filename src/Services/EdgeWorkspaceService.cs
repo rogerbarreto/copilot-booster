@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Automation;
+using Microsoft.Win32;
 
 namespace CopilotApp.Services;
 
@@ -15,7 +16,6 @@ namespace CopilotApp.Services;
 [ExcludeFromCodeCoverage]
 internal partial class EdgeWorkspaceService
 {
-    private const string EdgeExe = "msedge.exe";
     private const string TitlePrefix = "Copilot App Session [";
 
     [LibraryImport("user32.dll")]
@@ -90,12 +90,25 @@ internal partial class EdgeWorkspaceService
 
         try
         {
-            Process.Start(new ProcessStartInfo
+            var edgePath = FindEdgePath();
+            if (edgePath != null)
             {
-                FileName = EdgeExe,
-                Arguments = $"--new-window \"{url}\"",
-                UseShellExecute = true
-            });
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = edgePath,
+                    Arguments = $"--new-window \"{url}\"",
+                    UseShellExecute = false
+                });
+            }
+            else
+            {
+                // Fallback: use the microsoft-edge: protocol handler (no --new-window support)
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = $"microsoft-edge:{url}",
+                    UseShellExecute = true
+                });
+            }
         }
         catch
         {
@@ -221,5 +234,42 @@ internal partial class EdgeWorkspaceService
         var exeDir = AppContext.BaseDirectory;
         var path = Path.Combine(exeDir, "session.html");
         return File.Exists(path) ? path : null;
+    }
+
+    /// <summary>
+    /// Resolves the Edge executable path from the Windows registry App Paths,
+    /// falling back to common install locations.
+    /// </summary>
+    private static string? FindEdgePath()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe");
+            var path = key?.GetValue(null) as string;
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                return path;
+            }
+        }
+        catch { }
+
+        string[] knownPaths =
+        [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                @"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                @"Microsoft\Edge\Application\msedge.exe"),
+        ];
+
+        foreach (var candidate in knownPaths)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 }
