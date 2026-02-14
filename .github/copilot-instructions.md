@@ -21,4 +21,5 @@
 - When unsure about version bump type, ask before bumping.
 - Update version in both `CopilotApp.csproj` and `installer.iss`.
 - Update `CHANGELOG.md` before tagging.
+- Update `README.md` for every release: add new features/sections when applicable, or at minimum verify version references are current.
 - Push `v<version>` tag to trigger release CI.
