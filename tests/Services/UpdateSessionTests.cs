@@ -68,14 +68,19 @@
     }
 
     [Fact]
-    public void UpdateSession_ReturnsFalseForMissingFile()
+    public void UpdateSession_CreatesFileWhenMissing()
     {
         var sessionDir = Path.Combine(this._tempDir, "missing");
         Directory.CreateDirectory(sessionDir);
 
-        var result = SessionService.UpdateSession(sessionDir, "x", "y");
+        var result = SessionService.UpdateSession(sessionDir, "My Session", @"C:\work");
 
-        Assert.False(result);
+        Assert.True(result);
+        var wsFile = Path.Combine(sessionDir, "workspace.yaml");
+        Assert.True(File.Exists(wsFile));
+        var content = File.ReadAllText(wsFile);
+        Assert.Contains("summary: My Session", content);
+        Assert.Contains(@"cwd: C:\work", content);
     }
 
     [Fact]

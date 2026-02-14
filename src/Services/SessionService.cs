@@ -346,7 +346,21 @@ internal class SessionService
         var wsFile = Path.Combine(sessionDir, "workspace.yaml");
         if (!File.Exists(wsFile))
         {
-            return false;
+            // Create a new workspace.yaml for fresh sessions
+            try
+            {
+                var newLines = new List<string>
+                {
+                    $"cwd: {newCwd}",
+                    $"summary: {newSummary}",
+                };
+                File.WriteAllLines(wsFile, newLines);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         try
