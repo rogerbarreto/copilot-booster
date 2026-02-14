@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.3] - 2026-02-14
+
+### Changed
+
+- **Release notes** — GitHub Releases now show only the current version's changelog instead of the entire history.
+- **README download links** — added prominent download buttons at the top of the README for quick access to the installer and portable ZIP.
+
 ## [0.6.2] - 2026-02-14
 
 ### Fixed
@@ -135,6 +142,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
+[0.6.3]: https://github.com/rogerbarreto/copilot-app/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/rogerbarreto/copilot-app/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/rogerbarreto/copilot-app/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.5.0...v0.6.0

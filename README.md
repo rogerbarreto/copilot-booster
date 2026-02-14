@@ -4,6 +4,15 @@
 
 **Copilot App** turns [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) into a first-class desktop experience. Pin it to your taskbar and get instant access to new sessions, session history, active context tracking across terminals, Copilot CLI, IDEs, and Edge browser — all without touching config files.
 
+<p align="center">
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/rogerbarreto/copilot-app?label=Latest%20Release&style=for-the-badge" alt="Latest Release"></a>
+</p>
+
+<p align="center">
+  <a href="../../releases/latest/download/CopilotApp-Setup.exe">📦 <b>Download Installer</b></a> &nbsp;|&nbsp;
+  <a href="../../releases/latest/download/CopilotApp-win-x64.zip">📁 <b>Download Portable ZIP</b></a>
+</p>
+
 ---
 
 ## ✨ Features at a Glance

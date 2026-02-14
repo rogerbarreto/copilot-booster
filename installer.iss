@@ -1,7 +1,7 @@
 [Setup]
 AppId={{B7E3A9D1-4F2C-4E8B-9A1D-6C5F0E2D8B47}
 AppName=Copilot App
-AppVersion=0.6.2
+AppVersion=0.6.3
 AppPublisher=Community
 AppPublisherURL=https://github.com/community/copilot-app
 DefaultDirName={userappdata}\CopilotApp
