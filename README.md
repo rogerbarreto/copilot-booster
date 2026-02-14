@@ -102,6 +102,10 @@ IDE entries are added dynamically based on your configured IDEs in Settings.
 
 Open a managed Microsoft Edge window linked to any session. Each workspace gets a unique anchor tab that lets Copilot Booster track, focus, and detect whether the browser window is still open.
 
+<p align="center">
+  <img src="images/edge-session-tracking.png" alt="Edge browser workspace with session anchor tab" width="700">
+</p>
+
 - **Active tracking** — the Edge workspace appears as a clickable link in the Active column; click to focus the window
 - **Tab-level detection** — uses UI Automation to find the anchor tab across all Edge windows, even when another tab is active
 - **Auto-cleanup** — when you close the anchor tab or the Edge window, the workspace is automatically removed from tracking
@@ -114,14 +118,14 @@ Open a managed Microsoft Edge window linked to any session. Each workspace gets 
 The **New Session** tab shows your most-used working directories — sorted by frequency across all previous sessions. Non-existent paths are automatically cleaned up.
 
 <p align="center">
-  <img src="images/new-session-tab.png" alt="New Session tab with directory picker" width="700">
+  <img src="images/new-session-tab.png" alt="New Session tab with directory picker and session name prompt" width="700">
 </p>
 
 Each directory shows:
 - **# Sessions created** — how many sessions have used this path
 - **Git** — whether the directory is inside a Git repository (including worktrees)
 
-Right-click any directory to access all actions:
+Right-click any directory to access all actions, or double-click to quickly start a new session with a name prompt:
 
 | Action | Description |
 |--------|-------------|
@@ -129,8 +133,6 @@ Right-click any directory to access all actions:
 | **New Copilot Session Workspace** | Create a Git worktree workspace (Git repos only) |
 | **Add Directory** | Browse for a new directory to add to the list |
 | **Remove Directory** | Remove a manually-added directory (pinned only) |
-
-You can also double-click a directory to quickly start a new session.
 
 ---
 
