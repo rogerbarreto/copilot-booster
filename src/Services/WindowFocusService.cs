@@ -162,11 +162,11 @@ internal static partial class WindowFocusService
     /// and optionally matches window titles equal to known session summaries.
     /// </summary>
     /// <param name="sessionSummaries">Optional mapping of session summary to session ID for title matching.</param>
-    /// <returns>A dictionary mapping session IDs to lists of (label, windowTitle) tuples.</returns>
-    internal static Dictionary<string, List<(string Label, string Title)>> FindTrackedWindows(
+    /// <returns>A dictionary mapping session IDs to lists of (label, windowTitle, hwnd) tuples.</returns>
+    internal static Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>> FindTrackedWindows(
         Dictionary<string, string>? sessionSummaries = null)
     {
-        var results = new Dictionary<string, List<(string, string)>>(StringComparer.OrdinalIgnoreCase);
+        var results = new Dictionary<string, List<(string, string, IntPtr)>>(StringComparer.OrdinalIgnoreCase);
 
         EnumWindows((hwnd, _) =>
         {
@@ -221,9 +221,9 @@ internal static partial class WindowFocusService
             {
                 if (!results.ContainsKey(sessionId))
                 {
-                    results[sessionId] = new List<(string, string)>();
+                    results[sessionId] = new List<(string, string, IntPtr)>();
                 }
-                results[sessionId].Add((label, title));
+                results[sessionId].Add((label, title, hwnd));
             }
 
             return true;

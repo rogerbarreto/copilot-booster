@@ -155,7 +155,7 @@ internal class Program
                         File.Delete(s_signalFile);
                         if (int.TryParse(content, out int tab))
                         {
-                            s_mainForm.SwitchToTab(tab);
+                            s_mainForm.SwitchToTabAsync(tab);
                         }
                     }
                 }
