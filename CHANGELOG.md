@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-02-14
+
+### Added
+
+- **Copilot CLI detection** — scans open windows for Copilot CLI terminals by matching session summaries. Detects multiple instances of the same session with numbered labels (e.g., "Copilot CLI #1", "#2").
+- **HWND-based window focus** — clicking an Active link now focuses the exact window handle, fixing a bug where duplicate Copilot CLI titles always focused the first match.
+- **Direct IDE launch from context menu** — replaced the IDE picker dialog with direct "Open in {IDE} (CWD)" and "Open in {IDE} (Repo Root)" items in the Open dropdown.
+- **Session summary live sync** — detects when session names change externally (e.g., from Copilot CLI) and updates the list automatically.
+- **Auto-refresh on new sessions** — the Existing Sessions list refreshes when new sessions appear.
+
+### Changed
+
+- **SOLID refactoring** — extracted MainForm (1658 → 860 lines) into focused components: `SessionDataService`, `ActiveStatusTracker`, `SessionGridController`, `SettingsTabBuilder`, `NewSessionTabBuilder`.
+- **Constructor decomposition** — 700-line constructor split into 10 well-named builder methods.
+- **Async I/O** — all file/process scanning runs on background threads via `Task.Run()` to prevent UI freezes during startup and refresh.
+- **Auto-fit CWD column** — column width adjusts to content (capped at 300px). Window width increased to 1000px.
+- **Hand cursor** — shows only when hovering over clickable Active column link text.
+- 104 total tests.
+
 ## [0.5.0] - 2026-02-13
 
 ### Added
@@ -98,6 +117,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
+[0.6.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.3.0...v0.4.0
 [0.1.1]: https://github.com/rogerbarreto/copilot-app/compare/v0.1.0...v0.1.1

@@ -63,17 +63,17 @@ internal class MainForm : Form
     /// <param name="initialTab">The zero-based index of the tab to display on startup.</param>
     public MainForm(int initialTab = 0)
     {
-        InitializeFormProperties();
+        this.InitializeFormProperties();
 
         this._mainTabs = new TabControl { Dock = DockStyle.Fill };
         this._sessionsTab = new TabPage("Existing Sessions");
         this._settingsTab = new TabPage("Settings");
         this._newSessionTab = new TabPage("New Session");
 
-        BuildSessionsTab();
-        BuildSettingsTab();
-        BuildNewSessionTab();
-        SetupUpdateBanner();
+        this.BuildSessionsTab();
+        this.BuildSettingsTab();
+        this.BuildNewSessionTab();
+        this.SetupUpdateBanner();
 
         this._mainTabs.TabPages.Add(this._newSessionTab);
         this._mainTabs.TabPages.Add(this._sessionsTab);
@@ -81,7 +81,7 @@ internal class MainForm : Form
         this.Controls.Add(this._mainTabs);
         this.Controls.Add(this._updateLabel);
 
-        SetupTimersAndEvents(initialTab);
+        this.SetupTimersAndEvents(initialTab);
     }
 
     private void InitializeFormProperties()
@@ -105,11 +105,11 @@ internal class MainForm : Form
 
     private void BuildSessionsTab()
     {
-        InitializeSessionGrid();
-        var searchPanel = BuildSearchPanel();
+        this.InitializeSessionGrid();
+        var searchPanel = this.BuildSearchPanel();
         this._gridController = new SessionGridController(this._sessionGrid, this._activeTracker);
-        BuildGridContextMenu();
-        var buttonPanel = BuildSessionButtonPanel();
+        this.BuildGridContextMenu();
+        var buttonPanel = this.BuildSessionButtonPanel();
 
         this._sessionsTab.Controls.Add(this._sessionGrid);
         this._sessionsTab.Controls.Add(searchPanel);
@@ -278,7 +278,7 @@ internal class MainForm : Form
         };
 
         var btnOpen = new Button { Text = "Open ▾", Width = 80, Height = 28 };
-        var openMenu = BuildOpenMenu();
+        var openMenu = this.BuildOpenMenu();
         btnOpen.Click += (s, e) =>
         {
             openMenu.Show(btnOpen, new Point(0, btnOpen.Height));
