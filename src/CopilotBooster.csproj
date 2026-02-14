@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CopilotBooster.Tests" />
+    <InternalsVisibleTo Include="CopilotBooster.E2E" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="copilot.ico" />

@@ -304,11 +304,13 @@ internal class MainForm : Form
                         return;
                     }
 
-                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName).ConfigureAwait(true);
+                    var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
+                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, sourceDir).ConfigureAwait(true);
                     if (newSessionId != null)
                     {
                         var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                         Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                        await this.RefreshGridAsync().ConfigureAwait(true);
                     }
                     else
                     {
@@ -347,11 +349,13 @@ internal class MainForm : Form
                         var wsResult = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
                         if (wsResult != null)
                         {
-                            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName).ConfigureAwait(true);
+                            var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
+                            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, sourceDir).ConfigureAwait(true);
                             if (newSessionId != null)
                             {
                                 var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                                 Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                                await this.RefreshGridAsync().ConfigureAwait(true);
                             }
                             else
                             {
@@ -693,11 +697,12 @@ internal class MainForm : Form
                     return;
                 }
 
-                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName).ConfigureAwait(true);
+                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                 if (newSessionId != null)
                 {
                     var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                     Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                    await this.RefreshGridAsync().ConfigureAwait(true);
                 }
                 else
                 {
@@ -719,11 +724,12 @@ internal class MainForm : Form
                     var wsResult = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
                     if (wsResult != null)
                     {
-                        var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName).ConfigureAwait(true);
+                        var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                         if (newSessionId != null)
                         {
                             var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                             Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                            await this.RefreshGridAsync().ConfigureAwait(true);
                         }
                         else
                         {
@@ -816,11 +822,12 @@ internal class MainForm : Form
                     return;
                 }
 
-                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName).ConfigureAwait(true);
+                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                 if (newSessionId != null)
                 {
                     var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
                     Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                    await this.RefreshGridAsync().ConfigureAwait(true);
                 }
                 else
                 {
@@ -1009,6 +1016,13 @@ internal class MainForm : Form
         this._loadingOverlay.Visible = false;
 
         await this.RefreshNewSessionListAsync().ConfigureAwait(true);
+    }
+
+    private async Task RefreshGridAsync()
+    {
+        this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
+        var snapshot = this._activeTracker.Refresh(this._cachedSessions);
+        this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
     }
 
     private async Task RefreshNewSessionListAsync()
