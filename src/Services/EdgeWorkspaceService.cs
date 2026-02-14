@@ -16,7 +16,7 @@ namespace CopilotApp.Services;
 [ExcludeFromCodeCoverage]
 internal partial class EdgeWorkspaceService
 {
-    private const string TitlePrefix = "Copilot App Session [";
+    private const string TitlePrefix = "Copilot Booster Session [";
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -206,7 +206,7 @@ internal partial class EdgeWorkspaceService
                 {
                     var name = win.Current.Name;
                     if (!name.Contains("Edge", StringComparison.OrdinalIgnoreCase)
-                        && !name.Contains("Copilot App Session", StringComparison.OrdinalIgnoreCase))
+                        && !name.Contains("Copilot Booster Session", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

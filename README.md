@@ -1,8 +1,12 @@
-# Copilot App
+# Copilot Booster
+
+<p align="center">
+  <img src="images/logo.png" alt="Copilot Booster Logo" width="200">
+</p>
 
 > A Windows taskbar companion for GitHub Copilot CLI — manage sessions, terminals, IDEs, and browser workspaces from a single pinned icon.
 
-**Copilot App** turns [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) into a first-class desktop experience. Pin it to your taskbar and get instant access to new sessions, session history, active context tracking across terminals, Copilot CLI, IDEs, and Edge browser — all without touching config files.
+**Copilot Booster** turns [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) into a first-class desktop experience. Pin it to your taskbar and get instant access to new sessions, session history, active context tracking across terminals, Copilot CLI, IDEs, and Edge browser — all without touching config files.
 
 <p align="center">
   <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/rogerbarreto/copilot-app?label=Latest%20Release&style=for-the-badge" alt="Latest Release"></a>
@@ -84,12 +88,12 @@ IDE entries are added dynamically based on your configured IDEs in Settings.
 
 ### 🌐 Edge Browser Workspaces
 
-Open a managed Microsoft Edge window linked to any session. Each workspace gets a unique anchor tab that lets Copilot App track, focus, and detect whether the browser window is still open.
+Open a managed Microsoft Edge window linked to any session. Each workspace gets a unique anchor tab that lets Copilot Booster track, focus, and detect whether the browser window is still open.
 
 - **Active tracking** — the Edge workspace appears as a clickable link in the Active column; click to focus the window
 - **Tab-level detection** — uses UI Automation to find the anchor tab across all Edge windows, even when another tab is active
 - **Auto-cleanup** — when you close the anchor tab or the Edge window, the workspace is automatically removed from tracking
-- **Re-discovery** — if you restart Copilot App while an Edge workspace is still open, it will be re-detected on the next refresh
+- **Re-discovery** — if you restart Copilot Booster while an Edge workspace is still open, it will be re-detected on the next refresh
 
 ---
 
@@ -105,17 +109,26 @@ Each directory shows:
 - **# Sessions created** — how many sessions have used this path
 - **Git** — whether the directory is inside a Git repository (including worktrees)
 
-Click **Start** to launch a session, **Browse...** to pick any folder, or **Create Workspace** to create an isolated Git worktree.
+Right-click any directory to access all actions:
+
+| Action | Description |
+|--------|-------------|
+| **New Copilot Session** | Create a named session in the selected directory |
+| **New Copilot Session Workspace** | Create a Git worktree workspace (Git repos only) |
+| **Add Directory** | Browse for a new directory to add to the list |
+| **Remove Directory** | Remove a manually-added directory (pinned only) |
+
+You can also double-click a directory to quickly start a new session.
 
 ---
 
 ### 🌿 Git Workspace Creation
 
-For Git-enabled directories, Copilot App can create isolated workspaces backed by [git worktrees](https://git-scm.com/docs/git-worktree). Each workspace gets its own branch and directory — perfect for working on multiple features in parallel without stashing or switching branches.
+For Git-enabled directories, Copilot Booster can create isolated workspaces backed by [git worktrees](https://git-scm.com/docs/git-worktree). Each workspace gets its own branch and directory — perfect for working on multiple features in parallel without stashing or switching branches.
 
 Create a workspace from two places:
-- **New Session tab** → select a Git directory → click **Create Workspace**
-- **Existing Sessions tab** → **Open ▾** → **Open as New Copilot Session Workspace**
+- **New Session tab** → right-click a Git directory → **New Copilot Session Workspace**
+- **Existing Sessions tab** → right-click a session → **Open as New Copilot Session Workspace**
 
 Workspaces are stored in `%APPDATA%\CopilotApp\Workspaces\` and named after the repository and branch (e.g., `myrepo-feature-xyz`).
 
@@ -138,7 +151,7 @@ All configuration lives in a tabbed UI — no JSON editing required.
 
 ### 🔄 In-App Updates
 
-Copilot App checks for new versions on startup via the GitHub Releases API. When an update is available, a banner appears at the bottom of the window — click to download and install the latest version automatically.
+Copilot Booster checks for new versions on startup via the GitHub Releases API. When an update is available, a banner appears at the bottom of the window — click to download and install the latest version automatically.
 
 ---
 
@@ -197,7 +210,7 @@ iscc installer.iss
 ## 💻 Command Line
 
 ```powershell
-CopilotApp.exe                        # New session (shows CWD picker)
+CopilotApp.exe                        # Open New Session tab
 CopilotApp.exe "C:\my\project"        # New session in a specific directory
 CopilotApp.exe --resume <sessionId>   # Resume a session in its original CWD
 CopilotApp.exe --open-existing        # Open the session browser
@@ -246,6 +259,7 @@ CopilotApp.exe (WinForms, persistent taskbar window)
 | `~/.copilot/terminal-cache.json` | Cached terminal sessions for restart persistence |
 | `~/.copilot/jumplist-lastupdate.txt` | Update coordination timestamp |
 | `~/.copilot/launcher.log` | Debug log |
+| `~/.copilot/pinned-directories.json` | Manually-added directories for New Session tab |
 | `~/.copilot/session-state/` | Session metadata (managed by Copilot CLI) |
 
 ---

@@ -16,10 +16,10 @@ internal static class WorkspaceCreatorForm
     /// Displays a modal dialog for creating a git worktree workspace from the specified repository.
     /// </summary>
     /// <param name="repoPath">The git repository root path.</param>
-    /// <returns>The worktree path on success, or <c>null</c> if the user cancels.</returns>
-    internal static string? ShowWorkspaceCreator(string repoPath)
+    /// <returns>A tuple of worktree path and optional session name on success, or <c>null</c> if the user cancels.</returns>
+    internal static (string WorktreePath, string? SessionName)? ShowWorkspaceCreator(string repoPath)
     {
-        string? resultPath = null;
+        (string WorktreePath, string? SessionName)? result = null;
         var repoFolderName = Path.GetFileName(repoPath);
 
         var form = new Form
@@ -30,7 +30,7 @@ internal static class WorkspaceCreatorForm
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 280
+            Height = 340
         };
 
         try
@@ -56,6 +56,36 @@ internal static class WorkspaceCreatorForm
         };
         form.Controls.Add(lblSubtitle);
         y += 28;
+
+        // Session Name
+        var lblSessionName = new Label
+        {
+            Text = "Session Name",
+            AutoSize = true,
+            Location = new Point(14, y)
+        };
+        form.Controls.Add(lblSessionName);
+        y += 20;
+
+        var txtSessionName = new TextBox
+        {
+            PlaceholderText = "e.g., Feature: User Authentication",
+            Location = new Point(14, y),
+            Width = 450
+        };
+        form.Controls.Add(txtSessionName);
+        y += 26;
+
+        var lblSessionNameHelper = new Label
+        {
+            Text = "A descriptive name for your session (optional)",
+            ForeColor = Color.Gray,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
+            AutoSize = true,
+            Location = new Point(14, y)
+        };
+        form.Controls.Add(lblSessionNameHelper);
+        y += 22;
 
         // Workspace Name
         var lblName = new Label
@@ -171,7 +201,7 @@ internal static class WorkspaceCreatorForm
             Text = "Create",
             DialogResult = DialogResult.None,
             Width = 80,
-            Location = new Point(300, 205)
+            Location = new Point(300, 265)
         };
 
         var btnCancel = new Button
@@ -179,7 +209,7 @@ internal static class WorkspaceCreatorForm
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
             Width = 80,
-            Location = new Point(390, 205)
+            Location = new Point(390, 265)
         };
 
         btnCreate.Click += (s, e) =>
@@ -200,7 +230,8 @@ internal static class WorkspaceCreatorForm
             var (success, error) = GitService.CreateWorktree(repoPath, worktreePath, workspaceName, selectedBaseBranch);
             if (success)
             {
-                resultPath = worktreePath;
+                var sessionName = txtSessionName.Text.Trim();
+                result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
                 form.DialogResult = DialogResult.OK;
                 form.Close();
             }
@@ -215,6 +246,6 @@ internal static class WorkspaceCreatorForm
         form.AcceptButton = btnCreate;
         form.CancelButton = btnCancel;
 
-        return form.ShowDialog() == DialogResult.OK ? resultPath : null;
+        return form.ShowDialog() == DialogResult.OK ? result : null;
     }
 }

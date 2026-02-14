@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installs the Copilot App Launcher.
+    Installs the Copilot Booster Launcher.
 
 .DESCRIPTION
     Builds the CopilotApp.exe and optionally sets the default work directory.

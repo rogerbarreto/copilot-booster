@@ -130,6 +130,7 @@ internal class JumpListService
 
             var newSessionTask = new JumpListLink(launcherExePath, "New Copilot Session")
             {
+                Arguments = "--new-session",
                 IconReference = new IconReference(copilotExePath, 0)
             };
 

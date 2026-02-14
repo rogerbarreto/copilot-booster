@@ -50,7 +50,7 @@ internal class SessionDataService
     /// <param name="sessionStateDir">Path to the directory containing session state.</param>
     /// <param name="pidRegistryFile">Optional path to the PID registry JSON file.</param>
     /// <returns>A <see cref="SessionData"/> with all three collections populated.</returns>
-    internal SessionData LoadAll(string sessionStateDir, string? pidRegistryFile = null)
+    internal SessionData LoadAll(string sessionStateDir, string? pidRegistryFile = null, IEnumerable<string>? pinnedDirectories = null)
     {
         var sessions = SessionService.LoadNamedSessions(sessionStateDir, pidRegistryFile);
         var cwdCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -70,6 +70,19 @@ internal class SessionDataService
             if (!cwdGitStatus.ContainsKey(cwd))
             {
                 cwdGitStatus[cwd] = this.IsGitRepo(cwd);
+            }
+        }
+
+        // Add pinned directories that don't already appear in session CWDs
+        if (pinnedDirectories != null)
+        {
+            foreach (var dir in pinnedDirectories)
+            {
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) && !cwdCounts.ContainsKey(dir))
+                {
+                    cwdCounts[dir] = 0;
+                    cwdGitStatus[dir] = this.IsGitRepo(dir);
+                }
             }
         }
 

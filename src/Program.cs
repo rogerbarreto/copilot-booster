@@ -60,6 +60,7 @@ internal class Program
         string? resumeSessionId = null;
         bool openExisting = false;
         bool showSettings = false;
+        bool newSession = false;
         string? openIdeSessionId = null;
         string? workDir = null;
 
@@ -78,6 +79,10 @@ internal class Program
             {
                 showSettings = true;
             }
+            else if (args[i] == "--new-session")
+            {
+                newSession = true;
+            }
             else if (args[i] == "--open-ide" && i + 1 < args.Length)
             {
                 openIdeSessionId = args[i + 1];
@@ -89,7 +94,7 @@ internal class Program
             }
         }
 
-        return new ParsedArgs(resumeSessionId, openExisting, showSettings, openIdeSessionId, workDir);
+        return new ParsedArgs(resumeSessionId, openExisting, showSettings, newSession, openIdeSessionId, workDir);
     }
 
     [STAThread]
@@ -109,13 +114,14 @@ internal class Program
         string? resumeSessionId = parsed.ResumeSessionId;
         bool openExisting = parsed.OpenExisting;
         bool showSettings = parsed.ShowSettings;
+        bool newSession = parsed.NewSession;
         string? openIdeSessionId = parsed.OpenIdeSessionId;
         string? workDir = parsed.WorkDir;
 
-        LogService.Log($"Args: resume={resumeSessionId ?? "null"}, openExisting={openExisting}, settings={showSettings}", s_logFile);
+        LogService.Log($"Args: resume={resumeSessionId ?? "null"}, openExisting={openExisting}, settings={showSettings}, newSession={newSession}", s_logFile);
 
         // Settings / Existing Sessions / Open IDE share a single MainForm window
-        if (showSettings || openExisting || openIdeSessionId != null)
+        if (showSettings || openExisting || newSession || openIdeSessionId != null || (workDir == null && resumeSessionId == null))
         {
             if (openIdeSessionId != null)
             {
@@ -123,7 +129,7 @@ internal class Program
                 return;
             }
 
-            int desiredTab = showSettings ? 2 : 1;
+            int desiredTab = showSettings ? 2 : newSession ? 0 : 1;
 
             // Use a Mutex to detect if another MainForm is already open
             using var mainFormMutex = new Mutex(true, MainFormMutexName, out bool isNewInstance);
@@ -180,32 +186,6 @@ internal class Program
             : Environment.GetEnvironmentVariable("COPILOT_WORK_DIR")
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        // For new sessions (no explicit workDir, not resuming), show MainForm
-        if (workDir == null && resumeSessionId == null)
-        {
-            // If a MainForm is already open, signal it to show the New Session tab
-            using var newSessionMutex = new Mutex(true, MainFormMutexName, out bool isNew);
-            if (!isNew)
-            {
-                try
-                {
-                    File.WriteAllText(s_signalFile, "0");
-                }
-                catch { }
-                LogService.Log("Signaled existing MainForm to show New Session tab", s_logFile);
-                return;
-            }
-
-            var mainForm = new MainForm(initialTab: 1);
-            if (mainForm.ShowDialog() == DialogResult.OK && mainForm.NewSessionCwd != null)
-            {
-                workDir = mainForm.NewSessionCwd;
-            }
-            else
-            {
-                return;
-            }
-        }
 
         // If resuming a session that is already running, focus its terminal window
         if (resumeSessionId != null)

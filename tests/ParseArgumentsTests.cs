@@ -8,6 +8,7 @@
         Assert.Null(result.ResumeSessionId);
         Assert.False(result.OpenExisting);
         Assert.False(result.ShowSettings);
+        Assert.False(result.NewSession);
         Assert.Null(result.OpenIdeSessionId);
         Assert.Null(result.WorkDir);
     }
@@ -36,6 +37,15 @@
         var result = Program.ParseArguments(["--settings"]);
 
         Assert.True(result.ShowSettings);
+    }
+
+    [Fact]
+    public void ParseArguments_NewSession_SetsFlag()
+    {
+        var result = Program.ParseArguments(["--new-session"]);
+
+        Assert.True(result.NewSession);
+        Assert.False(result.OpenExisting);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ internal class MainForm : Form
 
     // New Session tab controls
     private ListView _cwdListView = null!;
-    private Button _btnCreateWorkspace = null!;
+    private Label _newSessionLoadingOverlay = null!;
     private readonly Dictionary<string, bool> _cwdGitStatus = new(StringComparer.OrdinalIgnoreCase);
     private readonly NewSessionTabBuilder _newSessionTabBuilder = new();
     private readonly SessionDataService _sessionDataService = new();
@@ -52,11 +52,6 @@ internal class MainForm : Form
     /// Gets the identifier of the currently selected session.
     /// </summary>
     public string? SelectedSessionId { get; private set; }
-
-    /// <summary>
-    /// Gets the working directory chosen from the New Session tab.
-    /// </summary>
-    public string? NewSessionCwd { get; private set; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainForm"/> class.
@@ -87,7 +82,7 @@ internal class MainForm : Form
 
     private void InitializeFormProperties()
     {
-        this.Text = "Copilot App";
+        this.Text = "Copilot Booster";
         this.Size = new Size(1000, 550);
         this.MinimumSize = new Size(550, 400);
         this.StartPosition = FormStartPosition.CenterScreen;
@@ -282,12 +277,12 @@ internal class MainForm : Form
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
         var menuOpenNewSession = new ToolStripMenuItem("Open as New Copilot Session");
-        menuOpenNewSession.Click += (s, e) =>
+        menuOpenNewSession.Click += async (s, e) =>
         {
-            var sessionId = this._gridController.GetSelectedSessionId();
-            if (sessionId != null)
+            var selectedSessionId = this._gridController.GetSelectedSessionId();
+            if (selectedSessionId != null)
             {
-                var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+                var workspaceFile = Path.Combine(Program.SessionStateDir, selectedSessionId, "workspace.yaml");
                 string? selectedCwd = null;
                 if (File.Exists(workspaceFile))
                 {
@@ -303,20 +298,34 @@ internal class MainForm : Form
 
                 if (!string.IsNullOrEmpty(selectedCwd))
                 {
-                    var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                    Process.Start(new ProcessStartInfo(exePath, selectedCwd) { UseShellExecute = false });
+                    var sessionName = NewSessionNameForm.ShowNamePrompt();
+                    if (sessionName == null)
+                    {
+                        return;
+                    }
+
+                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName).ConfigureAwait(true);
+                    if (newSessionId != null)
+                    {
+                        var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                        Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                    }
+                    else
+                    {
+                        MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 }
             }
         };
         gridContextMenu.Items.Add(menuOpenNewSession);
 
         var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace");
-        menuOpenNewSessionWorkspace.Click += (s, e) =>
+        menuOpenNewSessionWorkspace.Click += async (s, e) =>
         {
-            var sessionId = this._gridController.GetSelectedSessionId();
-            if (sessionId != null)
+            var selectedSessionId = this._gridController.GetSelectedSessionId();
+            if (selectedSessionId != null)
             {
-                var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+                var workspaceFile = Path.Combine(Program.SessionStateDir, selectedSessionId, "workspace.yaml");
                 string? selectedCwd = null;
                 if (File.Exists(workspaceFile))
                 {
@@ -335,11 +344,19 @@ internal class MainForm : Form
                     var gitRoot = SessionService.FindGitRoot(selectedCwd);
                     if (gitRoot != null)
                     {
-                        var worktreePath = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
-                        if (worktreePath != null)
+                        var wsResult = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
+                        if (wsResult != null)
                         {
-                            var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                            Process.Start(new ProcessStartInfo(exePath, worktreePath) { UseShellExecute = false });
+                            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName).ConfigureAwait(true);
+                            if (newSessionId != null)
+                            {
+                                var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                                Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                            }
+                            else
+                            {
+                                MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
                         }
                     }
                 }
@@ -482,7 +499,8 @@ internal class MainForm : Form
 
         gridContextMenu.Opening += (s, e) =>
         {
-            bool isGit = false;
+            bool hasGitRoot = false;
+            bool isSubfolder = false;
             var sessionId = this._gridController.GetSelectedSessionId();
             if (sessionId != null)
             {
@@ -490,13 +508,14 @@ internal class MainForm : Form
                 if (session != null && !string.IsNullOrEmpty(session.Cwd))
                 {
                     var repoRoot = SessionService.FindGitRoot(session.Cwd);
-                    isGit = repoRoot != null && !string.Equals(repoRoot, session.Cwd, StringComparison.OrdinalIgnoreCase);
+                    hasGitRoot = repoRoot != null;
+                    isSubfolder = hasGitRoot && !string.Equals(repoRoot, session.Cwd, StringComparison.OrdinalIgnoreCase);
                 }
             }
-            menuOpenNewSessionWorkspace.Visible = isGit;
+            menuOpenNewSessionWorkspace.Visible = hasGitRoot;
             foreach (var item in ideRepoMenuItems)
             {
-                item.Visible = isGit;
+                item.Visible = isSubfolder;
             }
         };
 
@@ -618,7 +637,7 @@ internal class MainForm : Form
             }
 
             Program._settings.Save();
-            MessageBox.Show("Settings saved.", "Copilot App", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Settings saved.", "Copilot Booster", MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
 
         settingsBottomPanel.Controls.Add(btnCancel);
@@ -647,66 +666,37 @@ internal class MainForm : Form
         this._cwdListView.ListViewItemSorter = this._newSessionTabBuilder.Sorter;
         this._cwdListView.ColumnClick += (s, e) => this._newSessionTabBuilder.OnColumnClick(this._cwdListView, e);
 
-        this._cwdListView.DoubleClick += (s, e) =>
-        {
-            if (this._cwdListView.SelectedItems.Count > 0)
-            {
-                this.NewSessionCwd = this._cwdListView.SelectedItems[0].Tag as string;
-                this.DialogResult = DialogResult.OK;
-                this.Close();
-            }
-        };
+        // Right-click context menu
+        var cwdContextMenu = new ContextMenuStrip();
 
-        this._cwdListView.SelectedIndexChanged += (s, e) =>
+        var menuNewSession = new ToolStripMenuItem("New Copilot Session");
+        menuNewSession.Click += async (s, e) =>
         {
             if (this._cwdListView.SelectedItems.Count > 0
-                && this._cwdListView.SelectedItems[0].Tag is string path
-                && this._cwdGitStatus.TryGetValue(path, out bool isGit))
+                && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
             {
-                this._btnCreateWorkspace.Enabled = isGit;
-            }
-            else
-            {
-                this._btnCreateWorkspace.Enabled = false;
-            }
-        };
+                var sessionName = NewSessionNameForm.ShowNamePrompt();
+                if (sessionName == null)
+                {
+                    return;
+                }
 
-        var newSessionButtonPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 40,
-            FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(5)
-        };
-
-        var btnNsCancel = new Button { Text = "Cancel", Width = 80 };
-        btnNsCancel.Click += (s, e) => this.Close();
-
-        var btnNsStart = new Button { Text = "Start", Width = 80 };
-        btnNsStart.Click += (s, e) =>
-        {
-            if (this._cwdListView.SelectedItems.Count > 0)
-            {
-                this.NewSessionCwd = this._cwdListView.SelectedItems[0].Tag as string;
-                this.DialogResult = DialogResult.OK;
-                this.Close();
+                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName).ConfigureAwait(true);
+                if (newSessionId != null)
+                {
+                    var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                    Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                }
+                else
+                {
+                    MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         };
+        cwdContextMenu.Items.Add(menuNewSession);
 
-        var btnNsBrowse = new Button { Text = "Browse...", Width = 90 };
-        btnNsBrowse.Click += (s, e) =>
-        {
-            using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
-            if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
-            {
-                this.NewSessionCwd = fbd.SelectedPath;
-                this.DialogResult = DialogResult.OK;
-                this.Close();
-            }
-        };
-
-        this._btnCreateWorkspace = new Button { Text = "Create Workspace", Width = 130, Enabled = false };
-        this._btnCreateWorkspace.Click += (s, e) =>
+        var menuNewSessionWorkspace = new ToolStripMenuItem("New Copilot Session Workspace");
+        menuNewSessionWorkspace.Click += async (s, e) =>
         {
             if (this._cwdListView.SelectedItems.Count > 0
                 && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
@@ -714,24 +704,132 @@ internal class MainForm : Form
                 var gitRoot = SessionService.FindGitRoot(selectedCwd);
                 if (gitRoot != null)
                 {
-                    var worktreePath = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
-                    if (worktreePath != null)
+                    var wsResult = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
+                    if (wsResult != null)
                     {
-                        this.NewSessionCwd = worktreePath;
-                        this.DialogResult = DialogResult.OK;
-                        this.Close();
+                        var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName).ConfigureAwait(true);
+                        if (newSessionId != null)
+                        {
+                            var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                            Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                        }
+                        else
+                        {
+                            MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
                     }
                 }
             }
         };
+        cwdContextMenu.Items.Add(menuNewSessionWorkspace);
 
-        newSessionButtonPanel.Controls.Add(btnNsCancel);
-        newSessionButtonPanel.Controls.Add(btnNsStart);
-        newSessionButtonPanel.Controls.Add(btnNsBrowse);
-        newSessionButtonPanel.Controls.Add(this._btnCreateWorkspace);
+        cwdContextMenu.Items.Add(new ToolStripSeparator());
 
+        var menuAddDirectory = new ToolStripMenuItem("Add Directory");
+        menuAddDirectory.Click += async (s, e) =>
+        {
+            using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
+            if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
+            {
+                PinnedDirectoryService.Add(fbd.SelectedPath);
+                await this.RefreshNewSessionListAsync().ConfigureAwait(true);
+            }
+        };
+        cwdContextMenu.Items.Add(menuAddDirectory);
+
+        var menuRemoveDirectory = new ToolStripMenuItem("Remove Directory");
+        menuRemoveDirectory.Click += async (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0
+                && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
+            {
+                PinnedDirectoryService.Remove(selectedCwd);
+                await this.RefreshNewSessionListAsync().ConfigureAwait(true);
+            }
+        };
+        cwdContextMenu.Items.Add(menuRemoveDirectory);
+
+        cwdContextMenu.Opening += (s, e) =>
+        {
+            bool hasSelection = this._cwdListView.SelectedItems.Count > 0;
+            bool isGit = false;
+            bool isPinned = false;
+            int sessionCount = 0;
+
+            if (hasSelection && this._cwdListView.SelectedItems[0].Tag is string path)
+            {
+                if (this._cwdGitStatus.TryGetValue(path, out bool g))
+                {
+                    isGit = g;
+                }
+
+                if (int.TryParse(this._cwdListView.SelectedItems[0].SubItems[1].Text, out int count))
+                {
+                    sessionCount = count;
+                }
+
+                var pinnedDirs = PinnedDirectoryService.GetAll();
+                isPinned = pinnedDirs.Exists(d => string.Equals(d, path, StringComparison.OrdinalIgnoreCase));
+            }
+
+            menuNewSession.Visible = hasSelection;
+            menuNewSessionWorkspace.Visible = hasSelection && isGit;
+            menuRemoveDirectory.Visible = hasSelection && isPinned && sessionCount == 0;
+        };
+
+        this._cwdListView.ContextMenuStrip = cwdContextMenu;
+
+        // Right-click row selection
+        this._cwdListView.MouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                var item = this._cwdListView.GetItemAt(e.X, e.Y);
+                if (item != null)
+                {
+                    item.Selected = true;
+                }
+            }
+        };
+
+        // Double-click triggers New Copilot Session
+        this._cwdListView.DoubleClick += async (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0
+                && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
+            {
+                var sessionName = NewSessionNameForm.ShowNamePrompt();
+                if (sessionName == null)
+                {
+                    return;
+                }
+
+                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName).ConfigureAwait(true);
+                if (newSessionId != null)
+                {
+                    var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
+                    Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                }
+                else
+                {
+                    MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        };
+
+        this._newSessionLoadingOverlay = new Label
+        {
+            Text = "Loading directories...",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular),
+            ForeColor = SystemColors.GrayText,
+            BackColor = SystemColors.Window
+        };
+
+        this._newSessionTab.Controls.Add(this._newSessionLoadingOverlay);
+        this._newSessionLoadingOverlay.BringToFront();
         this._newSessionTab.Controls.Add(this._cwdListView);
-        this._newSessionTab.Controls.Add(newSessionButtonPanel);
     }
 
     private void SetupUpdateBanner()
@@ -903,8 +1001,10 @@ internal class MainForm : Form
 
     private async Task RefreshNewSessionListAsync()
     {
-        var data = await Task.Run(() => this._sessionDataService.LoadAll(Program.SessionStateDir, Program.PidRegistryFile)).ConfigureAwait(true);
+        var pinnedDirs = PinnedDirectoryService.GetAll();
+        var data = await Task.Run(() => this._sessionDataService.LoadAll(Program.SessionStateDir, Program.PidRegistryFile, pinnedDirs)).ConfigureAwait(true);
         this._newSessionTabBuilder.Populate(this._cwdListView, this._cwdGitStatus, data);
+        this._newSessionLoadingOverlay.Visible = false;
     }
 
     /// <summary>
