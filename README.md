@@ -38,7 +38,7 @@ Modern AI-assisted development isn't one task at a time — it's **multiple Copi
 Right-click the pinned icon to access everything:
 
 <p align="center">
-  <img src="images/menu-tasks.png" alt="Jump list with tasks" width="300">
+  <img src="images/jumplist.png" alt="Jump list with tasks" width="300">
 </p>
 
 - **New Copilot Session** — start a new session with a smart directory picker
