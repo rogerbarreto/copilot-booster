@@ -34,4 +34,41 @@
 
         Assert.Null(ex);
     }
+
+    [Fact]
+    public void LaunchTerminalSimple_DoesNotThrowForInvalidWorkDir()
+    {
+        var bogusDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        var ex = Record.Exception(() =>
+        {
+            var proc = TerminalLauncherService.LaunchTerminalSimple(bogusDir);
+            if (proc is not null)
+            {
+                try { proc.Kill(); } catch { }
+                proc.Dispose();
+            }
+        });
+
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void LaunchTerminalSimple_LaunchesForValidWorkDir()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var proc = TerminalLauncherService.LaunchTerminalSimple(tempDir);
+            Assert.NotNull(proc);
+            try { proc.Kill(); } catch { }
+            proc.Dispose();
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir); } catch { }
+        }
+    }
 }

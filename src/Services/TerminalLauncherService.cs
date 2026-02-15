@@ -68,6 +68,49 @@ internal static class TerminalLauncherService
     }
 
     /// <summary>
+    /// Launches a terminal in the given working directory without session tracking.
+    /// Tries Windows Terminal first, then PowerShell 7, then cmd.exe.
+    /// </summary>
+    /// <param name="workDir">The working directory to open the terminal in.</param>
+    /// <returns>The launched Process, or null if launch failed.</returns>
+    internal static Process? LaunchTerminalSimple(string workDir)
+    {
+        var terminal = DetectTerminal();
+
+        ProcessStartInfo psi = terminal switch
+        {
+            "wt" => new ProcessStartInfo
+            {
+                FileName = "wt.exe",
+                Arguments = $"-d \"{workDir}\"",
+                UseShellExecute = true
+            },
+            "pwsh" => new ProcessStartInfo
+            {
+                FileName = "pwsh.exe",
+                Arguments = "-NoExit",
+                WorkingDirectory = workDir,
+                UseShellExecute = true
+            },
+            _ => new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                WorkingDirectory = workDir,
+                UseShellExecute = true
+            }
+        };
+
+        try
+        {
+            return Process.Start(psi);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Finds the best available terminal executable.
     /// </summary>
     /// <returns>The terminal type found: "wt", "pwsh", or "cmd".</returns>

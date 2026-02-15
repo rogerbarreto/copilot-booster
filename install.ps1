@@ -45,7 +45,20 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 Write-Host "Published to: $PublishDir" -ForegroundColor Green
 
-# 3. Initialize settings if work dir provided
+# 3. Build and run installer
+Write-Host "Building installer..." -ForegroundColor Cyan
+$issFile = Join-Path $RepoRoot "installer.iss"
+& iscc $issFile /Q
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Installer build failed"
+    return
+}
+$setupExe = Join-Path $RepoRoot "installer-output\CopilotBooster-Setup.exe"
+Write-Host "Running installer..." -ForegroundColor Cyan
+Start-Process -FilePath $setupExe -Wait
+Write-Host "Installer completed." -ForegroundColor Green
+
+# 4. Initialize settings if work dir provided
 if ($WorkDir) {
     $settingsFile = Join-Path $env:USERPROFILE ".copilot\launcher-settings.json"
     if (Test-Path $settingsFile) {
@@ -65,7 +78,7 @@ if ($WorkDir) {
     Write-Host "Default work dir set to: $WorkDir" -ForegroundColor Green
 }
 
-# 4. Summary
+# 5. Summary
 Write-Host ""
 Write-Host "=== Installation Complete ===" -ForegroundColor Green
 Write-Host "Executable:  $PublishDir\CopilotBooster.exe"

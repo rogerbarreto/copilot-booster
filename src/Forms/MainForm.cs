@@ -838,6 +838,30 @@ internal class MainForm : Form
 
         cwdContextMenu.Items.Add(new ToolStripSeparator());
 
+        var menuOpenExplorer = new ToolStripMenuItem("Open in Explorer");
+        menuOpenExplorer.Click += (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0
+                && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", selectedCwd) { UseShellExecute = true });
+            }
+        };
+        cwdContextMenu.Items.Add(menuOpenExplorer);
+
+        var menuOpenTerminalCwd = new ToolStripMenuItem("Open Terminal");
+        menuOpenTerminalCwd.Click += (s, e) =>
+        {
+            if (this._cwdListView.SelectedItems.Count > 0
+                && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
+            {
+                TerminalLauncherService.LaunchTerminalSimple(selectedCwd);
+            }
+        };
+        cwdContextMenu.Items.Add(menuOpenTerminalCwd);
+
+        cwdContextMenu.Items.Add(new ToolStripSeparator());
+
         var menuAddDirectory = new ToolStripMenuItem("Add Directory");
         menuAddDirectory.Click += async (s, e) =>
         {
@@ -887,6 +911,8 @@ internal class MainForm : Form
 
             menuNewSession.Visible = hasSelection;
             menuNewSessionWorkspace.Visible = hasSelection && isGit;
+            menuOpenExplorer.Visible = hasSelection;
+            menuOpenTerminalCwd.Visible = hasSelection;
             menuRemoveDirectory.Visible = hasSelection && isPinned && sessionCount == 0;
         };
 
