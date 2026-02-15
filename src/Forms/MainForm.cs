@@ -65,6 +65,7 @@ internal class MainForm : Form
     {
         this.InitializeFormProperties();
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
+        this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
 
         this._mainTabs = new TabControl { Dock = DockStyle.Fill };
         if (!Application.IsDarkModeEnabled)
@@ -223,14 +224,14 @@ internal class MainForm : Form
     {
         this._sessionsVisuals.OnRefreshRequested += async () =>
         {
-            this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
-            var snapshot = this._activeTracker.Refresh(this._cachedSessions);
+            this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+            var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
             this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         };
 
         this._sessionsVisuals.OnSearchChanged += () =>
         {
-            var snapshot = this._activeTracker.Refresh(this._cachedSessions);
+            var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
             this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         };
 
@@ -260,8 +261,8 @@ internal class MainForm : Form
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
                 if (SessionService.UpdateSession(sessionDir, edited.Value.Summary, edited.Value.Cwd))
                 {
-                    this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
-                    var snapshot = this._activeTracker.Refresh(this._cachedSessions);
+                    this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+                    var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
                     this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
                 }
             }
@@ -405,6 +406,26 @@ internal class MainForm : Form
                 return (hasGitRoot, isSubfolder);
             }
             return (false, false);
+        };
+
+        this._sessionsVisuals.OnDeleteSession += async (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            var sessionName = session?.Summary ?? sid;
+            var result = MessageBox.Show(
+                $"Delete session \"{sessionName}\"?\n\n" +
+                "This will only remove the session from Copilot — your code and files are not affected.\n" +
+                "This action can be reversed.",
+                "Delete Session",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (result == DialogResult.Yes && this._interactionManager.DeleteSession(sid))
+            {
+                this._cachedSessions = (List<NamedSession>)this._refreshCoordinator.LoadSessions();
+                var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
+                this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+            }
         };
     }
 
@@ -843,8 +864,8 @@ internal class MainForm : Form
 
         if (tabIndex == 1)
         {
-            this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
-            var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
+            this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+            var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
             this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         }
 
@@ -875,9 +896,9 @@ internal class MainForm : Form
         this._refreshInProgress = true;
         try
         {
-            var sessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
+            var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
             this._cachedSessions = sessions;
-            var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
+            var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
             this._sessionsVisuals.GridVisuals.ApplySnapshot(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
 
             // Bell notification: detect transitions and fire toast
@@ -891,9 +912,9 @@ internal class MainForm : Form
 
     private async Task LoadInitialDataAsync()
     {
-        var sessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
+        var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
         this._cachedSessions = sessions;
-        var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
+        var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
         // Seed startup Copilot CLI sessions — suppress bell until they transition to working
         var copilotCliSessionIds = snapshot.StatusIconBySessionId
@@ -903,7 +924,7 @@ internal class MainForm : Form
         this._bellService?.SeedStartupSessions(copilotCliSessionIds);
 
         // Re-run refresh with started sessions seeded (bells now suppressed)
-        snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
+        snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
         this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         this._sessionsVisuals.LoadingOverlay.Visible = false;
@@ -913,8 +934,8 @@ internal class MainForm : Form
 
     private async Task RefreshGridAsync()
     {
-        this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
-        var snapshot = this._activeTracker.Refresh(this._cachedSessions);
+        this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+        var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
         this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
     }
 

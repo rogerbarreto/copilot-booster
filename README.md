@@ -116,6 +116,7 @@ Right-click any session row to access all actions in a single context menu:
 | **Open Terminal** | Launch a standalone terminal in the session's directory |
 | **Open in {IDE} (CWD)** | Open the working directory in your configured IDE |
 | **Open in {IDE} (Repo Root)** | Open the Git repository root in your IDE |
+| **Delete Session** | Soft-delete a session (renames `workspace.yaml` → `workspace-deleted.yaml` for safe recovery) |
 | **Open in Edge** | Launch a managed Edge browser workspace |
 
 IDE entries are added dynamically based on your configured IDEs in Settings.
@@ -180,6 +181,7 @@ All configuration lives in a tabbed UI — no JSON editing required.
   <img src="images/settings-tab.png" alt="Settings with Allowed Tools, Directories, and IDEs" width="700">
 </p>
 
+- **Theme** — choose between System (default), Light, or Dark theme; persisted across restarts
 - **Allowed Tools** — whitelist shell commands and MCP tools that Copilot can use without prompting
 - **Allowed Directories** — grant Copilot access to specific directories
 - **IDEs** — register your IDEs for the Open menu (e.g., Visual Studio, VS Code, Rider)

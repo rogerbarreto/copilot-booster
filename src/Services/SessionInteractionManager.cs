@@ -129,17 +129,22 @@ internal class SessionInteractionManager
     /// </summary>
     /// <param name="sessionId">The session ID to delete.</param>
     /// <returns><c>true</c> if the session was deleted; otherwise, <c>false</c>.</returns>
+    /// <summary>
+    /// Soft-deletes a session by renaming workspace.yaml to workspace-deleted.yaml.
+    /// The session directory and all artifacts are preserved for potential recovery.
+    /// </summary>
     internal bool DeleteSession(string sessionId)
     {
         var sessionDir = Path.Combine(this._sessionStateDir, sessionId);
-        if (!Directory.Exists(sessionDir))
+        var workspaceFile = Path.Combine(sessionDir, "workspace.yaml");
+        if (!File.Exists(workspaceFile))
         {
             return false;
         }
 
         try
         {
-            Directory.Delete(sessionDir, recursive: true);
+            File.Move(workspaceFile, Path.Combine(sessionDir, "workspace-deleted.yaml"));
             return true;
         }
         catch

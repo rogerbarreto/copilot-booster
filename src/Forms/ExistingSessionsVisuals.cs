@@ -36,6 +36,7 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenAsNewSessionWorkspace;
     internal event Action<string>? OnOpenTerminal;
     internal event Action<string>? OnOpenEdge;
+    internal event Action<string>? OnDeleteSession;
 
     /// <summary>
     /// Fired for IDE context-menu clicks.
@@ -361,6 +362,19 @@ internal class ExistingSessionsVisuals
             }
         };
         gridContextMenu.Items.Add(menuOpenEdge);
+
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
+        var menuDeleteSession = new ToolStripMenuItem("Delete Session");
+        menuDeleteSession.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnDeleteSession?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuDeleteSession);
 
         gridContextMenu.Opening += (s, e) =>
         {

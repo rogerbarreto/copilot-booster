@@ -22,7 +22,7 @@
 
 ### Before Release
 
-1. Decide version bump — patch for bug fixes, minor for new features (semver, no major bumps until GA). When unsure, ask before bumping.
+1. Decide version bump — patch for bug fixes, minor for new features (semver, no major bumps until GA). When unsure, ask before bumping. **Always check GitHub Releases (not local files) as the source of truth for the latest published version.**
 2. Update version in both `src/CopilotBooster.csproj` and `installer.iss`.
 3. Update `CHANGELOG.md` with the new version's changes.
 4. Update `README.md` — add new features/sections when applicable, or at minimum verify version references are current.

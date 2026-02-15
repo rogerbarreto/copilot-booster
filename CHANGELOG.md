@@ -8,11 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Dark/light/system theme support** — new theme dropdown in Settings with System (default), Light, and Dark options. Persisted across restarts. Changing theme restarts the app with confirmation.
+- **Session soft delete** — right-click a session → "Delete Session" with confirmation dialog. Soft-deletes by renaming `workspace.yaml` to `workspace-deleted.yaml`, preserving all artifacts for recovery.
+- **Custom-styled tabs** — owner-drawn tabs in light mode with better contrast between selected and unselected states.
+- **Themed DataGridView headers** — custom-painted column headers with sort glyphs, column borders, and proper dark/light colors.
+- **Themed selection highlights** — consistent blue selection colors across all grids, lists, and listviews in both themes.
+- **Panel-as-border TextBox styling** — all text inputs wrapped with themed border panels for consistent appearance.
 - **Session status icons** — animated blue spinner for working sessions and static red bell for idle/waiting sessions, rendered as image icons in a new Status column.
 - **Toast notifications** — Windows balloon notifications via the system tray icon when a Copilot CLI session finishes work and is ready for interaction. Click the notification to focus the terminal. Configurable on/off in Settings.
 - **Bell row highlighting** — sessions waiting for input get a soft red background color for visual distinction.
 - **Focus-click bell dismissal** — clicking to focus a session suppresses its bell until it transitions to working again.
 - **Startup suppression** — existing idle sessions don't trigger false bell notifications when the app launches.
+
+### Changed
+
+- **Architecture refactoring** — decoupled business logic from UI with new service classes (`SessionInteractionManager`, `BellNotificationService`, `WorkspaceCreationService`, `SessionRefreshCoordinator`). All visual classes renamed with `Visuals` suffix. MainForm reduced from ~1412 to ~940 lines.
+- **Non-blocking installer** — `install.ps1` no longer waits for the application to close before returning.
 
 ## [0.8.1] - 2026-02-15
 
