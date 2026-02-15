@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
@@ -24,16 +23,13 @@ internal class MainForm : Form
     private readonly TabPage _settingsTab;
 
     // Sessions tab controls
-    private TextBox _searchBox = null!;
-    private DataGridView _sessionGrid = null!;
-    private SessionGridController _gridController = null!;
-    private Label _loadingOverlay = null!;
+    private readonly ExistingSessionsVisuals _sessionsVisuals = null!;
     private List<NamedSession> _cachedSessions = new();
     private readonly ActiveStatusTracker _activeTracker = new();
+    private readonly SessionInteractionManager _interactionManager;
     private Timer? _activeStatusTimer;
     private Timer? _spinnerTimer;
-    private readonly HashSet<string> _notifiedBellSessionIds = new(StringComparer.OrdinalIgnoreCase);
-    private string? _lastBellNotificationSessionId;
+    private BellNotificationService? _bellService;
 
     // New Session tab controls
     private ListView _cwdListView = null!;
@@ -70,6 +66,7 @@ internal class MainForm : Form
     public MainForm(int initialTab = 0)
     {
         this.InitializeFormProperties();
+        this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
 
         this._mainTabs = new TabControl { Dock = DockStyle.Fill };
         if (!Application.IsDarkModeEnabled)
@@ -90,7 +87,8 @@ internal class MainForm : Form
         this._settingsTab = new TabPage("Settings");
         this._newSessionTab = new TabPage("New Session");
 
-        this.BuildSessionsTab();
+        this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsTab, this._activeTracker);
+        this.WireSessionsEvents();
         this.BuildSettingsTab();
         this.BuildNewSessionTab();
         this.SetupUpdateBanner();
@@ -161,10 +159,11 @@ internal class MainForm : Form
             ContextMenuStrip = trayMenu,
             Visible = true,
         };
+        this._bellService = new BellNotificationService(this._trayIcon, () => Program._settings.NotifyOnBell);
         this._trayIcon.DoubleClick += (s, e) => this.RestoreFromTray();
         this._trayIcon.BalloonTipClicked += (s, e) =>
         {
-            if (this._lastBellNotificationSessionId is string sid)
+            if (this._bellService.LastNotifiedSessionId is string sid)
             {
                 this._activeTracker.FocusActiveProcess(sid, 0);
             }
@@ -221,241 +220,35 @@ internal class MainForm : Form
         base.OnFormClosing(e);
     }
 
-    private void BuildSessionsTab()
+    private void WireSessionsEvents()
     {
-        this.InitializeSessionGrid();
-        var searchPanel = this.BuildSearchPanel();
-        this._gridController = new SessionGridController(this._sessionGrid, this._activeTracker);
-        this.BuildGridContextMenu();
-
-        this._loadingOverlay = new Label
-        {
-            Text = "Loading sessions...",
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular)
-        };
-
-        this._sessionsTab.Controls.Add(this._loadingOverlay);
-        this._loadingOverlay.BringToFront();
-        this._sessionsTab.Controls.Add(this._sessionGrid);
-        this._sessionsTab.Controls.Add(searchPanel);
-    }
-
-    private void InitializeSessionGrid()
-    {
-        this._sessionGrid = new DataGridView
-        {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            AllowUserToResizeRows = false,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
-            RowHeadersVisible = false,
-            BorderStyle = BorderStyle.None,
-            AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
-            CellBorderStyle = DataGridViewCellBorderStyle.Single,
-            GridColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlLight,
-            DefaultCellStyle = new DataGridViewCellStyle
-            {
-                WrapMode = DataGridViewTriState.True,
-                Padding = new Padding(4, 4, 4, 4),
-                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245),
-                SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : Color.Black
-            },
-            EnableHeadersVisualStyles = false,
-            ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
-            {
-                Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
-                BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210),
-                ForeColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText,
-                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210),
-                SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText
-            },
-            ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
-        };
-        this._sessionGrid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "Status",
-            HeaderText = "",
-            Width = 30,
-            MinimumWidth = 30,
-            Resizable = DataGridViewTriState.False,
-            DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
-        });
-        this._sessionGrid.Columns.Add("Session", "Session");
-        this._sessionGrid.Columns.Add("CWD", "CWD");
-        this._sessionGrid.Columns.Add("Date", "Date");
-        this._sessionGrid.Columns.Add("Active", "Active");
-        this._sessionGrid.Columns["Session"]!.Width = 300;
-        this._sessionGrid.Columns["Session"]!.MinimumWidth = 100;
-        this._sessionGrid.Columns["CWD"]!.Width = 110;
-        this._sessionGrid.Columns["CWD"]!.MinimumWidth = 60;
-        this._sessionGrid.Columns["Date"]!.Width = 130;
-        this._sessionGrid.Columns["Date"]!.MinimumWidth = 80;
-        this._sessionGrid.Columns["Active"]!.Width = 100;
-        this._sessionGrid.Columns["Active"]!.MinimumWidth = 60;
-
-        bool adjustingSessionWidth = false;
-        void AdjustSessionColumnWidth()
-        {
-            if (adjustingSessionWidth)
-            {
-                return;
-            }
-            adjustingSessionWidth = true;
-            try
-            {
-                var otherWidth = this._sessionGrid.Columns["Status"]!.Width
-                    + this._sessionGrid.Columns["CWD"]!.Width
-                    + this._sessionGrid.Columns["Date"]!.Width
-                    + this._sessionGrid.Columns["Active"]!.Width
-                    + (this._sessionGrid.RowHeadersVisible ? this._sessionGrid.RowHeadersWidth : 0)
-                    + SystemInformation.VerticalScrollBarWidth + 2;
-                var fill = this._sessionGrid.ClientSize.Width - otherWidth;
-                if (fill >= this._sessionGrid.Columns["Session"]!.MinimumWidth)
-                {
-                    this._sessionGrid.Columns["Session"]!.Width = fill;
-                }
-            }
-            finally { adjustingSessionWidth = false; }
-        }
-        this._sessionGrid.Resize += (s, e) => AdjustSessionColumnWidth();
-        this._sessionGrid.ColumnWidthChanged += (s, e) =>
-        {
-            if (e.Column.Name != "Session")
-            {
-                AdjustSessionColumnWidth();
-            }
-        };
-
-        this._sessionGrid.CellDoubleClick += (s, e) =>
-        {
-            if (e.RowIndex >= 0)
-            {
-                this.SelectedSessionId = this._sessionGrid.Rows[e.RowIndex].Tag as string;
-                this.LaunchSession();
-            }
-        };
-
-        this._sessionGrid.CellPainting += (s, e) =>
-        {
-            if (e.RowIndex != -1)
-            {
-                return;
-            }
-
-            e.PaintBackground(e.ClipBounds, false);
-            var borderColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark;
-            var textColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText;
-            using var borderPen = new Pen(borderColor);
-            e.Graphics!.DrawLine(borderPen, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
-            e.Graphics.DrawLine(borderPen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
-            var textBounds = new Rectangle(e.CellBounds.X + 4, e.CellBounds.Y + 2, e.CellBounds.Width - 20, e.CellBounds.Height - 4);
-            TextRenderer.DrawText(e.Graphics, e.Value?.ToString() ?? "", e.CellStyle!.Font, textBounds, textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
-            var col = this._sessionGrid.Columns[e.ColumnIndex];
-            if (col.HeaderCell.SortGlyphDirection != SortOrder.None)
-            {
-                var glyphX = e.CellBounds.Right - 16;
-                var glyphY = e.CellBounds.Top + (e.CellBounds.Height - 8) / 2;
-                using var brush = new SolidBrush(textColor);
-                if (col.HeaderCell.SortGlyphDirection == SortOrder.Ascending)
-                {
-                    e.Graphics.FillPolygon(brush, [new Point(glyphX, glyphY + 8), new Point(glyphX + 4, glyphY), new Point(glyphX + 8, glyphY + 8)]);
-                }
-                else
-                {
-                    e.Graphics.FillPolygon(brush, [new Point(glyphX, glyphY), new Point(glyphX + 4, glyphY + 8), new Point(glyphX + 8, glyphY)]);
-                }
-            }
-            e.Handled = true;
-        };
-    }
-
-    private Panel BuildSearchPanel()
-    {
-        var searchPanel = new Panel { Dock = DockStyle.Top, Height = 34 };
-        var searchLabel = new Label
-        {
-            Text = "Search:",
-            AutoSize = true,
-            Location = new Point(5, 9)
-        };
-        var btnRefreshTop = new Button
-        {
-            Text = "Refresh",
-            Width = 65,
-            Height = 27,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Location = new Point(searchPanel.Width - 70, 3)
-        };
-        // Ensure button repositions on resize
-        searchPanel.Resize += (s, e) => btnRefreshTop.Left = searchPanel.ClientSize.Width - 70;
-        btnRefreshTop.Click += async (s, e) =>
+        this._sessionsVisuals.OnRefreshRequested += async () =>
         {
             this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
             var snapshot = this._activeTracker.Refresh(this._cachedSessions);
-            this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
+            this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         };
-        this._searchBox = new TextBox
-        {
-            Location = new Point(55, 4),
-            Width = 100,
-            Height = 20,
-            Multiline = true,
-            WordWrap = false,
-            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
-            PlaceholderText = "Filter sessions..."
-        };
-        this._searchBox.KeyDown += (s, e) =>
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                e.SuppressKeyPress = true;
-            }
-        };
-        var searchBorder = SettingsTabBuilder.WrapWithBorder(this._searchBox);
-        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 130;
-        this._searchBox.TextChanged += (s, e) =>
+
+        this._sessionsVisuals.OnSearchChanged += () =>
         {
             var snapshot = this._activeTracker.Refresh(this._cachedSessions);
-            this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
+            this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         };
-        searchPanel.Controls.Add(searchBorder);
-        searchPanel.Controls.Add(btnRefreshTop);
-        searchPanel.Controls.Add(searchLabel);
-        return searchPanel;
-    }
 
-    private void BuildGridContextMenu()
-    {
-        var gridContextMenu = new ContextMenuStrip();
-
-        var menuOpenSession = new ToolStripMenuItem("Open Session");
-        menuOpenSession.Click += (s, e) =>
+        this._sessionsVisuals.OnSessionDoubleClicked += (sid) =>
         {
-            var sid = this._gridController.GetSelectedSessionId();
-            if (sid != null)
-            {
-                this.SelectedSessionId = sid;
-                this.LaunchSession();
-            }
+            this.SelectedSessionId = sid;
+            this.LaunchSession();
         };
-        gridContextMenu.Items.Add(menuOpenSession);
 
-        var editMenuItem = new ToolStripMenuItem("Edit Session");
-        editMenuItem.Click += async (s, e) =>
+        this._sessionsVisuals.OnOpenSession += (sid) =>
         {
-            var sid = this._gridController.GetSelectedSessionId();
-            if (sid == null)
-            {
-                return;
-            }
+            this.SelectedSessionId = sid;
+            this.LaunchSession();
+        };
 
+        this._sessionsVisuals.OnEditSession += async (sid) =>
+        {
             var session = this._cachedSessions.Find(x => x.Id == sid);
             if (session == null)
             {
@@ -470,113 +263,83 @@ internal class MainForm : Form
                 {
                     this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
                     var snapshot = this._activeTracker.Refresh(this._cachedSessions);
-                    this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
+                    this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
                 }
             }
         };
-        gridContextMenu.Items.Add(editMenuItem);
 
-        gridContextMenu.Items.Add(new ToolStripSeparator());
-
-        var menuOpenNewSession = new ToolStripMenuItem("Open as New Copilot Session");
-        menuOpenNewSession.Click += async (s, e) =>
+        this._sessionsVisuals.OnOpenAsNewSession += async (selectedSessionId) =>
         {
-            var selectedSessionId = this._gridController.GetSelectedSessionId();
-            if (selectedSessionId != null)
+            var selectedCwd = this._interactionManager.GetSessionCwd(selectedSessionId);
+
+            if (!string.IsNullOrEmpty(selectedCwd))
             {
-                var workspaceFile = Path.Combine(Program.SessionStateDir, selectedSessionId, "workspace.yaml");
-                string? selectedCwd = null;
-                if (File.Exists(workspaceFile))
+                var sessionName = NewSessionNameForm.ShowNamePrompt();
+                if (sessionName == null)
                 {
-                    foreach (var line in File.ReadLines(workspaceFile))
-                    {
-                        if (line.StartsWith("cwd:"))
-                        {
-                            selectedCwd = line.Substring("cwd:".Length).Trim();
-                            break;
-                        }
-                    }
+                    return;
                 }
 
-                if (!string.IsNullOrEmpty(selectedCwd))
+                var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
+                var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, sourceDir).ConfigureAwait(true);
+                if (newSessionId != null)
                 {
-                    var sessionName = NewSessionNameForm.ShowNamePrompt();
-                    if (sessionName == null)
-                    {
-                        return;
-                    }
-
-                    var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
-                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, sourceDir).ConfigureAwait(true);
-                    if (newSessionId != null)
-                    {
-                        var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                        Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
-                        await this.RefreshGridAsync().ConfigureAwait(true);
-                    }
-                    else
-                    {
-                        MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    this._interactionManager.LaunchSession(newSessionId);
+                    await this.RefreshGridAsync().ConfigureAwait(true);
+                }
+                else
+                {
+                    MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         };
-        gridContextMenu.Items.Add(menuOpenNewSession);
 
-        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace");
-        menuOpenNewSessionWorkspace.Click += async (s, e) =>
+        this._sessionsVisuals.OnOpenAsNewSessionWorkspace += async (selectedSessionId) =>
         {
-            var selectedSessionId = this._gridController.GetSelectedSessionId();
-            if (selectedSessionId != null)
+            var selectedCwd = this._interactionManager.GetSessionCwd(selectedSessionId);
+
+            if (!string.IsNullOrEmpty(selectedCwd))
             {
-                var workspaceFile = Path.Combine(Program.SessionStateDir, selectedSessionId, "workspace.yaml");
-                string? selectedCwd = null;
-                if (File.Exists(workspaceFile))
+                var gitRoot = SessionService.FindGitRoot(selectedCwd);
+                if (gitRoot != null)
                 {
-                    foreach (var line in File.ReadLines(workspaceFile))
+                    var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot);
+                    if (wsResult != null)
                     {
-                        if (line.StartsWith("cwd:"))
+                        var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
+                        var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, sourceDir).ConfigureAwait(true);
+                        if (newSessionId != null)
                         {
-                            selectedCwd = line.Substring("cwd:".Length).Trim();
-                            break;
+                            this._interactionManager.LaunchSession(newSessionId);
+                            await this.RefreshGridAsync().ConfigureAwait(true);
                         }
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(selectedCwd))
-                {
-                    var gitRoot = SessionService.FindGitRoot(selectedCwd);
-                    if (gitRoot != null)
-                    {
-                        var wsResult = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
-                        if (wsResult != null)
+                        else
                         {
-                            var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
-                            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, sourceDir).ConfigureAwait(true);
-                            if (newSessionId != null)
-                            {
-                                var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                                Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
-                                await this.RefreshGridAsync().ConfigureAwait(true);
-                            }
-                            else
-                            {
-                                MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            }
+                            MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         }
                     }
                 }
             }
         };
-        gridContextMenu.Items.Add(menuOpenNewSessionWorkspace);
 
-        gridContextMenu.Items.Add(new ToolStripSeparator());
-
-        var menuOpenTerminal = new ToolStripMenuItem("Open Terminal");
-        menuOpenTerminal.Click += (s, e) =>
+        this._sessionsVisuals.OnOpenTerminal += (sid) =>
         {
-            var sid = this._gridController.GetSelectedSessionId();
-            if (sid == null)
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session == null || string.IsNullOrEmpty(session.Cwd))
+            {
+                return;
+            }
+
+            var proc = this._interactionManager.OpenTerminal(session.Cwd, sid);
+            if (proc != null)
+            {
+                this.RefreshActiveStatusAsync();
+            }
+        };
+
+        this._sessionsVisuals.OnOpenInIde += (sid, capturedIde, useRepoRoot) =>
+        {
+            if (this._activeTracker.TryFocusExistingIde(sid, capturedIde.Description))
             {
                 return;
             }
@@ -587,111 +350,29 @@ internal class MainForm : Form
                 return;
             }
 
-            var proc = TerminalLauncherService.LaunchTerminal(session.Cwd, sid);
-            if (proc != null)
-            {
-                TerminalCacheService.CacheTerminal(Program.TerminalCacheFile, sid, proc.Id);
-                this.RefreshActiveStatusAsync();
-            }
-        };
-        gridContextMenu.Items.Add(menuOpenTerminal);
-
-        var ideRepoMenuItems = new List<ToolStripMenuItem>();
-        if (Program._settings.Ides.Count > 0)
-        {
-            gridContextMenu.Items.Add(new ToolStripSeparator());
-
-            foreach (var ide in Program._settings.Ides)
-            {
-                var capturedIde = ide;
-
-                var menuIdeCwd = new ToolStripMenuItem($"Open in {ide.Description} (CWD)");
-                menuIdeCwd.Click += (s, e) =>
-                {
-                    var sid = this._gridController.GetSelectedSessionId();
-                    if (sid == null)
-                    {
-                        return;
-                    }
-
-                    // Focus existing IDE instance if already open for this session
-                    if (this._activeTracker.TryFocusExistingIde(sid, capturedIde.Description))
-                    {
-                        return;
-                    }
-
-                    var session = this._cachedSessions.Find(x => x.Id == sid);
-                    if (session == null || string.IsNullOrEmpty(session.Cwd))
-                    {
-                        return;
-                    }
-
-                    var proc = IdePickerForm.LaunchIde(capturedIde.Path, session.Cwd);
-                    if (proc != null)
-                    {
-                        this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, session.Cwd));
-                        this.RefreshActiveStatusAsync();
-                    }
-                };
-                gridContextMenu.Items.Add(menuIdeCwd);
-
-                var menuIdeRepo = new ToolStripMenuItem($"Open in {ide.Description} (Repo Root)");
-                menuIdeRepo.Click += (s, e) =>
-                {
-                    var sid = this._gridController.GetSelectedSessionId();
-                    if (sid == null)
-                    {
-                        return;
-                    }
-
-                    // Focus existing IDE instance if already open for this session
-                    if (this._activeTracker.TryFocusExistingIde(sid, capturedIde.Description))
-                    {
-                        return;
-                    }
-
-                    var session = this._cachedSessions.Find(x => x.Id == sid);
-                    if (session == null || string.IsNullOrEmpty(session.Cwd))
-                    {
-                        return;
-                    }
-
-                    var repoRoot = SessionService.FindGitRoot(session.Cwd);
-                    if (repoRoot == null)
-                    {
-                        return;
-                    }
-
-                    var proc = IdePickerForm.LaunchIde(capturedIde.Path, repoRoot);
-                    if (proc != null)
-                    {
-                        this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, repoRoot));
-                        this.RefreshActiveStatusAsync();
-                    }
-                };
-                gridContextMenu.Items.Add(menuIdeRepo);
-                ideRepoMenuItems.Add(menuIdeRepo);
-            }
-        }
-
-        gridContextMenu.Items.Add(new ToolStripSeparator());
-
-        var menuOpenEdge = new ToolStripMenuItem("Open in Edge");
-        menuOpenEdge.Click += async (s, e) =>
-        {
-            var sid = this._gridController.GetSelectedSessionId();
-            if (sid == null)
+            var targetPath = useRepoRoot ? SessionService.FindGitRoot(session.Cwd) : session.Cwd;
+            if (targetPath == null)
             {
                 return;
             }
 
+            var proc = SessionInteractionManager.OpenInIde(capturedIde.Path, targetPath);
+            if (proc != null)
+            {
+                this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, targetPath));
+                this.RefreshActiveStatusAsync();
+            }
+        };
+
+        this._sessionsVisuals.OnOpenEdge += async (sid) =>
+        {
             if (this._activeTracker.TryGetEdge(sid, out var existing) && existing.IsOpen)
             {
                 existing.Focus();
                 return;
             }
 
-            var workspace = new EdgeWorkspaceService(sid);
+            var workspace = SessionInteractionManager.CreateEdgeWorkspace(sid);
             workspace.WindowClosed += () =>
             {
                 if (this.InvokeRequired)
@@ -713,40 +394,18 @@ internal class MainForm : Form
             await workspace.OpenAsync().ConfigureAwait(true);
             this.RefreshActiveStatusAsync();
         };
-        gridContextMenu.Items.Add(menuOpenEdge);
 
-        gridContextMenu.Opening += (s, e) =>
+        this._sessionsVisuals.GetGitRootInfo = (sessionId) =>
         {
-            bool hasGitRoot = false;
-            bool isSubfolder = false;
-            var sessionId = this._gridController.GetSelectedSessionId();
-            if (sessionId != null)
+            var session = this._cachedSessions.Find(x => x.Id == sessionId);
+            if (session != null && !string.IsNullOrEmpty(session.Cwd))
             {
-                var session = this._cachedSessions.Find(x => x.Id == sessionId);
-                if (session != null && !string.IsNullOrEmpty(session.Cwd))
-                {
-                    var repoRoot = SessionService.FindGitRoot(session.Cwd);
-                    hasGitRoot = repoRoot != null;
-                    isSubfolder = hasGitRoot && !string.Equals(repoRoot, session.Cwd, StringComparison.OrdinalIgnoreCase);
-                }
+                var repoRoot = SessionService.FindGitRoot(session.Cwd);
+                var hasGitRoot = repoRoot != null;
+                var isSubfolder = hasGitRoot && !string.Equals(repoRoot, session.Cwd, StringComparison.OrdinalIgnoreCase);
+                return (hasGitRoot, isSubfolder);
             }
-            menuOpenNewSessionWorkspace.Visible = hasGitRoot;
-            foreach (var item in ideRepoMenuItems)
-            {
-                item.Visible = isSubfolder;
-            }
-        };
-
-        this._sessionGrid.ContextMenuStrip = gridContextMenu;
-
-        this._sessionGrid.CellMouseDown += (s, e) =>
-        {
-            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
-            {
-                this._sessionGrid.ClearSelection();
-                this._sessionGrid.Rows[e.RowIndex].Selected = true;
-                this._sessionGrid.CurrentCell = this._sessionGrid.Rows[e.RowIndex].Cells[0];
-            }
+            return (false, false);
         };
     }
 
@@ -986,8 +645,7 @@ internal class MainForm : Form
                 var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                 if (newSessionId != null)
                 {
-                    var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                    Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                    this._interactionManager.LaunchSession(newSessionId);
                     await this.RefreshGridAsync().ConfigureAwait(true);
                 }
                 else
@@ -1007,14 +665,13 @@ internal class MainForm : Form
                 var gitRoot = SessionService.FindGitRoot(selectedCwd);
                 if (gitRoot != null)
                 {
-                    var wsResult = WorkspaceCreatorForm.ShowWorkspaceCreator(gitRoot);
+                    var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot);
                     if (wsResult != null)
                     {
                         var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                         if (newSessionId != null)
                         {
-                            var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                            Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                            this._interactionManager.LaunchSession(newSessionId);
                             await this.RefreshGridAsync().ConfigureAwait(true);
                         }
                         else
@@ -1035,7 +692,7 @@ internal class MainForm : Form
             if (this._cwdListView.SelectedItems.Count > 0
                 && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
             {
-                Process.Start(new ProcessStartInfo("explorer.exe", selectedCwd) { UseShellExecute = true });
+                SessionInteractionManager.OpenExplorer(selectedCwd);
             }
         };
         cwdContextMenu.Items.Add(menuOpenExplorer);
@@ -1046,7 +703,7 @@ internal class MainForm : Form
             if (this._cwdListView.SelectedItems.Count > 0
                 && this._cwdListView.SelectedItems[0].Tag is string selectedCwd)
             {
-                TerminalLauncherService.LaunchTerminalSimple(selectedCwd);
+                SessionInteractionManager.OpenTerminalSimple(selectedCwd);
             }
         };
         cwdContextMenu.Items.Add(menuOpenTerminalCwd);
@@ -1137,8 +794,7 @@ internal class MainForm : Form
                 var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                 if (newSessionId != null)
                 {
-                    var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-                    Process.Start(new ProcessStartInfo(exePath, $"--resume {newSessionId}") { UseShellExecute = false });
+                    this._interactionManager.LaunchSession(newSessionId);
                     await this.RefreshGridAsync().ConfigureAwait(true);
                 }
                 else
@@ -1203,7 +859,7 @@ internal class MainForm : Form
         this._activeStatusTimer.Start();
 
         this._spinnerTimer = new Timer { Interval = 100 };
-        this._spinnerTimer.Tick += (s, e) => this._gridController.AdvanceSpinnerFrame();
+        this._spinnerTimer.Tick += (s, e) => this._sessionsVisuals.GridVisuals.AdvanceSpinnerFrame();
         this._spinnerTimer.Start();
 
         this.Shown += async (s, e) =>
@@ -1265,11 +921,7 @@ internal class MainForm : Form
     {
         if (this.SelectedSessionId != null)
         {
-            var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
-            Process.Start(new ProcessStartInfo(exePath, $"--resume {this.SelectedSessionId}")
-            {
-                UseShellExecute = false
-            });
+            this._interactionManager.LaunchSession(this.SelectedSessionId);
         }
     }
 
@@ -1293,7 +945,7 @@ internal class MainForm : Form
         {
             this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
             var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
-            this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
+            this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         }
 
         if (this.WindowState == FormWindowState.Minimized)
@@ -1326,33 +978,10 @@ internal class MainForm : Form
             var sessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
             this._cachedSessions = sessions;
             var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
-            this._gridController.ApplySnapshot(this._cachedSessions, snapshot, this._searchBox.Text);
+            this._sessionsVisuals.GridVisuals.ApplySnapshot(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
 
             // Bell notification: detect transitions and fire toast
-            var currentBellIds = new HashSet<string>(
-                snapshot.StatusIconBySessionId.Where(kvp => kvp.Value == "bell").Select(kvp => kvp.Key),
-                StringComparer.OrdinalIgnoreCase);
-
-            // Re-arm: remove sessions that left bell state
-            this._notifiedBellSessionIds.IntersectWith(currentBellIds);
-
-            // Notify new bell sessions
-            if (Program._settings.NotifyOnBell && this._trayIcon != null)
-            {
-                foreach (var bellId in currentBellIds)
-                {
-                    if (this._notifiedBellSessionIds.Add(bellId))
-                    {
-                        var sessionName = snapshot.SessionNamesById.GetValueOrDefault(bellId, "Copilot CLI");
-                        this._lastBellNotificationSessionId = bellId;
-                        this._trayIcon.ShowBalloonTip(
-                            5000,
-                            "Session Ready",
-                            $"\U0001F514 {sessionName}",
-                            ToolTipIcon.Info);
-                    }
-                }
-            }
+            this._bellService?.CheckAndNotify(snapshot);
         }
         finally
         {
@@ -1371,13 +1000,13 @@ internal class MainForm : Form
             .Where(kvp => kvp.Value == "bell")
             .Select(kvp => kvp.Key);
         this._activeTracker.InitStartedSessions(copilotCliSessionIds);
-        this._notifiedBellSessionIds.UnionWith(copilotCliSessionIds);
+        this._bellService?.SeedStartupSessions(copilotCliSessionIds);
 
         // Re-run refresh with started sessions seeded (bells now suppressed)
         snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
 
-        this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
-        this._loadingOverlay.Visible = false;
+        this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+        this._sessionsVisuals.LoadingOverlay.Visible = false;
 
         await this.RefreshNewSessionListAsync().ConfigureAwait(true);
     }
@@ -1386,7 +1015,7 @@ internal class MainForm : Form
     {
         this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
         var snapshot = this._activeTracker.Refresh(this._cachedSessions);
-        this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
+        this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
     }
 
     private async Task RefreshNewSessionListAsync()
