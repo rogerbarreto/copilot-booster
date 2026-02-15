@@ -174,4 +174,40 @@ public sealed class LauncherSettingsTests : IDisposable
 
         Assert.Equal("\"--allow-tool=tool1\" \"--add-dir=C:\\dir\"", result);
     }
+
+    [Fact]
+    public void Load_WithTheme_DeserializesCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var json = JsonSerializer.Serialize(new { theme = "dark" });
+        File.WriteAllText(file, json);
+
+        var settings = LauncherSettings.Load(file);
+
+        Assert.Equal("dark", settings.Theme);
+    }
+
+    [Fact]
+    public void Load_WithoutTheme_DefaultsToSystem()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var json = JsonSerializer.Serialize(new { allowedTools = Array.Empty<string>() });
+        File.WriteAllText(file, json);
+
+        var settings = LauncherSettings.Load(file);
+
+        Assert.Equal("system", settings.Theme);
+    }
+
+    [Fact]
+    public void Save_WithTheme_PersistsCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings { Theme = "light" };
+
+        settings.Save(file);
+
+        var loaded = LauncherSettings.Load(file);
+        Assert.Equal("light", loaded.Theme);
+    }
 }

@@ -55,7 +55,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 $setupExe = Join-Path $RepoRoot "installer-output\CopilotBooster-Setup.exe"
 Write-Host "Running installer..." -ForegroundColor Cyan
-Start-Process -FilePath $setupExe -Wait
+Start-Process -FilePath $setupExe
 Write-Host "Installer completed." -ForegroundColor Green
 
 # 4. Initialize settings if work dir provided

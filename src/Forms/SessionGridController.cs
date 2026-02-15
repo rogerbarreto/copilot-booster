@@ -15,8 +15,17 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal class SessionGridController
 {
-    private static readonly Color s_activeRowColor = Color.FromArgb(232, 245, 255);
-    private static readonly Color s_bellRowColor = Color.FromArgb(255, 238, 238);
+    private static Color ActiveRowColor => Application.IsDarkModeEnabled
+        ? Color.FromArgb(0x22, 0x22, 0x22)
+        : Color.FromArgb(220, 235, 250);
+
+    private static Color ActiveRowForeColor => Application.IsDarkModeEnabled
+        ? Color.White
+        : Color.Black;
+
+    private static Color BellRowColor => Application.IsDarkModeEnabled
+        ? Color.FromArgb(90, 30, 30)
+        : Color.FromArgb(255, 238, 238);
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
     private readonly Image[] _spinnerFrames;
@@ -77,7 +86,8 @@ internal class SessionGridController
                 row.Cells[0].Value = "";
                 if (!string.IsNullOrEmpty(activeText))
                 {
-                    row.DefaultCellStyle.BackColor = s_activeRowColor;
+                    row.DefaultCellStyle.BackColor = ActiveRowColor;
+                    row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
                 }
             }
         };
@@ -160,7 +170,7 @@ internal class SessionGridController
 
             var lines = text.Split('\n');
             var isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
-            var linkColor = isSelected ? Color.White : Color.FromArgb(0, 102, 204);
+            var linkColor = isSelected ? Color.White : Application.IsDarkModeEnabled ? Color.FromArgb(100, 180, 255) : Color.FromArgb(0, 102, 204);
             var linkFont = new Font(e.CellStyle!.Font ?? this._grid.Font, FontStyle.Underline);
             var padding = e.CellStyle.Padding;
             int ly = e.CellBounds.Y + padding.Top;
@@ -203,11 +213,12 @@ internal class SessionGridController
 
             if (statusIcon == "bell")
             {
-                row.DefaultCellStyle.BackColor = s_bellRowColor;
+                row.DefaultCellStyle.BackColor = BellRowColor;
             }
             else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
             {
-                row.DefaultCellStyle.BackColor = s_activeRowColor;
+                row.DefaultCellStyle.BackColor = ActiveRowColor;
+                row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
             }
         }
 
@@ -240,15 +251,18 @@ internal class SessionGridController
 
             if (statusIcon == "bell")
             {
-                row.DefaultCellStyle.BackColor = s_bellRowColor;
+                row.DefaultCellStyle.BackColor = BellRowColor;
+                row.DefaultCellStyle.ForeColor = Color.Empty;
             }
             else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
             {
-                row.DefaultCellStyle.BackColor = s_activeRowColor;
+                row.DefaultCellStyle.BackColor = ActiveRowColor;
+                row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
             }
             else
             {
-                row.DefaultCellStyle.BackColor = SystemColors.Window;
+                row.DefaultCellStyle.BackColor = Color.Empty;
+                row.DefaultCellStyle.ForeColor = Color.Empty;
             }
         }
 
@@ -289,11 +303,12 @@ internal class SessionGridController
 
             if (newStatusIcon == "bell")
             {
-                newRow.DefaultCellStyle.BackColor = s_bellRowColor;
+                newRow.DefaultCellStyle.BackColor = BellRowColor;
             }
             else if (newStatusIcon == "working" || !string.IsNullOrEmpty(newActiveText))
             {
-                newRow.DefaultCellStyle.BackColor = s_activeRowColor;
+                newRow.DefaultCellStyle.BackColor = ActiveRowColor;
+                newRow.DefaultCellStyle.ForeColor = ActiveRowForeColor;
             }
         }
     }

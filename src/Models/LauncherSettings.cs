@@ -46,6 +46,12 @@ internal class LauncherSettings
     public bool NotifyOnBell { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the application theme. Valid values are <c>"system"</c>, <c>"light"</c>, and <c>"dark"</c>.
+    /// </summary>
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = "system";
+
+    /// <summary>
     /// Loads the launcher settings from the default settings file.
     /// </summary>
     /// <returns>The deserialized <see cref="LauncherSettings"/> instance.</returns>

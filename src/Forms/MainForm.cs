@@ -48,6 +48,8 @@ internal class MainForm : Form
     private ListView _idesList = null!;
     private TextBox _workDirBox = null!;
     private CheckBox _notifyOnBellCheck = null!;
+    private ComboBox _themeCombo = null!;
+    private bool _suppressThemeChange;
 
     // Update banner
     private LinkLabel _updateLabel = null!;
@@ -70,6 +72,20 @@ internal class MainForm : Form
         this.InitializeFormProperties();
 
         this._mainTabs = new TabControl { Dock = DockStyle.Fill };
+        if (!Application.IsDarkModeEnabled)
+        {
+            this._mainTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            this._mainTabs.DrawItem += (s, e) =>
+            {
+                bool selected = e.Index == this._mainTabs.SelectedIndex;
+                var back = selected ? SystemColors.Window : Color.FromArgb(220, 220, 220);
+                var fore = SystemColors.ControlText;
+                using var brush = new SolidBrush(back);
+                e.Graphics.FillRectangle(brush, e.Bounds);
+                var text = this._mainTabs.TabPages[e.Index].Text;
+                TextRenderer.DrawText(e.Graphics, text, this._mainTabs.Font, e.Bounds, fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            };
+        }
         this._sessionsTab = new TabPage("Existing Sessions");
         this._settingsTab = new TabPage("Settings");
         this._newSessionTab = new TabPage("New Session");
@@ -217,9 +233,7 @@ internal class MainForm : Form
             Text = "Loading sessions...",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular),
-            ForeColor = SystemColors.GrayText,
-            BackColor = SystemColors.Window
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular)
         };
 
         this._sessionsTab.Controls.Add(this._loadingOverlay);
@@ -240,12 +254,27 @@ internal class MainForm : Form
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
             RowHeadersVisible = false,
-            BackgroundColor = SystemColors.Window,
             BorderStyle = BorderStyle.None,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
-            CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-            DefaultCellStyle = new DataGridViewCellStyle { WrapMode = DataGridViewTriState.True, Padding = new Padding(4, 4, 4, 4) },
-            ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold) },
+            CellBorderStyle = DataGridViewCellBorderStyle.Single,
+            GridColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlLight,
+            DefaultCellStyle = new DataGridViewCellStyle
+            {
+                WrapMode = DataGridViewTriState.True,
+                Padding = new Padding(4, 4, 4, 4),
+                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245),
+                SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : Color.Black
+            },
+            EnableHeadersVisualStyles = false,
+            ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210),
+                ForeColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText,
+                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210),
+                SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText
+            },
+            ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
             ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
         };
         this._sessionGrid.Columns.Add(new DataGridViewTextBoxColumn
@@ -311,18 +340,60 @@ internal class MainForm : Form
                 this.LaunchSession();
             }
         };
+
+        this._sessionGrid.CellPainting += (s, e) =>
+        {
+            if (e.RowIndex != -1)
+            {
+                return;
+            }
+
+            e.PaintBackground(e.ClipBounds, false);
+            var borderColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark;
+            var textColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText;
+            using var borderPen = new Pen(borderColor);
+            e.Graphics!.DrawLine(borderPen, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+            e.Graphics.DrawLine(borderPen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+            var textBounds = new Rectangle(e.CellBounds.X + 4, e.CellBounds.Y + 2, e.CellBounds.Width - 20, e.CellBounds.Height - 4);
+            TextRenderer.DrawText(e.Graphics, e.Value?.ToString() ?? "", e.CellStyle!.Font, textBounds, textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+            var col = this._sessionGrid.Columns[e.ColumnIndex];
+            if (col.HeaderCell.SortGlyphDirection != SortOrder.None)
+            {
+                var glyphX = e.CellBounds.Right - 16;
+                var glyphY = e.CellBounds.Top + (e.CellBounds.Height - 8) / 2;
+                using var brush = new SolidBrush(textColor);
+                if (col.HeaderCell.SortGlyphDirection == SortOrder.Ascending)
+                {
+                    e.Graphics.FillPolygon(brush, [new Point(glyphX, glyphY + 8), new Point(glyphX + 4, glyphY), new Point(glyphX + 8, glyphY + 8)]);
+                }
+                else
+                {
+                    e.Graphics.FillPolygon(brush, [new Point(glyphX, glyphY), new Point(glyphX + 4, glyphY + 8), new Point(glyphX + 8, glyphY)]);
+                }
+            }
+            e.Handled = true;
+        };
     }
 
     private Panel BuildSearchPanel()
     {
-        var searchPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(5, 5, 5, 2) };
-        var searchLabel = new Label { Text = "Search:", AutoSize = true, Dock = DockStyle.Left, TextAlign = ContentAlignment.MiddleLeft };
+        var searchPanel = new Panel { Dock = DockStyle.Top, Height = 34 };
+        var searchLabel = new Label
+        {
+            Text = "Search:",
+            AutoSize = true,
+            Location = new Point(5, 9)
+        };
         var btnRefreshTop = new Button
         {
             Text = "Refresh",
             Width = 65,
-            Dock = DockStyle.Right
+            Height = 27,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            Location = new Point(searchPanel.Width - 70, 3)
         };
+        // Ensure button repositions on resize
+        searchPanel.Resize += (s, e) => btnRefreshTop.Left = searchPanel.ClientSize.Width - 70;
         btnRefreshTop.Click += async (s, e) =>
         {
             this._cachedSessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
@@ -331,15 +402,30 @@ internal class MainForm : Form
         };
         this._searchBox = new TextBox
         {
-            Dock = DockStyle.Fill,
+            Location = new Point(55, 4),
+            Width = 100,
+            Height = 20,
+            Multiline = true,
+            WordWrap = false,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
             PlaceholderText = "Filter sessions..."
         };
+        this._searchBox.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+            }
+        };
+        var searchBorder = SettingsTabBuilder.WrapWithBorder(this._searchBox);
+        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 130;
         this._searchBox.TextChanged += (s, e) =>
         {
             var snapshot = this._activeTracker.Refresh(this._cachedSessions);
             this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
         };
-        searchPanel.Controls.Add(this._searchBox);
+        searchPanel.Controls.Add(searchBorder);
         searchPanel.Controls.Add(btnRefreshTop);
         searchPanel.Controls.Add(searchLabel);
         return searchPanel;
@@ -668,10 +754,25 @@ internal class MainForm : Form
     {
         var settingsContainer = new Panel { Dock = DockStyle.Fill };
         var settingsTabs = new TabControl { Dock = DockStyle.Fill };
+        if (!Application.IsDarkModeEnabled)
+        {
+            settingsTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            settingsTabs.DrawItem += (s, e) =>
+            {
+                bool selected = e.Index == settingsTabs.SelectedIndex;
+                var back = selected ? SystemColors.Window : Color.FromArgb(220, 220, 220);
+                var fore = SystemColors.ControlText;
+                using var brush = new SolidBrush(back);
+                e.Graphics.FillRectangle(brush, e.Bounds);
+                var text = settingsTabs.TabPages[e.Index].Text;
+                TextRenderer.DrawText(e.Graphics, text, settingsTabs.Font, e.Bounds, fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            };
+        }
 
         // Allowed Tools
         var toolsTab = new TabPage("Allowed Tools");
-        this._toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
+        this._toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
+        SettingsTabBuilder.ApplyThemedSelection(this._toolsList);
         foreach (var tool in Program._settings.AllowedTools)
         {
             this._toolsList.Items.Add(tool);
@@ -682,7 +783,8 @@ internal class MainForm : Form
 
         // Allowed Directories
         var dirsTab = new TabPage("Allowed Directories");
-        this._dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
+        this._dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
+        SettingsTabBuilder.ApplyThemedSelection(this._dirsList);
         foreach (var dir in Program._settings.AllowedDirs)
         {
             this._dirsList.Items.Add(dir);
@@ -699,7 +801,7 @@ internal class MainForm : Form
             View = View.Details,
             FullRowSelect = true,
             MultiSelect = false,
-            GridLines = true
+            GridLines = !Application.IsDarkModeEnabled
         };
         this._idesList.Columns.Add("Description", 200);
         this._idesList.Columns.Add("Path", 400);
@@ -709,6 +811,7 @@ internal class MainForm : Form
             item.SubItems.Add(ide.Path);
             this._idesList.Items.Add(item);
         }
+        SettingsTabBuilder.ApplyThemedSelection(this._idesList);
         var ideButtons = SettingsTabBuilder.CreateIdeButtons(this._idesList);
         idesTab.Controls.Add(this._idesList);
         idesTab.Controls.Add(ideButtons);
@@ -742,7 +845,7 @@ internal class MainForm : Form
                 this._workDirBox.Text = fbd.SelectedPath;
             }
         };
-        workDirPanel.Controls.AddRange([workDirLabel, this._workDirBox, workDirBrowse]);
+        workDirPanel.Controls.AddRange([workDirLabel, SettingsTabBuilder.WrapWithBorder(this._workDirBox), workDirBrowse]);
 
         // Notifications
         var notifyPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
@@ -754,6 +857,51 @@ internal class MainForm : Form
             Location = new Point(8, 5)
         };
         notifyPanel.Controls.Add(this._notifyOnBellCheck);
+
+        // Theme
+        var themePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var themeLabel = new Label { Text = "Theme:", AutoSize = true, Location = new Point(8, 7) };
+        this._themeCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(130, 4),
+            Width = 150
+        };
+        this._themeCombo.Items.AddRange(new object[] { "System (default)", "Light", "Dark" });
+        this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
+        this._themeCombo.SelectedIndexChanged += (s, e) =>
+        {
+            if (this._suppressThemeChange)
+            {
+                return;
+            }
+
+            var theme = ThemeService.IndexToTheme(this._themeCombo.SelectedIndex);
+            if (theme == Program._settings.Theme)
+            {
+                return;
+            }
+
+            var result = MessageBox.Show(
+                "Theme changed. The application needs to restart to apply the new theme.\n\nRestart now?",
+                "Copilot Booster",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (result == DialogResult.Yes)
+            {
+                Program._settings.Theme = theme;
+                Program._settings.Save();
+                Application.Restart();
+                Environment.Exit(0);
+            }
+            else
+            {
+                this._suppressThemeChange = true;
+                this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
+                this._suppressThemeChange = false;
+            }
+        };
+        themePanel.Controls.AddRange([themeLabel, this._themeCombo]);
 
         // Bottom buttons
         var settingsBottomPanel = new FlowLayoutPanel
@@ -767,8 +915,11 @@ internal class MainForm : Form
         var btnCancel = new Button { Text = "Cancel", Width = 90 };
         btnCancel.Click += (s, e) =>
         {
-            SettingsTabBuilder.ReloadSettingsUI(this._toolsList, this._dirsList, this._idesList, this._workDirBox);
+            SettingsTabBuilder.ReloadSettingsUI(this._toolsList, this._dirsList, this._idesList, this._workDirBox, this._themeCombo);
             this._notifyOnBellCheck.Checked = Program._settings.NotifyOnBell;
+            this._suppressThemeChange = true;
+            this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
+            this._suppressThemeChange = false;
         };
 
         var btnSave = new Button { Text = "Save", Width = 90 };
@@ -792,6 +943,7 @@ internal class MainForm : Form
         settingsBottomPanel.Controls.Add(btnSave);
 
         settingsContainer.Controls.Add(settingsTabs);
+        settingsContainer.Controls.Add(themePanel);
         settingsContainer.Controls.Add(notifyPanel);
         settingsContainer.Controls.Add(workDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
@@ -807,13 +959,14 @@ internal class MainForm : Form
             View = View.Details,
             FullRowSelect = true,
             MultiSelect = false,
-            GridLines = true
+            GridLines = !Application.IsDarkModeEnabled
         };
         this._cwdListView.Columns.Add("Directory", 350);
         this._cwdListView.Columns.Add("# Sessions created ▼", 120, HorizontalAlignment.Center);
         this._cwdListView.Columns.Add("Git", 50, HorizontalAlignment.Center);
         this._cwdListView.ListViewItemSorter = this._newSessionTabBuilder.Sorter;
         this._cwdListView.ColumnClick += (s, e) => this._newSessionTabBuilder.OnColumnClick(this._cwdListView, e);
+        SettingsTabBuilder.ApplyThemedSelection(this._cwdListView);
 
         // Right-click context menu
         var cwdContextMenu = new ContextMenuStrip();
@@ -1000,9 +1153,7 @@ internal class MainForm : Form
             Text = "Loading directories...",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular),
-            ForeColor = SystemColors.GrayText,
-            BackColor = SystemColors.Window
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular)
         };
 
         this._newSessionTab.Controls.Add(this._newSessionLoadingOverlay);

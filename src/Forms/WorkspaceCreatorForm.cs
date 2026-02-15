@@ -73,7 +73,7 @@ internal static class WorkspaceCreatorForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(txtSessionName);
+        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtSessionName));
         y += 26;
 
         var lblSessionNameHelper = new Label
@@ -103,7 +103,7 @@ internal static class WorkspaceCreatorForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(txtName);
+        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtName));
         y += 26;
 
         var lblNameHelper = new Label

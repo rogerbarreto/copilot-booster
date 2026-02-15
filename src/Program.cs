@@ -189,6 +189,7 @@ internal class Program
 
         // Load settings (creates defaults on first run)
         _settings = LauncherSettings.Load();
+        ThemeService.ApplyTheme(_settings.Theme);
 
         // Parse arguments
         var parsed = ParseArguments(args);

@@ -60,7 +60,7 @@ internal static class SessionEditorForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(txtName);
+        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtName));
         y += 34;
 
         // CWD
@@ -79,7 +79,7 @@ internal static class SessionEditorForm
             Location = new Point(14, y),
             Width = 370
         };
-        form.Controls.Add(txtCwd);
+        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtCwd));
 
         var btnBrowse = new Button
         {

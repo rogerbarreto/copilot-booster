@@ -69,7 +69,7 @@ internal static class NewSessionNameForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(txtName);
+        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtName));
         y += 26;
 
         var lblHelper = new Label

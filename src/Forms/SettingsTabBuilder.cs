@@ -13,6 +13,31 @@ namespace CopilotBooster.Forms;
 internal static class SettingsTabBuilder
 {
     /// <summary>
+    /// Wraps a <see cref="TextBox"/> in a <see cref="Panel"/> that provides a themed border.
+    /// The text box is set to <see cref="BorderStyle.None"/> and fills the panel interior.
+    /// </summary>
+    /// <param name="textBox">The text box to wrap.</param>
+    /// <returns>The wrapper panel containing the text box.</returns>
+    internal static Panel WrapWithBorder(TextBox textBox)
+    {
+        textBox.BorderStyle = BorderStyle.None;
+        textBox.Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f);
+        var wrapper = new Panel
+        {
+            Location = textBox.Location,
+            Size = new Size(textBox.Width, textBox.Height + 6),
+            Anchor = textBox.Anchor,
+            Padding = new Padding(1),
+            BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark
+        };
+        textBox.Location = Point.Empty;
+        textBox.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        textBox.Dock = DockStyle.Fill;
+        wrapper.Controls.Add(textBox);
+        return wrapper;
+    }
+
+    /// <summary>
     /// Creates a panel with Add, Edit, and Remove buttons for a <see cref="ListBox"/>.
     /// </summary>
     /// <param name="listBox">The list box to manage.</param>
@@ -239,7 +264,7 @@ internal static class SettingsTabBuilder
         var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(310, 118), Width = 75 };
         var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(392, 118), Width = 75 };
 
-        form.Controls.AddRange([lblDesc, txtDesc, lblPath, txtPath, btnBrowse, btnOk, btnCancel]);
+        form.Controls.AddRange([lblDesc, WrapWithBorder(txtDesc), lblPath, WrapWithBorder(txtPath), btnBrowse, btnOk, btnCancel]);
         form.AcceptButton = btnOk;
         form.CancelButton = btnCancel;
 
@@ -275,12 +300,121 @@ internal static class SettingsTabBuilder
         var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(260, 72), Width = 75 };
         var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(342, 72), Width = 75 };
 
-        form.Controls.AddRange([lbl, txt, btnOk, btnCancel]);
+        form.Controls.AddRange([lbl, WrapWithBorder(txt), btnOk, btnCancel]);
         form.AcceptButton = btnOk;
         form.CancelButton = btnCancel;
 
         return form.ShowDialog() == DialogResult.OK ? txt.Text : null;
     }
+
+    /// <summary>
+    /// Applies themed selection colors to a <see cref="ListBox"/> using owner-draw.
+    /// </summary>
+    internal static void ApplyThemedSelection(ListBox listBox)
+    {
+        listBox.DrawMode = DrawMode.OwnerDrawFixed;
+        listBox.DrawItem += (s, e) =>
+        {
+            if (e.Index < 0)
+            {
+                return;
+            }
+
+            bool selected = (e.State & DrawItemState.Selected) != 0;
+            Color back, fore;
+            if (selected)
+            {
+                back = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245);
+                fore = Application.IsDarkModeEnabled ? Color.White : Color.Black;
+            }
+            else
+            {
+                back = listBox.BackColor;
+                fore = listBox.ForeColor;
+            }
+
+            using var backBrush = new SolidBrush(back);
+            e.Graphics!.FillRectangle(backBrush, e.Bounds);
+
+            var text = listBox.Items[e.Index]?.ToString() ?? "";
+            TextRenderer.DrawText(e.Graphics, text, e.Font, e.Bounds, fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+
+            e.DrawFocusRectangle();
+        };
+    }
+
+    /// <summary>
+    /// Applies themed selection colors to a <see cref="ListView"/> using owner-draw.
+    /// </summary>
+    internal static void ApplyThemedSelection(ListView listView)
+    {
+        listView.OwnerDraw = true;
+        listView.DrawColumnHeader += (s, e) =>
+        {
+            var headerBack = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210);
+            using var backBrush = new SolidBrush(headerBack);
+            e.Graphics!.FillRectangle(backBrush, e.Bounds);
+            var fore = listView.ForeColor;
+            TextRenderer.DrawText(e.Graphics, e.Header?.Text ?? "", e.Font, e.Bounds, fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+
+            // Draw bottom border
+            var borderColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark;
+            using var pen = new Pen(borderColor);
+            e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+            // Draw right border for column separation
+            e.Graphics.DrawLine(pen, e.Bounds.Right - 1, e.Bounds.Top, e.Bounds.Right - 1, e.Bounds.Bottom);
+        };
+        listView.DrawItem += (s, e) =>
+        {
+            // Fill the entire row background including area beyond columns
+            using var brush = new SolidBrush(e.Item!.Selected
+                ? (Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245))
+                : listView.BackColor);
+            e.Graphics!.FillRectangle(brush, e.Bounds);
+        };
+        listView.DrawSubItem += (s, e) =>
+        {
+            bool selected = e.Item!.Selected;
+            Color back = selected
+                ? (Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245))
+                : listView.BackColor;
+            Color fore = selected
+                ? (Application.IsDarkModeEnabled ? Color.White : Color.Black)
+                : listView.ForeColor;
+
+            using var backBrush = new SolidBrush(back);
+            e.Graphics!.FillRectangle(backBrush, e.Bounds);
+
+            var text = e.SubItem?.Text ?? "";
+            var flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter;
+
+            if (e.Header?.TextAlign == HorizontalAlignment.Center)
+            {
+                flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter;
+            }
+            else if (e.Header?.TextAlign == HorizontalAlignment.Right)
+            {
+                flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter;
+            }
+
+            TextRenderer.DrawText(e.Graphics, text, e.Item.Font ?? listView.Font, e.Bounds, fore, flags);
+
+            // Draw right border for column separation
+            using var pen = new Pen(Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlLight);
+            e.Graphics.DrawLine(pen, e.Bounds.Right - 1, e.Bounds.Top, e.Bounds.Right - 1, e.Bounds.Bottom);
+        };
+    }
+
+    /// <summary>
+    /// Reloads settings controls from the persisted <see cref="LauncherSettings"/>.
+    /// Overload kept for callers that do not yet have a theme combo box.
+    /// </summary>
+    /// <param name="toolsList">The allowed tools list box.</param>
+    /// <param name="dirsList">The allowed directories list box.</param>
+    /// <param name="idesList">The IDEs list view.</param>
+    /// <param name="workDirBox">The default work directory text box.</param>
+    internal static void ReloadSettingsUI(ListBox toolsList, ListBox dirsList, ListView idesList, TextBox workDirBox)
+        => ReloadSettingsUI(toolsList, dirsList, idesList, workDirBox, themeCombo: null);
 
     /// <summary>
     /// Reloads settings controls from the persisted <see cref="LauncherSettings"/>.
@@ -289,7 +423,8 @@ internal static class SettingsTabBuilder
     /// <param name="dirsList">The allowed directories list box.</param>
     /// <param name="idesList">The IDEs list view.</param>
     /// <param name="workDirBox">The default work directory text box.</param>
-    internal static void ReloadSettingsUI(ListBox toolsList, ListBox dirsList, ListView idesList, TextBox workDirBox)
+    /// <param name="themeCombo">The theme selection combo box, or <c>null</c> to skip theme reload.</param>
+    internal static void ReloadSettingsUI(ListBox toolsList, ListBox dirsList, ListView idesList, TextBox workDirBox, ComboBox? themeCombo)
     {
         var fresh = LauncherSettings.Load();
 
@@ -314,5 +449,15 @@ internal static class SettingsTabBuilder
         }
 
         workDirBox.Text = fresh.DefaultWorkDir;
+
+        if (themeCombo != null)
+        {
+            themeCombo.SelectedIndex = fresh.Theme switch
+            {
+                "light" => 1,
+                "dark" => 2,
+                _ => 0
+            };
+        }
     }
 }
