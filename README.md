@@ -11,7 +11,7 @@ Modern AI-assisted development isn't one task at a time — it's **multiple Copi
 **Copilot Booster** eliminates that overhead. Pin it to your taskbar and get **complete isolation per session** — each Copilot agent gets its own terminal, IDE workspace, and browser instance, all tracked and instantly accessible from a single icon. No more hunting for the right window. No more losing context. Just click and focus.
 
 <p align="center">
-  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/rogerbarreto/copilot-app?label=Latest%20Release&style=for-the-badge" alt="Latest Release"></a>
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/rogerbarreto/copilot-booster?label=Latest%20Release&style=for-the-badge" alt="Latest Release"></a>
 </p>
 
 <p align="center">
@@ -211,8 +211,8 @@ Download **`CopilotBooster-win-x64.zip`** from the [latest release](../../releas
 #### Option C: Build from Source
 
 ```powershell
-git clone <repo-url> copilot-app
-cd copilot-app
+git clone <repo-url> copilot-booster
+cd copilot-booster
 .\install.ps1
 ```
 

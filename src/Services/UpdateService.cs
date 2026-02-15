@@ -13,7 +13,7 @@ namespace CopilotBooster.Services;
 /// </summary>
 internal sealed class UpdateService
 {
-    private const string ReleasesUrl = "https://api.github.com/repos/community/copilot-app/releases/latest";
+    private const string ReleasesUrl = "https://api.github.com/repos/rogerbarreto/copilot-booster/releases/latest";
 
     private static readonly HttpClient s_httpClient = new()
     {

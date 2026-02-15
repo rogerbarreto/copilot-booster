@@ -203,15 +203,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
-[0.8.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.7.1...v0.8.0
-[0.6.3]: https://github.com/rogerbarreto/copilot-app/compare/v0.6.2...v0.6.3
-[0.6.2]: https://github.com/rogerbarreto/copilot-app/compare/v0.6.1...v0.6.2
-[0.6.1]: https://github.com/rogerbarreto/copilot-app/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.3.0...v0.4.0
-[0.1.1]: https://github.com/rogerbarreto/copilot-app/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.3...v0.1.0
-[0.0.3]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/rogerbarreto/copilot-app/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/rogerbarreto/copilot-app/releases/tag/v0.0.1
+[0.8.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.7.1...v0.8.0
+[0.6.3]: https://github.com/rogerbarreto/copilot-booster/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/rogerbarreto/copilot-booster/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/rogerbarreto/copilot-booster/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.3.0...v0.4.0
+[0.1.1]: https://github.com/rogerbarreto/copilot-booster/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.0.3...v0.1.0
+[0.0.3]: https://github.com/rogerbarreto/copilot-booster/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/rogerbarreto/copilot-booster/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/rogerbarreto/copilot-booster/releases/tag/v0.0.1
