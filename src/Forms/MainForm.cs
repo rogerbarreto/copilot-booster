@@ -31,6 +31,9 @@ internal class MainForm : Form
     private List<NamedSession> _cachedSessions = new();
     private readonly ActiveStatusTracker _activeTracker = new();
     private Timer? _activeStatusTimer;
+    private Timer? _spinnerTimer;
+    private readonly HashSet<string> _notifiedBellSessionIds = new(StringComparer.OrdinalIgnoreCase);
+    private string? _lastBellNotificationSessionId;
 
     // New Session tab controls
     private ListView _cwdListView = null!;
@@ -44,6 +47,7 @@ internal class MainForm : Form
     private ListBox _dirsList = null!;
     private ListView _idesList = null!;
     private TextBox _workDirBox = null!;
+    private CheckBox _notifyOnBellCheck = null!;
 
     // Update banner
     private LinkLabel _updateLabel = null!;
@@ -142,6 +146,13 @@ internal class MainForm : Form
             Visible = true,
         };
         this._trayIcon.DoubleClick += (s, e) => this.RestoreFromTray();
+        this._trayIcon.BalloonTipClicked += (s, e) =>
+        {
+            if (this._lastBellNotificationSessionId is string sid)
+            {
+                this._activeTracker.FocusActiveProcess(sid, 0);
+            }
+        };
     }
 
     private void ShowTab(int tabIndex)
@@ -237,6 +248,15 @@ internal class MainForm : Form
             ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold) },
             ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
         };
+        this._sessionGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Status",
+            HeaderText = "",
+            Width = 30,
+            MinimumWidth = 30,
+            Resizable = DataGridViewTriState.False,
+            DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
+        });
         this._sessionGrid.Columns.Add("Session", "Session");
         this._sessionGrid.Columns.Add("CWD", "CWD");
         this._sessionGrid.Columns.Add("Date", "Date");
@@ -260,7 +280,8 @@ internal class MainForm : Form
             adjustingSessionWidth = true;
             try
             {
-                var otherWidth = this._sessionGrid.Columns["CWD"]!.Width
+                var otherWidth = this._sessionGrid.Columns["Status"]!.Width
+                    + this._sessionGrid.Columns["CWD"]!.Width
                     + this._sessionGrid.Columns["Date"]!.Width
                     + this._sessionGrid.Columns["Active"]!.Width
                     + (this._sessionGrid.RowHeadersVisible ? this._sessionGrid.RowHeadersWidth : 0)
@@ -723,6 +744,17 @@ internal class MainForm : Form
         };
         workDirPanel.Controls.AddRange([workDirLabel, this._workDirBox, workDirBrowse]);
 
+        // Notifications
+        var notifyPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        this._notifyOnBellCheck = new CheckBox
+        {
+            Text = "Notify when session is ready (\U0001F514)",
+            Checked = Program._settings.NotifyOnBell,
+            AutoSize = true,
+            Location = new Point(8, 5)
+        };
+        notifyPanel.Controls.Add(this._notifyOnBellCheck);
+
         // Bottom buttons
         var settingsBottomPanel = new FlowLayoutPanel
         {
@@ -733,7 +765,11 @@ internal class MainForm : Form
         };
 
         var btnCancel = new Button { Text = "Cancel", Width = 90 };
-        btnCancel.Click += (s, e) => SettingsTabBuilder.ReloadSettingsUI(this._toolsList, this._dirsList, this._idesList, this._workDirBox);
+        btnCancel.Click += (s, e) =>
+        {
+            SettingsTabBuilder.ReloadSettingsUI(this._toolsList, this._dirsList, this._idesList, this._workDirBox);
+            this._notifyOnBellCheck.Checked = Program._settings.NotifyOnBell;
+        };
 
         var btnSave = new Button { Text = "Save", Width = 90 };
         btnSave.Click += (s, e) =>
@@ -747,6 +783,7 @@ internal class MainForm : Form
                 Program._settings.Ides.Add(new IdeEntry { Description = item.Text, Path = item.SubItems[1].Text });
             }
 
+            Program._settings.NotifyOnBell = this._notifyOnBellCheck.Checked;
             Program._settings.Save();
             MessageBox.Show("Settings saved.", "Copilot Booster", MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
@@ -755,6 +792,7 @@ internal class MainForm : Form
         settingsBottomPanel.Controls.Add(btnSave);
 
         settingsContainer.Controls.Add(settingsTabs);
+        settingsContainer.Controls.Add(notifyPanel);
         settingsContainer.Controls.Add(workDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
 
@@ -1013,12 +1051,20 @@ internal class MainForm : Form
         this._activeStatusTimer.Tick += (s, e) => this.RefreshActiveStatusAsync();
         this._activeStatusTimer.Start();
 
+        this._spinnerTimer = new Timer { Interval = 100 };
+        this._spinnerTimer.Tick += (s, e) => this._gridController.AdvanceSpinnerFrame();
+        this._spinnerTimer.Start();
+
         this.Shown += async (s, e) =>
         {
             await this.LoadInitialDataAsync().ConfigureAwait(true);
             _ = this.CheckForUpdateInBackgroundAsync();
         };
-        this.FormClosed += (s, e) => this._activeStatusTimer?.Stop();
+        this.FormClosed += (s, e) =>
+        {
+            this._activeStatusTimer?.Stop();
+            this._spinnerTimer?.Stop();
+        };
     }
 
     private async Task CheckForUpdateInBackgroundAsync()
@@ -1130,6 +1176,32 @@ internal class MainForm : Form
             this._cachedSessions = sessions;
             var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
             this._gridController.ApplySnapshot(this._cachedSessions, snapshot, this._searchBox.Text);
+
+            // Bell notification: detect transitions and fire toast
+            var currentBellIds = new HashSet<string>(
+                snapshot.StatusIconBySessionId.Where(kvp => kvp.Value == "bell").Select(kvp => kvp.Key),
+                StringComparer.OrdinalIgnoreCase);
+
+            // Re-arm: remove sessions that left bell state
+            this._notifiedBellSessionIds.IntersectWith(currentBellIds);
+
+            // Notify new bell sessions
+            if (Program._settings.NotifyOnBell && this._trayIcon != null)
+            {
+                foreach (var bellId in currentBellIds)
+                {
+                    if (this._notifiedBellSessionIds.Add(bellId))
+                    {
+                        var sessionName = snapshot.SessionNamesById.GetValueOrDefault(bellId, "Copilot CLI");
+                        this._lastBellNotificationSessionId = bellId;
+                        this._trayIcon.ShowBalloonTip(
+                            5000,
+                            "Session Ready",
+                            $"\U0001F514 {sessionName}",
+                            ToolTipIcon.Info);
+                    }
+                }
+            }
         }
         finally
         {
@@ -1142,8 +1214,18 @@ internal class MainForm : Form
         var sessions = await Task.Run(() => LoadNamedSessions()).ConfigureAwait(true);
         this._cachedSessions = sessions;
         var snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
-        this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
 
+        // Seed startup Copilot CLI sessions — suppress bell until they transition to working
+        var copilotCliSessionIds = snapshot.StatusIconBySessionId
+            .Where(kvp => kvp.Value == "bell")
+            .Select(kvp => kvp.Key);
+        this._activeTracker.InitStartedSessions(copilotCliSessionIds);
+        this._notifiedBellSessionIds.UnionWith(copilotCliSessionIds);
+
+        // Re-run refresh with started sessions seeded (bells now suppressed)
+        snapshot = await Task.Run(() => this._activeTracker.Refresh(this._cachedSessions)).ConfigureAwait(true);
+
+        this._gridController.Populate(this._cachedSessions, snapshot, this._searchBox.Text);
         this._loadingOverlay.Visible = false;
 
         await this.RefreshNewSessionListAsync().ConfigureAwait(true);

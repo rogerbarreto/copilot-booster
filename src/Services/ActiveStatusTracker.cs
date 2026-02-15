@@ -13,7 +13,8 @@ namespace CopilotBooster.Services;
 /// </summary>
 internal record ActiveStatusSnapshot(
     Dictionary<string, string> ActiveTextBySessionId,
-    Dictionary<string, string> SessionNamesById
+    Dictionary<string, string> SessionNamesById,
+    Dictionary<string, string> StatusIconBySessionId
 );
 
 /// <summary>
@@ -26,6 +27,7 @@ internal class ActiveStatusTracker
     private Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>> _activeTrackedWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _edgeInitialScanDone;
     private bool _ideInitialLoadDone;
 
@@ -38,6 +40,16 @@ internal class ActiveStatusTracker
     /// Callback invoked (possibly from a background thread) when an Edge workspace is closed.
     /// </summary>
     internal Action<string>? OnEdgeWorkspaceClosed { get; set; }
+
+    /// <summary>
+    /// Seeds sessions present at startup. These will output "" instead of "bell"
+    /// until they transition to working first, preventing false bell notifications on app launch.
+    /// Only Copilot CLI sessions should be passed here.
+    /// </summary>
+    internal void InitStartedSessions(IEnumerable<string> copilotCliSessionIds)
+    {
+        this._startedSessionIds.UnionWith(copilotCliSessionIds);
+    }
 
     internal HashSet<string> LoadActiveSessionIds()
     {
@@ -367,9 +379,41 @@ internal class ActiveStatusTracker
             }
         }
 
+        // Detect working/bell status from Copilot CLI window title prefix.
+        // When Copilot CLI is working, it prefixes the title with an emoji (e.g. 🤖).
+        // When it's idle/waiting for input, the title is just the session name (no emoji).
+        // Sessions present at startup are suppressed (empty status) until they transition
+        // to working first, preventing false bell notifications on app launch.
+        var statusIconBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in this._activeTrackedWindows)
+        {
+            foreach (var (label, title, _) in kvp.Value)
+            {
+                if (!label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var stripped = WindowFocusService.StripLeadingEmoji(title);
+                if (stripped != title)
+                {
+                    // Has emoji prefix — session is working
+                    this._startedSessionIds.Remove(kvp.Key);
+                    statusIconBySessionId[kvp.Key] = "working";
+                }
+                else
+                {
+                    // No emoji prefix — session is idle/waiting for input
+                    statusIconBySessionId[kvp.Key] = this._startedSessionIds.Contains(kvp.Key) ? "" : "bell";
+                }
+
+                break;
+            }
+        }
+
         this._edgeInitialScanDone = true;
 
-        return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById);
+        return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById, statusIconBySessionId);
     }
 
     /// <summary>

@@ -40,6 +40,12 @@ internal class LauncherSettings
     public List<IdeEntry> Ides { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets whether to show a notification when a Copilot CLI session enters the bell state.
+    /// </summary>
+    [JsonPropertyName("notifyOnBell")]
+    public bool NotifyOnBell { get; set; } = true;
+
+    /// <summary>
     /// Loads the launcher settings from the default settings file.
     /// </summary>
     /// <returns>The deserialized <see cref="LauncherSettings"/> instance.</returns>

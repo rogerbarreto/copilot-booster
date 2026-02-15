@@ -49,7 +49,7 @@ Right-click the pinned icon to access everything:
 
 ### 🔄 Session Browser & Active Context Tracking
 
-The Existing Sessions tab is the central hub. Each session shows four columns — **Session**, **CWD** (with ⎇ for Git repos), **Date**, and **Active** — giving you a live view of what's running where.
+The Existing Sessions tab is the central hub. Each session shows five columns — **Status** (animated icons), **Session**, **CWD** (with ⎇ for Git repos), **Date**, and **Active** — giving you a live view of what's running where.
 
 <p align="center">
   <img src="images/existing-sessions-active-tracking.png" alt="Existing sessions with Terminal and Copilot CLI active tracking" width="700">
@@ -76,6 +76,26 @@ Other session browser features:
 - **Auto-refresh** — the list updates when new sessions appear or names change externally
 - **Auto-cleanup** — empty sessions with no activity are automatically removed
 - **Loading indicator** — shows "Loading sessions..." while session data is being fetched
+
+---
+
+### 🔔 Session Status & Toast Notifications
+
+The **Status** column shows live session state with animated icons — a spinning blue indicator when Copilot CLI is working, and a red bell when it's idle and waiting for input. Bell rows are highlighted with a soft red background for quick visual scanning.
+
+<p align="center">
+  <img src="images/session-state-notification.png" alt="Session status column showing bell and spinner icons" width="700">
+</p>
+
+When a session finishes work, a **Windows toast notification** pops up via the system tray icon with the session name. Click the notification to instantly focus the Copilot CLI terminal.
+
+<p align="center">
+  <img src="images/toast-notification.png" alt="Toast notification when session is ready" width="350">
+</p>
+
+- **One-shot notifications** — each bell only fires once per idle transition; clicking to focus a session suppresses the bell until the next work cycle completes
+- **Startup-aware** — existing idle sessions don't trigger false notifications when the app launches
+- **Configurable** — toggle notifications on/off in the Settings tab
 
 ---
 

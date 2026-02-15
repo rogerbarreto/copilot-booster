@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0] - 2026-02-15
+
+### Added
+
+- **Session status icons** — animated blue spinner for working sessions and static red bell for idle/waiting sessions, rendered as image icons in a new Status column.
+- **Toast notifications** — Windows balloon notifications via the system tray icon when a Copilot CLI session finishes work and is ready for interaction. Click the notification to focus the terminal. Configurable on/off in Settings.
+- **Bell row highlighting** — sessions waiting for input get a soft red background color for visual distinction.
+- **Focus-click bell dismissal** — clicking to focus a session suppresses its bell until it transitions to working again.
+- **Startup suppression** — existing idle sessions don't trigger false bell notifications when the app launches.
+
 ## [0.8.1] - 2026-02-15
 
 ### Added

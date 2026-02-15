@@ -16,13 +16,28 @@ namespace CopilotBooster.Forms;
 internal class SessionGridController
 {
     private static readonly Color s_activeRowColor = Color.FromArgb(232, 245, 255);
+    private static readonly Color s_bellRowColor = Color.FromArgb(255, 238, 238);
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
+    private readonly Image[] _spinnerFrames;
+    private readonly Image _bellImage;
+    private int _spinnerFrameIndex;
 
     internal SessionGridController(DataGridView grid, ActiveStatusTracker activeTracker)
     {
         this._grid = grid;
         this._activeTracker = activeTracker;
+
+        var asm = typeof(SessionGridController).Assembly;
+        this._spinnerFrames = new Image[8];
+        for (int i = 0; i < 8; i++)
+        {
+            using var stream = asm.GetManifestResourceStream($"CopilotBooster.Resources.spinner_{i}.png")!;
+            this._spinnerFrames[i] = Image.FromStream(stream);
+        }
+        using var bellStream = asm.GetManifestResourceStream("CopilotBooster.Resources.bell.png")!;
+        this._bellImage = Image.FromStream(bellStream);
+
         this.WireEvents();
     }
 
@@ -30,18 +45,18 @@ internal class SessionGridController
     {
         this._grid.CellMouseClick += (s, e) =>
         {
-            if (e.RowIndex < 0 || e.ColumnIndex != 3)
+            if (e.RowIndex < 0 || e.ColumnIndex != 4)
             {
                 return;
             }
 
             var row = this._grid.Rows[e.RowIndex];
-            var activeText = row.Cells[3].Value as string;
+            var activeText = row.Cells[4].Value as string;
             if (!string.IsNullOrEmpty(activeText) && row.Tag is string sessionId)
             {
                 var lines = activeText.Split('\n');
-                var font = row.Cells[3].InheritedStyle.Font ?? this._grid.Font;
-                var padding = row.Cells[3].InheritedStyle.Padding;
+                var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
+                var padding = row.Cells[4].InheritedStyle.Padding;
                 int clickedLine = lines.Length - 1;
                 int cumY = padding.Top;
                 for (int i = 0; i < lines.Length; i++)
@@ -54,20 +69,30 @@ internal class SessionGridController
                     }
                 }
                 this._activeTracker.FocusActiveProcess(sessionId, clickedLine);
+
+                // Suppress bell until session transitions to working again
+                this._activeTracker.InitStartedSessions([sessionId]);
+
+                // Clear bell status when user focuses a session
+                row.Cells[0].Value = "";
+                if (!string.IsNullOrEmpty(activeText))
+                {
+                    row.DefaultCellStyle.BackColor = s_activeRowColor;
+                }
             }
         };
 
         this._grid.CellMouseMove += (s, e) =>
         {
-            if (e.RowIndex >= 0 && e.ColumnIndex == 3)
+            if (e.RowIndex >= 0 && e.ColumnIndex == 4)
             {
                 var row = this._grid.Rows[e.RowIndex];
-                var activeText = row.Cells[3].Value as string;
+                var activeText = row.Cells[4].Value as string;
                 if (!string.IsNullOrEmpty(activeText))
                 {
                     var lines = activeText.Split('\n');
-                    var font = row.Cells[3].InheritedStyle.Font ?? this._grid.Font;
-                    var padding = row.Cells[3].InheritedStyle.Padding;
+                    var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
+                    var padding = row.Cells[4].InheritedStyle.Padding;
                     int cumY = padding.Top;
                     bool overLink = false;
                     for (int i = 0; i < lines.Length; i++)
@@ -95,7 +120,38 @@ internal class SessionGridController
 
         this._grid.CellPainting += (s, e) =>
         {
-            if (e.RowIndex < 0 || e.ColumnIndex != 3 || e.Value is not string text || string.IsNullOrEmpty(text))
+            if (e.RowIndex < 0)
+            {
+                return;
+            }
+
+            // Status column (0) — draw spinner/bell image
+            if (e.ColumnIndex == 0)
+            {
+                var statusValue = e.Value as string;
+                Image? img = null;
+                if (statusValue == "working")
+                {
+                    img = this._spinnerFrames[this._spinnerFrameIndex % 8];
+                }
+                else if (statusValue == "bell")
+                {
+                    img = this._bellImage;
+                }
+
+                e.PaintBackground(e.ClipBounds, true);
+                if (img != null)
+                {
+                    int x = e.CellBounds.X + (e.CellBounds.Width - img.Width) / 2;
+                    int y = e.CellBounds.Y + (e.CellBounds.Height - img.Height) / 2;
+                    e.Graphics!.DrawImage(img, x, y, img.Width, img.Height);
+                }
+                e.Handled = true;
+                return;
+            }
+
+            // Active column (4) — draw underlined links
+            if (e.ColumnIndex != 4 || e.Value is not string text || string.IsNullOrEmpty(text))
             {
                 return;
             }
@@ -107,13 +163,13 @@ internal class SessionGridController
             var linkColor = isSelected ? Color.White : Color.FromArgb(0, 102, 204);
             var linkFont = new Font(e.CellStyle!.Font ?? this._grid.Font, FontStyle.Underline);
             var padding = e.CellStyle.Padding;
-            int y = e.CellBounds.Y + padding.Top;
+            int ly = e.CellBounds.Y + padding.Top;
 
             foreach (var line in lines)
             {
                 var size = TextRenderer.MeasureText(e.Graphics!, line, linkFont);
-                TextRenderer.DrawText(e.Graphics!, line, linkFont, new Point(e.CellBounds.X + padding.Left, y), linkColor);
-                y += size.Height;
+                TextRenderer.DrawText(e.Graphics!, line, linkFont, new Point(e.CellBounds.X + padding.Left, ly), linkColor);
+                ly += size.Height;
             }
 
             linkFont.Dispose();
@@ -140,11 +196,16 @@ internal class SessionGridController
             }
 
             var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
-            var rowIndex = this._grid.Rows.Add(session.Summary, cwdText, dateText, activeText);
+            var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
+            var rowIndex = this._grid.Rows.Add(statusIcon, session.Summary, cwdText, dateText, activeText);
             var row = this._grid.Rows[rowIndex];
             row.Tag = session.Id;
 
-            if (!string.IsNullOrEmpty(activeText))
+            if (statusIcon == "bell")
+            {
+                row.DefaultCellStyle.BackColor = s_bellRowColor;
+            }
+            else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
             {
                 row.DefaultCellStyle.BackColor = s_activeRowColor;
             }
@@ -164,16 +225,31 @@ internal class SessionGridController
 
             if (snapshot.SessionNamesById.TryGetValue(sessionId, out var newName))
             {
-                var currentName = row.Cells[0].Value?.ToString();
+                var currentName = row.Cells[1].Value?.ToString();
                 if (currentName != newName)
                 {
-                    row.Cells[0].Value = newName;
+                    row.Cells[1].Value = newName;
                 }
             }
 
             var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(sessionId, "");
-            row.Cells[3].Value = activeText;
-            row.DefaultCellStyle.BackColor = string.IsNullOrEmpty(activeText) ? SystemColors.Window : s_activeRowColor;
+            row.Cells[4].Value = activeText;
+
+            var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(sessionId, "");
+            row.Cells[0].Value = statusIcon;
+
+            if (statusIcon == "bell")
+            {
+                row.DefaultCellStyle.BackColor = s_bellRowColor;
+            }
+            else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
+            {
+                row.DefaultCellStyle.BackColor = s_activeRowColor;
+            }
+            else
+            {
+                row.DefaultCellStyle.BackColor = SystemColors.Window;
+            }
         }
 
         // Detect new sessions not yet in the grid and add them
@@ -206,11 +282,16 @@ internal class SessionGridController
             }
 
             var newActiveText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
-            var rowIndex = this._grid.Rows.Add(session.Summary, cwdText, dateText, newActiveText);
+            var newStatusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
+            var rowIndex = this._grid.Rows.Add(newStatusIcon, session.Summary, cwdText, dateText, newActiveText);
             var newRow = this._grid.Rows[rowIndex];
             newRow.Tag = session.Id;
 
-            if (!string.IsNullOrEmpty(newActiveText))
+            if (newStatusIcon == "bell")
+            {
+                newRow.DefaultCellStyle.BackColor = s_bellRowColor;
+            }
+            else if (newStatusIcon == "working" || !string.IsNullOrEmpty(newActiveText))
             {
                 newRow.DefaultCellStyle.BackColor = s_activeRowColor;
             }
@@ -240,5 +321,11 @@ internal class SessionGridController
     internal string? GetSelectedSessionId()
     {
         return this._grid.CurrentRow?.Tag as string;
+    }
+
+    internal void AdvanceSpinnerFrame()
+    {
+        this._spinnerFrameIndex = (this._spinnerFrameIndex + 1) % 8;
+        this._grid.InvalidateColumn(0);
     }
 }
