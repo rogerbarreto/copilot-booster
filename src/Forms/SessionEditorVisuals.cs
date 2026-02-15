@@ -9,7 +9,7 @@ namespace CopilotBooster.Forms;
 /// Provides a modal dialog for editing session name and working directory.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal static class SessionEditorForm
+internal static class SessionEditorVisuals
 {
     /// <summary>
     /// Displays a modal dialog for editing a session's summary and CWD.
@@ -60,7 +60,7 @@ internal static class SessionEditorForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtName));
+        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtName));
         y += 34;
 
         // CWD
@@ -79,7 +79,7 @@ internal static class SessionEditorForm
             Location = new Point(14, y),
             Width = 370
         };
-        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtCwd));
+        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtCwd));
 
         var btnBrowse = new Button
         {

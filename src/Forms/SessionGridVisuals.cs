@@ -13,7 +13,7 @@ namespace CopilotBooster.Forms;
 /// Controls the session DataGridView: population, painting, cursor, and click handling.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal class SessionGridController
+internal class SessionGridVisuals
 {
     private static Color ActiveRowColor => Application.IsDarkModeEnabled
         ? Color.FromArgb(0x22, 0x22, 0x22)
@@ -32,12 +32,12 @@ internal class SessionGridController
     private readonly Image _bellImage;
     private int _spinnerFrameIndex;
 
-    internal SessionGridController(DataGridView grid, ActiveStatusTracker activeTracker)
+    internal SessionGridVisuals(DataGridView grid, ActiveStatusTracker activeTracker)
     {
         this._grid = grid;
         this._activeTracker = activeTracker;
 
-        var asm = typeof(SessionGridController).Assembly;
+        var asm = typeof(SessionGridVisuals).Assembly;
         this._spinnerFrames = new Image[8];
         for (int i = 0; i < 8; i++)
         {

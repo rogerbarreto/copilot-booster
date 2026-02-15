@@ -10,7 +10,7 @@ namespace CopilotBooster.Forms;
 /// Provides a modal dialog for creating a new git worktree workspace.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal static class WorkspaceCreatorForm
+internal static class WorkspaceCreatorVisuals
 {
     /// <summary>
     /// Displays a modal dialog for creating a git worktree workspace from the specified repository.
@@ -73,7 +73,7 @@ internal static class WorkspaceCreatorForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtSessionName));
+        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtSessionName));
         y += 26;
 
         var lblSessionNameHelper = new Label
@@ -103,7 +103,7 @@ internal static class WorkspaceCreatorForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtName));
+        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtName));
         y += 26;
 
         var lblNameHelper = new Label
@@ -134,13 +134,13 @@ internal static class WorkspaceCreatorForm
             Width = 450
         };
 
-        var branches = GitService.GetBranches(repoPath);
+        var branches = WorkspaceCreationService.GetBranches(repoPath);
         foreach (var b in branches)
         {
             cmbBranch.Items.Add(b);
         }
 
-        var currentBranch = GitService.GetCurrentBranch(repoPath);
+        var currentBranch = WorkspaceCreationService.GetCurrentBranch(repoPath);
         if (!string.IsNullOrEmpty(currentBranch) && cmbBranch.Items.Contains(currentBranch))
         {
             cmbBranch.SelectedItem = currentBranch;
@@ -188,8 +188,7 @@ internal static class WorkspaceCreatorForm
             }
             else
             {
-                var dirName = GitService.SanitizeWorkspaceDirName(repoFolderName!, name);
-                lblPreview.Text = Path.Combine(GitService.GetWorkspacesDir(), dirName);
+                lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, name);
             }
         }
 
@@ -221,13 +220,10 @@ internal static class WorkspaceCreatorForm
                 return;
             }
 
-            var dirName = GitService.SanitizeWorkspaceDirName(repoFolderName!, workspaceName);
-            var worktreePath = Path.Combine(GitService.GetWorkspacesDir(), dirName);
             var selectedBaseBranch = cmbBranch.SelectedItem?.ToString() ?? "main";
 
-            Directory.CreateDirectory(GitService.GetWorkspacesDir());
-
-            var (success, error) = GitService.CreateWorktree(repoPath, worktreePath, workspaceName, selectedBaseBranch);
+            var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
+                repoPath, repoFolderName!, workspaceName, selectedBaseBranch);
             if (success)
             {
                 var sessionName = txtSessionName.Text.Trim();

@@ -12,7 +12,7 @@ namespace CopilotBooster.Forms;
 /// Provides a picker dialog for opening a session's working directory or repository in a configured IDE.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal static class IdePickerForm
+internal static class IdePickerVisuals
 {
     /// <summary>
     /// Displays an IDE picker dialog and opens the selected IDE for the specified session.

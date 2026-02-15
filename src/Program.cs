@@ -207,7 +207,7 @@ internal class Program
         {
             if (openIdeSessionId != null)
             {
-                IdePickerForm.OpenIdeForSession(openIdeSessionId);
+                IdePickerVisuals.OpenIdeForSession(openIdeSessionId);
                 return;
             }
 

@@ -13,7 +13,7 @@ namespace CopilotBooster.Forms;
 /// Provides a dialog for selecting a working directory from previously used directories or browsing for a new one.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal static class CwdPickerForm
+internal static class CwdPickerVisuals
 {
     /// <summary>
     /// Displays the working directory picker dialog, listing previously used directories sorted by usage frequency.

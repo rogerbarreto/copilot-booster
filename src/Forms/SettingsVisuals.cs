@@ -10,7 +10,7 @@ namespace CopilotBooster.Forms;
 /// Helper methods for building and managing settings tab UI controls.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal static class SettingsTabBuilder
+internal static class SettingsVisuals
 {
     /// <summary>
     /// Wraps a <see cref="TextBox"/> in a <see cref="Panel"/> that provides a themed border.

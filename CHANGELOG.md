@@ -119,7 +119,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **SOLID refactoring** — extracted MainForm (1658 → 860 lines) into focused components: `SessionDataService`, `ActiveStatusTracker`, `SessionGridController`, `SettingsTabBuilder`, `NewSessionTabBuilder`.
+- **SOLID refactoring** — extracted MainForm (1658 → 860 lines) into focused components: `SessionDataService`, `ActiveStatusTracker`, `SessionGridVisuals`, `SettingsVisuals`, `NewSessionTabBuilder`.
 - **Constructor decomposition** — 700-line constructor split into 10 well-named builder methods.
 - **Async I/O** — all file/process scanning runs on background threads via `Task.Run()` to prevent UI freezes during startup and refresh.
 - **Auto-fit CWD column** — column width adjusts to content (capped at 300px). Window width increased to 1000px.
@@ -139,7 +139,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Edit session** — right-click any session in the Existing Sessions list to open an "Edit" context menu. The Edit Session dialog lets you rename the session summary and change the working directory (with a folder browser).
-- **SessionEditorForm** — new modal dialog with session name and CWD fields, including a Browse button that defaults to the current working directory.
+- **SessionEditorVisuals** — new modal dialog with session name and CWD fields, including a Browse button that defaults to the current working directory.
 - **SessionService.UpdateSession()** — new method to persist session edits back to `workspace.yaml`, preserving all other fields.
 - 5 new unit tests for `UpdateSession` (99 total).
 

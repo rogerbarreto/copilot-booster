@@ -8,7 +8,7 @@ namespace CopilotBooster.Forms;
 /// Provides a modal dialog for naming a new Copilot session.
 /// </summary>
 [ExcludeFromCodeCoverage]
-internal static class NewSessionNameForm
+internal static class NewSessionNameVisuals
 {
     /// <summary>
     /// Displays a modal dialog prompting the user for a session name.
@@ -69,7 +69,7 @@ internal static class NewSessionNameForm
             Location = new Point(14, y),
             Width = 450
         };
-        form.Controls.Add(SettingsTabBuilder.WrapWithBorder(txtName));
+        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtName));
         y += 26;
 
         var lblHelper = new Label
