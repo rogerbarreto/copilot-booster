@@ -262,6 +262,14 @@ internal class MainForm : Form
             if (edited != null)
             {
                 SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
+
+                // Update Edge tab title if workspace is open
+                if (this._activeTracker.TryGetEdge(sid, out var edgeWs) && edgeWs.IsOpen)
+                {
+                    var displayName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
+                    edgeWs.UpdateSessionName(displayName);
+                }
+
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
                 if (SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd))
                 {
@@ -386,6 +394,9 @@ internal class MainForm : Form
                 return;
             }
 
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            var sessionName = !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary;
+
             var workspace = SessionInteractionManager.CreateEdgeWorkspace(sid);
             workspace.WindowClosed += () =>
             {
@@ -405,7 +416,7 @@ internal class MainForm : Form
             };
             this._activeTracker.TrackEdge(sid, workspace);
 
-            await workspace.OpenAsync().ConfigureAwait(true);
+            await workspace.OpenAsync(sessionName).ConfigureAwait(true);
             this.RefreshActiveStatusAsync();
         };
 
@@ -798,13 +809,17 @@ internal class MainForm : Form
 
     private void SetupUpdateBanner()
     {
+        var linkColor = Application.IsDarkModeEnabled ? Color.FromArgb(100, 180, 255) : Color.FromArgb(0, 102, 204);
         this._updateLabel = new LinkLabel
         {
             Dock = DockStyle.Bottom,
             TextAlign = ContentAlignment.MiddleCenter,
             Height = 28,
             Visible = false,
-            Padding = new Padding(0, 4, 0, 4)
+            Padding = new Padding(0, 4, 0, 4),
+            LinkColor = linkColor,
+            ActiveLinkColor = linkColor,
+            VisitedLinkColor = linkColor
         };
         this._updateLabel.LinkClicked += this.OnUpdateLabelClickedAsync;
     }

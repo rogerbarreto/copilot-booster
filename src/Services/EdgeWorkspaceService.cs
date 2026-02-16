@@ -18,7 +18,7 @@ namespace CopilotBooster.Services;
 [ExcludeFromCodeCoverage]
 internal partial class EdgeWorkspaceService
 {
-    private const string TitlePrefix = "Copilot Booster Session [";
+    private const string TitlePrefix = "CB Session [";
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -31,8 +31,10 @@ internal partial class EdgeWorkspaceService
 
     /// <summary>
     /// The title substring used to find the Edge tab/window.
+    /// Uses just the bracketed ID which is unique enough (GUID) and appears in both
+    /// named titles "[Name] - [id]" and unnamed titles "[id]".
     /// </summary>
-    private string TitleMarker => $"{TitlePrefix}{this.WorkspaceId}]";
+    private string TitleMarker => $"[{this.WorkspaceId}]";
 
     /// <summary>
     /// Gets or sets the cached window handle for external use (e.g. minimize, bulk scan).
@@ -76,11 +78,12 @@ internal partial class EdgeWorkspaceService
     }
 
     /// <summary>
-    /// Launches Edge with a new window pointing to session.html with the workspace GUID.
+    /// Launches Edge with a new window pointing to session.html with the workspace GUID and optional session name.
+    /// Opens an additional new-tab so the session anchor tab is not navigated away.
     /// Waits up to <paramref name="timeoutMs"/> milliseconds for the tab to appear.
     /// </summary>
     /// <returns>True if the tab was detected; false on timeout.</returns>
-    internal async Task<bool> OpenAsync(int timeoutMs = 10000)
+    internal async Task<bool> OpenAsync(string? sessionName = null, int timeoutMs = 10000)
     {
         var sessionHtml = GetSessionHtmlPath();
         if (sessionHtml == null)
@@ -89,7 +92,7 @@ internal partial class EdgeWorkspaceService
             return false;
         }
 
-        var url = $"file:///{sessionHtml.Replace('\\', '/')}#{this.WorkspaceId}";
+        var url = BuildSessionUrl(sessionHtml, this.WorkspaceId, sessionName);
 
         try
         {
@@ -124,6 +127,14 @@ internal partial class EdgeWorkspaceService
         {
             if (this.IsOpen)
             {
+                // Open a new tab so the session anchor tab is not navigated away
+                if (this.CachedHwnd != IntPtr.Zero)
+                {
+                    WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
+                    WindowFocusService.WaitForForeground(this.CachedHwnd);
+                    WindowFocusService.SendCtrlT(this.CachedHwnd);
+                }
+
                 return true;
             }
 
@@ -131,6 +142,44 @@ internal partial class EdgeWorkspaceService
         }
 
         return this.IsOpen;
+    }
+
+    /// <summary>
+    /// Updates the session name displayed in the Edge tab by navigating to the updated hash URL.
+    /// The session.html hashchange listener updates the title and content live.
+    /// </summary>
+    internal void UpdateSessionName(string? sessionName)
+    {
+        var sessionHtml = GetSessionHtmlPath();
+        if (sessionHtml == null || !this.IsOpen)
+        {
+            return;
+        }
+
+        var url = BuildSessionUrl(sessionHtml, this.WorkspaceId, sessionName);
+
+        try
+        {
+            var edgePath = FindEdgePath();
+            if (edgePath != null)
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = edgePath,
+                    Arguments = $"\"{url}\"",
+                    UseShellExecute = false
+                });
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = $"microsoft-edge:{url}",
+                    UseShellExecute = true
+                });
+            }
+        }
+        catch (Exception ex) { Program.Logger.LogDebug("Failed to update Edge session name: {Error}", ex.Message); }
     }
 
     /// <summary>
@@ -209,7 +258,7 @@ internal partial class EdgeWorkspaceService
                 {
                     var name = win.Current.Name;
                     if (!name.Contains("Edge", StringComparison.OrdinalIgnoreCase)
-                        && !name.Contains("Copilot Booster Session", StringComparison.OrdinalIgnoreCase))
+                        && !name.Contains("CB Session", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -227,6 +276,20 @@ internal partial class EdgeWorkspaceService
         catch (Exception ex) { Program.Logger.LogDebug("UI Automation error: {Error}", ex.Message); }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds the file:// URL for session.html with the workspace ID and optional URL-encoded session name in the hash.
+    /// </summary>
+    internal static string BuildSessionUrl(string sessionHtmlPath, string workspaceId, string? sessionName)
+    {
+        var baseUrl = $"file:///{sessionHtmlPath.Replace('\\', '/')}#{workspaceId}";
+        if (!string.IsNullOrWhiteSpace(sessionName))
+        {
+            baseUrl += $"/{Uri.EscapeDataString(sessionName)}";
+        }
+
+        return baseUrl;
     }
 
     /// <summary>
@@ -277,7 +340,7 @@ internal partial class EdgeWorkspaceService
     }
 
     /// <summary>
-    /// Scans all Edge windows for tabs containing "Copilot Booster Session [sessionId]"
+    /// Scans all Edge windows for tabs containing "CB Session [sessionId]"
     /// and returns a mapping of session ID → window handle.
     /// This is Edge-first: we scan Edge windows (fewer) and extract session IDs
     /// from tab names, avoiding per-session probing.
@@ -298,7 +361,7 @@ internal partial class EdgeWorkspaceService
                 {
                     var name = win.Current.Name;
                     if (!name.Contains("Edge", StringComparison.OrdinalIgnoreCase)
-                        && !name.Contains("Copilot Booster Session", StringComparison.OrdinalIgnoreCase))
+                        && !name.Contains("CB Session", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }
@@ -327,23 +390,30 @@ internal partial class EdgeWorkspaceService
     }
 
     /// <summary>
-    /// Extracts the session ID from a tab name like "Copilot Booster Session [guid] ...".
+    /// Extracts the session ID from a tab name like "CB Session [name] - [guid]"
+    /// or "CB Session [guid]". Returns the content of the last bracketed segment.
     /// </summary>
-    private static string? ExtractSessionId(string tabName)
+    internal static string? ExtractSessionId(string tabName)
     {
-        var startIdx = tabName.IndexOf(TitlePrefix, StringComparison.OrdinalIgnoreCase);
-        if (startIdx < 0)
+        var prefixIdx = tabName.IndexOf(TitlePrefix, StringComparison.OrdinalIgnoreCase);
+        if (prefixIdx < 0)
         {
             return null;
         }
 
-        var idStart = startIdx + TitlePrefix.Length;
-        var endIdx = tabName.IndexOf(']', idStart);
-        if (endIdx < 0)
+        // Find the last [...] bracket pair — that's the session ID
+        var lastOpen = tabName.LastIndexOf('[');
+        if (lastOpen < prefixIdx)
         {
             return null;
         }
 
-        return tabName[idStart..endIdx];
+        var lastClose = tabName.IndexOf(']', lastOpen);
+        if (lastClose < 0)
+        {
+            return null;
+        }
+
+        return tabName[(lastOpen + 1)..lastClose];
     }
 }

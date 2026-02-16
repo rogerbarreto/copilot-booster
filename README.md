@@ -132,6 +132,8 @@ Open a managed Microsoft Edge window linked to any session. Each workspace gets 
 </p>
 
 - **Active tracking** — the Edge workspace appears as a clickable link in the Active column; click to focus the window
+- **Session name in tab** — the anchor tab title shows the session name (alias or summary) for easy identification; updates live when you change the alias
+- **New tab on open** — a fresh new tab is automatically opened alongside the anchor tab so your browsing doesn't overwrite the tracker
 - **Tab-level detection** — uses UI Automation to find the anchor tab across all Edge windows, even when another tab is active
 - **Auto-cleanup** — when you close the anchor tab or the Edge window, the workspace is automatically removed from tracking
 - **Re-discovery** — if you restart Copilot Booster while an Edge workspace is still open, it will be re-detected on the next refresh

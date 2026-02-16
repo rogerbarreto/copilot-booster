@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0] - 2026-02-16
+
+### Added
+
+- **Edge session names** — Edge anchor tabs now display the session name (alias or summary) in the tab title and page content, making it easy to identify which browser window belongs to which session.
+- **Live Edge name updates** — changing a session alias automatically updates the Edge tab title via `hashchange` navigation, no need to close and reopen.
+- **Edge new-tab on open** — opening an Edge workspace now automatically opens a fresh new tab alongside the session anchor tab, so your browsing doesn't overwrite the tracker tab.
+- **Session.html dark mode** — the anchor tab page now supports light and dark themes via `prefers-color-scheme`, with a warning banner reminding users not to close the tracking tab.
+- **Session list ordering preserved** — refreshing the session grid no longer resets row order; existing positions are maintained while new sessions are appended.
+- **Update banner theming** — the update-available link label now uses theme-aware colors (light blue in dark mode, dark blue in light mode).
+
+### Fixed
+
+- **Edge not working in installed version** — the Inno Setup installer was missing `session.html` and `copilot.ico`, causing Edge workspace open to silently fail. Both files are now included.
+- **Spaces in session names showing as `+`** — switched from `WebUtility.UrlEncode` to `Uri.EscapeDataString` for proper `%20` encoding in URL hash fragments.
+
 ## [0.10.0] - 2026-02-16
 
 ### Added

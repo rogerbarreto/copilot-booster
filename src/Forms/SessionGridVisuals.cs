@@ -189,12 +189,50 @@ internal class SessionGridVisuals
 
     internal void Populate(List<NamedSession> sessions, ActiveStatusSnapshot snapshot, string? searchQuery)
     {
-        this._grid.Rows.Clear();
         var isSearching = !string.IsNullOrWhiteSpace(searchQuery);
 
         var displayed = isSearching
             ? SessionService.SearchSessions(sessions, searchQuery!)
             : sessions.Take(50).ToList();
+
+        // Preserve existing row order when the same sessions are displayed
+        var existingOrder = new List<string>();
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is string id)
+            {
+                existingOrder.Add(id);
+            }
+        }
+
+        var displayedIds = new HashSet<string>(displayed.Select(s => s.Id), StringComparer.OrdinalIgnoreCase);
+        if (existingOrder.Count > 0
+            && existingOrder.All(id => displayedIds.Contains(id)))
+        {
+            // Re-order displayed list to match existing grid order, appending new sessions at the end
+            var existingSet = new HashSet<string>(existingOrder, StringComparer.OrdinalIgnoreCase);
+            var ordered = new List<NamedSession>();
+            foreach (var id in existingOrder)
+            {
+                var s = displayed.Find(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (s != null)
+                {
+                    ordered.Add(s);
+                }
+            }
+
+            foreach (var s in displayed)
+            {
+                if (!existingSet.Contains(s.Id))
+                {
+                    ordered.Add(s);
+                }
+            }
+
+            displayed = ordered;
+        }
+
+        this._grid.Rows.Clear();
 
         foreach (var session in displayed)
         {

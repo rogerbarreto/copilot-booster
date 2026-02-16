@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace CopilotBooster.Services;
 
@@ -15,6 +16,8 @@ internal static partial class WindowFocusService
     private const int SW_RESTORE = 9;
     private const int SW_MINIMIZE = 6;
     private const byte VK_MENU = 0x12;
+    private const byte VK_CONTROL = 0x11;
+    private const byte VK_T = 0x54;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     private const uint KEYEVENTF_KEYUP = 0x0002;
 
@@ -35,6 +38,9 @@ internal static partial class WindowFocusService
 
     [LibraryImport("user32.dll")]
     private static partial void keybd_event(byte bVk, byte bScan, uint dwFlags, nuint dwExtraInfo);
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetForegroundWindow();
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -479,5 +485,37 @@ internal static partial class WindowFocusService
         SetForegroundWindow(hwnd);
 
         return true;
+    }
+
+    /// <summary>
+    /// Sends Ctrl+T to the specified window to open a new browser tab.
+    /// The window must already be in the foreground.
+    /// </summary>
+    internal static void SendCtrlT(IntPtr hwnd)
+    {
+        keybd_event(VK_CONTROL, 0, 0, 0);
+        keybd_event(VK_T, 0, 0, 0);
+        keybd_event(VK_T, 0, KEYEVENTF_KEYUP, 0);
+        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+    }
+
+    /// <summary>
+    /// Waits until the specified window becomes the foreground window, or until timeout.
+    /// </summary>
+    /// <returns>True if the window is now in the foreground.</returns>
+    internal static bool WaitForForeground(IntPtr hwnd, int timeoutMs = 1000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (GetForegroundWindow() == hwnd)
+            {
+                return true;
+            }
+
+            Thread.Sleep(50);
+        }
+
+        return GetForegroundWindow() == hwnd;
     }
 }

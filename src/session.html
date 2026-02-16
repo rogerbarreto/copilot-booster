@@ -1,33 +1,98 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <script>
-        const id = location.hash.slice(1);
-        document.title = `Copilot Booster Session [${id}]`;
+        function parseHash() {
+            const raw = location.hash.slice(1);
+            const sep = raw.indexOf('/');
+            const id = sep >= 0 ? raw.substring(0, sep) : raw;
+            const name = sep >= 0 ? decodeURIComponent(raw.substring(sep + 1)) : '';
+            return { id, name };
+        }
+
+        function update() {
+            const { id, name } = parseHash();
+            if (name) {
+                document.title = `CB Session [${name}] - [${id}]`;
+            } else {
+                document.title = `CB Session [${id}]`;
+            }
+            const nameEl = document.getElementById('session-name');
+            const idEl = document.getElementById('session-id');
+            if (nameEl) nameEl.textContent = name || 'Unnamed Session';
+            if (idEl) idEl.textContent = id;
+        }
+
+        window.addEventListener('hashchange', update);
+        document.addEventListener('DOMContentLoaded', update);
     </script>
     <style>
+        :root {
+            --bg: #f5f5f5;
+            --fg: #333;
+            --fg-muted: #666;
+            --id-color: #888;
+            --banner-bg: #fff3cd;
+            --banner-border: #ffc107;
+            --banner-fg: #856404;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1e1e1e;
+                --fg: #e0e0e0;
+                --fg-muted: #aaa;
+                --id-color: #999;
+                --banner-bg: #3a3000;
+                --banner-border: #ffc107;
+                --banner-fg: #ffd54f;
+            }
+        }
         body {
             font-family: Segoe UI, sans-serif;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
             margin: 0;
-            background: #f5f5f5;
-            color: #333;
+            background: var(--bg);
+            color: var(--fg);
         }
         .container { text-align: center; padding: 40px; }
         .icon { font-size: 48px; margin-bottom: 16px; }
+        h1 { margin: 0 0 4px; font-size: 20px; }
         h2 { margin: 0 0 8px; }
-        p { color: #666; margin: 0; }
+        p { color: var(--fg-muted); margin: 0; }
+        .session-id {
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            color: var(--id-color);
+            margin-top: 12px;
+        }
+        .banner {
+            background: var(--banner-bg);
+            border: 1px solid var(--banner-border);
+            color: var(--banner-fg);
+            padding: 10px 20px;
+            border-radius: 6px;
+            margin-top: 24px;
+            font-size: 13px;
+            max-width: 400px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="icon">📌</div>
-        <h2>Copilot Booster Session</h2>
+        <h1>Copilot Booster Session</h1>
+        <h2 id="session-name">Copilot Booster Session</h2>
         <p>Keep this tab open to maintain your browsing session reference.<br>
            Feel free to open other tabs in this window.</p>
+        <div class="session-id" id="session-id"></div>
+        <div class="banner">
+            ⚠️ Please do not close this tab — it is used by Copilot Booster to track this browser window for the session.
+        </div>
     </div>
 </body>
 </html>
