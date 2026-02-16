@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Forms;
 
@@ -115,15 +116,10 @@ internal class MainForm : Form
         this.FormBorderStyle = FormBorderStyle.Sizable;
         this.TopMost = Program._settings.AlwaysOnTop;
 
-        try
+        if (Program.AppIcon != null)
         {
-            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null)
-            {
-                this.Icon = icon;
-            }
+            this.Icon = Program.AppIcon;
         }
-        catch { }
     }
 
     private void SetupTrayIcon()
@@ -149,10 +145,13 @@ internal class MainForm : Form
             }
             else
             {
-                trayIconImage = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                trayIconImage = Program.AppIcon;
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Program.Logger.LogWarning("Failed to load tray icon: {Error}", ex.Message);
+        }
 
         trayIconImage ??= this.Icon ?? SystemIcons.Application;
 

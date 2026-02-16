@@ -1,7 +1,9 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Models;
 
@@ -93,7 +95,7 @@ internal class LauncherSettings
                 return JsonSerializer.Deserialize<LauncherSettings>(json) ?? CreateDefault();
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to load settings: {Error}", ex.Message); }
 
         var settings = CreateDefault();
         settings.Save(settingsFile);
@@ -122,7 +124,7 @@ internal class LauncherSettings
             var options = s_writeOptions;
             File.WriteAllText(settingsFile, JsonSerializer.Serialize(this, options));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to save settings: {Error}", ex.Message); }
     }
 
     /// <summary>

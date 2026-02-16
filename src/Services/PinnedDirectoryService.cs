@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -27,7 +28,7 @@ internal static class PinnedDirectoryService
                 return JsonSerializer.Deserialize<List<string>>(json) ?? [];
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to load pinned directories: {Error}", ex.Message); }
         return [];
     }
 
@@ -45,7 +46,7 @@ internal static class PinnedDirectoryService
             }
             File.WriteAllText(s_pinnedFile, JsonSerializer.Serialize(directories, new JsonSerializerOptions { WriteIndented = true }));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to save pinned directories: {Error}", ex.Message); }
     }
 
     /// <summary>

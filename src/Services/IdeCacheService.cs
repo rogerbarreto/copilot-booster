@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using CopilotBooster.Models;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -41,7 +42,7 @@ internal static class IdeCacheService
 
             File.WriteAllText(cacheFile, JsonSerializer.Serialize(entries));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to save IDE cache: {Error}", ex.Message); }
     }
 
     /// <summary>
@@ -81,7 +82,7 @@ internal static class IdeCacheService
                 result[entry.SessionId].Add(proc);
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to load IDE cache: {Error}", ex.Message); }
 
         return result;
     }

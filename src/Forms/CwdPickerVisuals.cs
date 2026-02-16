@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using CopilotBooster.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Forms;
 
@@ -50,7 +51,7 @@ internal static class CwdPickerVisuals
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { Program.Logger.LogWarning("Failed to parse workspace.yaml: {Error}", ex.Message); }
             }
         }
 
@@ -70,15 +71,10 @@ internal static class CwdPickerVisuals
             TopMost = Program._settings.AlwaysOnTop
         };
 
-        try
+        if (Program.AppIcon != null)
         {
-            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null)
-            {
-                form.Icon = icon;
-            }
+            form.Icon = Program.AppIcon;
         }
-        catch { }
 
         var listView = new ListView
         {

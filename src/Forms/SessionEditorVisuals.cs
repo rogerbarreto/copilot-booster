@@ -37,15 +37,10 @@ internal static class SessionEditorVisuals
             TopMost = Program._settings.AlwaysOnTop
         };
 
-        try
+        if (Program.AppIcon != null)
         {
-            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null)
-            {
-                form.Icon = icon;
-            }
+            form.Icon = Program.AppIcon;
         }
-        catch { }
 
         int y = 14;
 

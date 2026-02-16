@@ -1,6 +1,8 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -26,15 +28,15 @@ internal static class TerminalCacheService
                 {
                     cache = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(cacheFile)) ?? [];
                 }
-                catch { }
+                catch (Exception ex) { Program.Logger.LogWarning("Failed to parse terminal cache: {Error}", ex.Message); }
             }
 
             cache[sessionId] = JsonSerializer.Deserialize<JsonElement>(
-                JsonSerializer.Serialize(new { copilotPid, started = System.DateTime.Now.ToString("o") }));
+                JsonSerializer.Serialize(new { copilotPid, started = DateTime.Now.ToString("o") }));
 
             File.WriteAllText(cacheFile, JsonSerializer.Serialize(cache));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to cache terminal: {Error}", ex.Message); }
     }
 
     /// <summary>
@@ -60,7 +62,7 @@ internal static class TerminalCacheService
                 ids.Add(entry.Key);
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to read terminal cache: {Error}", ex.Message); }
 
         return ids;
     }
@@ -83,6 +85,6 @@ internal static class TerminalCacheService
             cache.Remove(sessionId);
             File.WriteAllText(cacheFile, JsonSerializer.Serialize(cache));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to remove terminal cache: {Error}", ex.Message); }
     }
 }

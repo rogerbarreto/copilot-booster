@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -60,10 +61,15 @@ internal class Program
     internal static LauncherSettings _settings = null!;
 
     /// <summary>
+    /// Cached application icon extracted once at startup.
+    /// </summary>
+    internal static Icon? AppIcon { get; private set; }
+
+    /// <summary>
     /// Application-wide logger. Uses <see cref="LogLevel.Debug"/> for profiling,
     /// <see cref="LogLevel.Information"/> for general operational logs.
     /// Minimum level is <see cref="LogLevel.Information"/> by default;
-    /// pass <c>--profile</c> or build in DEBUG to include debug-level output.
+    /// configure via Settings → Log Level or the <c>logLevel</c> field in settings.json.
     /// </summary>
     internal static ILogger Logger { get; set; } = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
@@ -212,6 +218,16 @@ internal class Program
         }
         Logger = new FileLogger(s_logFile, minLevel);
 
+        // Cache app icon once
+        try
+        {
+            AppIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Failed to extract app icon: {Error}", ex.Message);
+        }
+
         // Perform one-time migration of files from old location
         MigrateFromCopilotDir();
 
@@ -252,7 +268,7 @@ internal class Program
                 {
                     File.WriteAllText(s_signalFile, desiredTab.ToString());
                 }
-                catch { }
+                catch (Exception ex) { Logger.LogWarning("Failed to write signal file: {Error}", ex.Message); }
                 Logger.LogInformation("Signaled existing MainForm to switch to tab {Tab}", desiredTab);
                 return;
             }
@@ -275,7 +291,7 @@ internal class Program
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { Logger.LogWarning("Failed to signal existing instance: {Error}", ex.Message); }
             };
             signalTimer.Start();
 
@@ -286,7 +302,7 @@ internal class Program
                     File.Delete(s_signalFile);
                 }
             }
-            catch { }
+            catch (Exception ex) { Logger.LogWarning("Failed to delete signal file: {Error}", ex.Message); }
 
             Application.Run(s_mainForm);
             signalTimer.Stop();
@@ -344,21 +360,15 @@ internal class Program
             WindowState = FormWindowState.Minimized,
             FormBorderStyle = FormBorderStyle.SizableToolWindow,
             MinimizeBox = true,
-            Size = new System.Drawing.Size(0, 0),
+            Size = new Size(0, 0),
             Opacity = 0,
             ShowIcon = false
         };
 
-        // Set window icon
-        try
+        if (AppIcon != null)
         {
-            var icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null)
-            {
-                s_hiddenForm.Icon = icon;
-            }
+            s_hiddenForm.Icon = AppIcon;
         }
-        catch { }
 
         s_hiddenForm.Load += (s, e) =>
         {
@@ -464,7 +474,7 @@ internal class Program
                             SetWindowText(hwnd, $"Copilot CLI - {sessionId}");
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { Logger.LogDebug("Failed to set window title: {Error}", ex.Message); }
                 }
             }
 

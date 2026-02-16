@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -143,7 +144,7 @@ internal static class GitService
 
             if (!process.WaitForExit(10_000))
             {
-                try { process.Kill(); } catch { }
+                try { process.Kill(); } catch (Exception ex) { Program.Logger.LogDebug("Failed to kill git process: {Error}", ex.Message); }
                 return (-1, "", "Git command timed out.");
             }
 

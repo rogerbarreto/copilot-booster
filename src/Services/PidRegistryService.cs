@@ -1,6 +1,8 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -65,12 +67,12 @@ internal class PidRegistryService
                 {
                     registry = JsonSerializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(pidRegistryFile)) ?? [];
                 }
-                catch { }
+                catch (Exception ex) { Program.Logger.LogWarning("Failed to parse PID registry: {Error}", ex.Message); }
             }
-            registry[pid.ToString()] = new { started = System.DateTime.Now.ToString("o"), sessionId = (string?)null };
+            registry[pid.ToString()] = new { started = DateTime.Now.ToString("o"), sessionId = (string?)null };
             File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(registry));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to register PID: {Error}", ex.Message); }
     }
 
     /// <summary>
@@ -93,11 +95,11 @@ internal class PidRegistryService
             var registry = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? [];
 
             registry[pid.ToString()] = JsonSerializer.Deserialize<JsonElement>(
-                JsonSerializer.Serialize(new { started = System.DateTime.Now.ToString("o"), sessionId, copilotPid }));
+                JsonSerializer.Serialize(new { started = DateTime.Now.ToString("o"), sessionId, copilotPid }));
 
             File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(registry));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to update PID session: {Error}", ex.Message); }
     }
 
     /// <summary>
@@ -118,6 +120,6 @@ internal class PidRegistryService
             registry.Remove(pid.ToString());
             File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(registry));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to unregister PID: {Error}", ex.Message); }
     }
 }

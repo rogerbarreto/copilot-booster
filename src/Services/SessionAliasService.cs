@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -26,7 +27,7 @@ internal static class SessionAliasService
                     ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to load session aliases: {Error}", ex.Message); }
 
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
@@ -46,7 +47,7 @@ internal static class SessionAliasService
 
             File.WriteAllText(aliasFile, JsonSerializer.Serialize(aliases, s_writeOptions));
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogError("Failed to save session alias: {Error}", ex.Message); }
     }
 
     /// <summary>

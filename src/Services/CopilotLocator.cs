@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -43,7 +44,7 @@ internal class CopilotLocator
                 return output.Split('\n')[0].Trim();
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("Failed to locate copilot via PATH: {Error}", ex.Message); }
 
         return "copilot.exe";
     }

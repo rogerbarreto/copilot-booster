@@ -69,15 +69,10 @@ internal static class IdePickerVisuals
             TopMost = Program._settings.AlwaysOnTop
         };
 
-        try
+        if (Program.AppIcon != null)
         {
-            var icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-            if (icon != null)
-            {
-                form.Icon = icon;
-            }
+            form.Icon = Program.AppIcon;
         }
-        catch { }
 
         var layout = new TableLayoutPanel
         {

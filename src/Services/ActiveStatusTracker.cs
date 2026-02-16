@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using CopilotBooster.Models;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -61,7 +62,7 @@ internal class ActiveStatusTracker
                 ids.Add(s.Id);
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to load active session IDs: {Error}", ex.Message); }
         return ids;
     }
 
@@ -93,7 +94,7 @@ internal class ActiveStatusTracker
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("Process not found: {Error}", ex.Message); }
     }
 
     internal string BuildActiveText(string sessionId)
@@ -151,7 +152,7 @@ internal class ActiveStatusTracker
                             parts.Add(proc.Name);
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { Program.Logger.LogWarning("Failed to check process liveness: {Error}", ex.Message); }
                 }
             }
         }
@@ -209,7 +210,7 @@ internal class ActiveStatusTracker
                             focusTargets.Add((proc.Name, () => WindowFocusService.TryFocusProcessWindow(capturedPid)));
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { Program.Logger.LogDebug("Process not found for focus: {Error}", ex.Message); }
                 }
             }
         }
@@ -388,7 +389,7 @@ internal class ActiveStatusTracker
                         {
                             bool stillAlive;
                             try { stillAlive = !Process.GetProcessById(proc.Pid).HasExited; }
-                            catch { stillAlive = false; }
+                            catch (Exception ex) { stillAlive = false; Program.Logger.LogDebug("Process exited: {Error}", ex.Message); }
 
                             if (stillAlive)
                             {
@@ -410,7 +411,7 @@ internal class ActiveStatusTracker
                 // No HWND yet — try to capture one from the PID
                 bool alive;
                 try { alive = !Process.GetProcessById(proc.Pid).HasExited; }
-                catch { alive = false; }
+                catch (Exception ex) { alive = false; Program.Logger.LogDebug("Process exited: {Error}", ex.Message); }
 
                 if (alive)
                 {
@@ -563,7 +564,7 @@ internal class ActiveStatusTracker
                         return true;
                     }
                 }
-                catch { }
+                catch (Exception ex) { Program.Logger.LogDebug("Process not found: {Error}", ex.Message); }
             }
         }
 

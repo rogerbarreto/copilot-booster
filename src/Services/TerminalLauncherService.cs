@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -141,7 +142,7 @@ internal static class TerminalLauncherService
                 return "pwsh";
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("Failed to detect pwsh: {Error}", ex.Message); }
 
         return "cmd";
     }

@@ -63,7 +63,7 @@ internal sealed class FileLogger : ILogger
                 File.AppendAllText(this._logFile, line + "\n");
             }
         }
-        catch { }
+        catch { } // Logger cannot log its own write failure
     }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;

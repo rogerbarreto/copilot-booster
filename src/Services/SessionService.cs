@@ -128,7 +128,7 @@ internal class SessionService
             {
                 File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(pidRegistry));
             }
-            catch { }
+            catch (Exception ex) { Program.Logger.LogWarning("Failed to clean PID registry: {Error}", ex.Message); }
         }
 
         return sessions;
@@ -268,7 +268,7 @@ internal class SessionService
                     var hasEvents = File.Exists(Path.Combine(d, "events.jsonl"));
                     if (!hasEvents && activeIds != null && !activeIds.Contains(id))
                     {
-                        try { Directory.Delete(d, recursive: true); deletedCount++; } catch { }
+                        try { Directory.Delete(d, recursive: true); deletedCount++; } catch (Exception ex) { Program.Logger.LogError("Failed to delete session directory: {Error}", ex.Message); }
                         return null;
                     }
 
@@ -347,7 +347,7 @@ internal class SessionService
                 ids.Add(s.Id);
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogWarning("Failed to get active session IDs: {Error}", ex.Message); }
         return ids;
     }
 

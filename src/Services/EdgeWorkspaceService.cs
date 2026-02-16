@@ -6,6 +6,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Automation;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
 namespace CopilotBooster.Services;
@@ -182,7 +183,7 @@ internal partial class EdgeWorkspaceService
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("UI Automation error scanning Edge tab: {Error}", ex.Message); }
 
         return false;
     }
@@ -219,10 +220,10 @@ internal partial class EdgeWorkspaceService
                         break;
                     }
                 }
-                catch { }
+                catch (Exception ex) { Program.Logger.LogDebug("UI Automation error scanning Edge window: {Error}", ex.Message); }
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("UI Automation error: {Error}", ex.Message); }
 
         return result;
     }
@@ -253,7 +254,7 @@ internal partial class EdgeWorkspaceService
                 return path;
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("Failed to get session HTML path: {Error}", ex.Message); }
 
         string[] knownPaths =
         [
@@ -316,10 +317,10 @@ internal partial class EdgeWorkspaceService
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { Program.Logger.LogDebug("UI Automation error scanning Edge window: {Error}", ex.Message); }
             }
         }
-        catch { }
+        catch (Exception ex) { Program.Logger.LogDebug("UI Automation error: {Error}", ex.Message); }
 
         return result;
     }
