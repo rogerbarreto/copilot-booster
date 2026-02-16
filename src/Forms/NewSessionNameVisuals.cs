@@ -26,7 +26,8 @@ internal static class NewSessionNameVisuals
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 200
+            Height = 200,
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         try
@@ -44,7 +45,7 @@ internal static class NewSessionNameVisuals
         // Subtitle
         var lblSubtitle = new Label
         {
-            Text = "Name your new coding session",
+            Text = "Give your session an alias",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 8.5f),
             AutoSize = true,
@@ -53,10 +54,10 @@ internal static class NewSessionNameVisuals
         form.Controls.Add(lblSubtitle);
         y += 28;
 
-        // Session Name
+        // Session Alias
         var lblName = new Label
         {
-            Text = "Session Name",
+            Text = "Session Alias",
             AutoSize = true,
             Location = new Point(14, y)
         };
@@ -74,7 +75,7 @@ internal static class NewSessionNameVisuals
 
         var lblHelper = new Label
         {
-            Text = "A descriptive name for your session (optional)",
+            Text = "A stable label for your session (optional)",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,

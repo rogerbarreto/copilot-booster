@@ -30,7 +30,8 @@ internal static class SessionEditorVisuals
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 270
+            Height = 270,
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         try

@@ -65,7 +65,8 @@ internal static class CwdPickerVisuals
             Size = new Size(600, 420),
             MinimumSize = new Size(450, 300),
             StartPosition = FormStartPosition.CenterScreen,
-            FormBorderStyle = FormBorderStyle.Sizable
+            FormBorderStyle = FormBorderStyle.Sizable,
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         try

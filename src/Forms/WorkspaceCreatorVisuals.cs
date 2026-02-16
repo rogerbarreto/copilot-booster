@@ -30,7 +30,8 @@ internal static class WorkspaceCreatorVisuals
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 340
+            Height = 340,
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         try

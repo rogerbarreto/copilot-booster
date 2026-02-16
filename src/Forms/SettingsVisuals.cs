@@ -239,7 +239,8 @@ internal static class SettingsVisuals
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
-            MinimizeBox = false
+            MinimizeBox = false,
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         var lblDesc = new Label { Text = "Description:", Location = new Point(12, 15), AutoSize = true };
@@ -292,7 +293,8 @@ internal static class SettingsVisuals
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
-            MinimizeBox = false
+            MinimizeBox = false,
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         var lbl = new Label { Text = label, Location = new Point(12, 15), AutoSize = true };

@@ -65,7 +65,8 @@ internal static class IdePickerVisuals
             MinimizeBox = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(12)
+            Padding = new Padding(12),
+            TopMost = Program._settings.AlwaysOnTop
         };
 
         try
