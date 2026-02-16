@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>copilot.ico</ApplicationIcon>
     <AssemblyName>CopilotBooster</AssemblyName>
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <Nullable>enable</Nullable>
@@ -27,5 +27,6 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft-WindowsAPICodePack-Shell" Version="1.1.5" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="*" />
   </ItemGroup>
 </Project>

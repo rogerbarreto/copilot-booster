@@ -13,6 +13,7 @@ namespace CopilotBooster.Services;
 internal static partial class WindowFocusService
 {
     private const int SW_RESTORE = 9;
+    private const int SW_MINIMIZE = 6;
     private const byte VK_MENU = 0x12;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -426,6 +427,17 @@ internal static partial class WindowFocusService
     internal static bool IsWindowAlive(IntPtr hwnd)
     {
         return hwnd != IntPtr.Zero && IsWindow(hwnd) && IsWindowVisible(hwnd);
+    }
+
+    /// <summary>
+    /// Minimizes the specified window.
+    /// </summary>
+    internal static void MinimizeWindow(IntPtr hwnd)
+    {
+        if (hwnd != IntPtr.Zero)
+        {
+            ShowWindow(hwnd, SW_MINIMIZE);
+        }
     }
 
     /// <summary>

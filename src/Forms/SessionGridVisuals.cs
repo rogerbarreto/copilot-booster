@@ -207,9 +207,16 @@ internal class SessionGridVisuals
 
             var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
             var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
-            var rowIndex = this._grid.Rows.Add(statusIcon, session.Summary, cwdText, dateText, activeText);
+            var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+            var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, activeText);
             var row = this._grid.Rows[rowIndex];
             row.Tag = session.Id;
+
+            // Tooltip shows the current session name when alias is displayed
+            if (!string.IsNullOrEmpty(session.Alias) && !string.IsNullOrEmpty(session.Summary))
+            {
+                row.Cells[1].ToolTipText = session.Summary;
+            }
 
             if (statusIcon == "bell")
             {
@@ -236,10 +243,23 @@ internal class SessionGridVisuals
 
             if (snapshot.SessionNamesById.TryGetValue(sessionId, out var newName))
             {
-                var currentName = row.Cells[1].Value?.ToString();
-                if (currentName != newName)
+                // Find the session to check for alias
+                var session = sessions.Find(s => s.Id == sessionId);
+                var displayName = session != null && !string.IsNullOrEmpty(session.Alias) ? session.Alias : newName;
+                var currentDisplay = row.Cells[1].Value?.ToString();
+                if (currentDisplay != displayName)
                 {
-                    row.Cells[1].Value = newName;
+                    row.Cells[1].Value = displayName;
+                }
+
+                // Update tooltip with current name when alias is shown
+                if (session != null && !string.IsNullOrEmpty(session.Alias))
+                {
+                    row.Cells[1].ToolTipText = newName;
+                }
+                else
+                {
+                    row.Cells[1].ToolTipText = "";
                 }
             }
 
@@ -297,9 +317,15 @@ internal class SessionGridVisuals
 
             var newActiveText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
             var newStatusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
-            var rowIndex = this._grid.Rows.Add(newStatusIcon, session.Summary, cwdText, dateText, newActiveText);
+            var newDisplayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+            var rowIndex = this._grid.Rows.Add(newStatusIcon, newDisplayName, cwdText, dateText, newActiveText);
             var newRow = this._grid.Rows[rowIndex];
             newRow.Tag = session.Id;
+
+            if (!string.IsNullOrEmpty(session.Alias) && !string.IsNullOrEmpty(session.Summary))
+            {
+                newRow.Cells[1].ToolTipText = session.Summary;
+            }
 
             if (newStatusIcon == "bell")
             {

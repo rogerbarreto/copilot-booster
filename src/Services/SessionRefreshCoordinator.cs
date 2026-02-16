@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
 using CopilotBooster.Models;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -29,12 +31,23 @@ internal class SessionRefreshCoordinator
     }
 
     /// <summary>
-    /// Loads named sessions from disk and caches them.
+    /// Loads named sessions from disk, merges aliases, and caches them.
     /// </summary>
     /// <returns>The loaded sessions.</returns>
     internal IReadOnlyList<NamedSession> LoadSessions()
     {
         this._cachedSessions = SessionService.LoadNamedSessions(this._sessionStateDir, this._pidRegistryFile);
+
+        // Merge aliases from the alias file
+        var aliases = SessionAliasService.Load(Program.SessionAliasFile);
+        foreach (var session in this._cachedSessions)
+        {
+            if (aliases.TryGetValue(session.Id, out var alias))
+            {
+                session.Alias = alias;
+            }
+        }
+
         return this._cachedSessions;
     }
 
@@ -45,7 +58,14 @@ internal class SessionRefreshCoordinator
     /// <returns>A snapshot of active text, session names, and status icons.</returns>
     internal ActiveStatusSnapshot RefreshActiveStatus(IReadOnlyList<NamedSession> sessions)
     {
-        return this._activeTracker.Refresh((List<NamedSession>)sessions);
+        Stopwatch? sw = Program.Logger.IsEnabled(LogLevel.Debug) ? Stopwatch.StartNew() : null;
+        var result = this._activeTracker.Refresh((List<NamedSession>)sessions);
+        if (sw != null)
+        {
+            sw.Stop();
+            Program.Logger.LogDebug("RefreshActiveStatus: {ElapsedMs}ms ({SessionCount} sessions)", sw.ElapsedMilliseconds, sessions.Count);
+        }
+        return result;
     }
 
     /// <summary>

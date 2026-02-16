@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
 using Microsoft.WindowsAPICodePack.Shell;
 using Microsoft.WindowsAPICodePack.Taskbar;
 
@@ -16,16 +17,8 @@ internal class JumpListService
     /// <summary>
     /// Acquires a named mutex lock and updates the jump list, recording the update timestamp.
     /// </summary>
-    /// <param name="updateLockName">Name of the mutex used to synchronize updates.</param>
-    /// <param name="lastUpdateFile">Path to the file storing the last update timestamp.</param>
-    /// <param name="launcherExePath">Path to the launcher executable.</param>
-    /// <param name="copilotExePath">Path to the Copilot executable for icon references.</param>
-    /// <param name="pidRegistryFile">Path to the PID registry JSON file.</param>
-    /// <param name="sessionStateDir">Path to the directory containing session state.</param>
-    /// <param name="logFile">Path to the log file.</param>
-    /// <param name="hiddenForm">The hidden form used for UI thread invocation, or <c>null</c>.</param>
     [ExcludeFromCodeCoverage]
-    internal static void TryUpdateJumpListWithLock(string updateLockName, string lastUpdateFile, string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, string logFile, Form? hiddenForm)
+    internal static void TryUpdateJumpListWithLock(string updateLockName, string lastUpdateFile, string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, Form? hiddenForm)
     {
         try
         {
@@ -35,7 +28,7 @@ internal class JumpListService
                 try
                 {
                     File.WriteAllText(lastUpdateFile, DateTime.UtcNow.ToString("o"));
-                    UpdateJumpList(launcherExePath, copilotExePath, pidRegistryFile, sessionStateDir, logFile, hiddenForm);
+                    UpdateJumpList(launcherExePath, copilotExePath, pidRegistryFile, sessionStateDir, hiddenForm);
                 }
                 finally
                 {
@@ -45,16 +38,13 @@ internal class JumpListService
         }
         catch (Exception ex)
         {
-            LogService.Log($"TryUpdateJumpListWithLock error: {ex.Message}", logFile);
+            Program.Logger.LogError("TryUpdateJumpListWithLock error: {Error}", ex.Message);
         }
     }
 
     /// <summary>
     /// Determines whether a background jump list update should be performed based on the elapsed time.
     /// </summary>
-    /// <param name="minInterval">Minimum interval between updates.</param>
-    /// <param name="lastUpdateFile">Path to the file storing the last update timestamp.</param>
-    /// <returns><c>true</c> if the minimum interval has elapsed since the last update; otherwise, <c>false</c>.</returns>
     internal static bool ShouldBackgroundUpdate(TimeSpan minInterval, string lastUpdateFile)
     {
         try
@@ -76,23 +66,14 @@ internal class JumpListService
     /// <summary>
     /// Continuously checks and updates the jump list at regular intervals until cancellation is requested.
     /// </summary>
-    /// <param name="ct">Cancellation token to stop the loop.</param>
-    /// <param name="updateLockName">Name of the mutex used to synchronize updates.</param>
-    /// <param name="lastUpdateFile">Path to the file storing the last update timestamp.</param>
-    /// <param name="launcherExePath">Path to the launcher executable.</param>
-    /// <param name="copilotExePath">Path to the Copilot executable for icon references.</param>
-    /// <param name="pidRegistryFile">Path to the PID registry JSON file.</param>
-    /// <param name="sessionStateDir">Path to the directory containing session state.</param>
-    /// <param name="logFile">Path to the log file.</param>
-    /// <param name="hiddenForm">The hidden form used for UI thread invocation, or <c>null</c>.</param>
     [ExcludeFromCodeCoverage]
-    internal static void UpdaterLoop(string updateLockName, string lastUpdateFile, string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, string logFile, Form? hiddenForm, CancellationToken ct)
+    internal static void UpdaterLoop(string updateLockName, string lastUpdateFile, string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, Form? hiddenForm, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             if (ShouldBackgroundUpdate(TimeSpan.FromMinutes(1), lastUpdateFile))
             {
-                hiddenForm?.Invoke(() => TryUpdateJumpListWithLock(updateLockName, lastUpdateFile, launcherExePath, copilotExePath, pidRegistryFile, sessionStateDir, logFile, hiddenForm));
+                hiddenForm?.Invoke(() => TryUpdateJumpListWithLock(updateLockName, lastUpdateFile, launcherExePath, copilotExePath, pidRegistryFile, sessionStateDir, hiddenForm));
             }
 
             for (int i = 0; i < 300 && !ct.IsCancellationRequested; i++)
@@ -105,14 +86,8 @@ internal class JumpListService
     /// <summary>
     /// Rebuilds the Windows taskbar jump list with current active sessions and standard tasks.
     /// </summary>
-    /// <param name="launcherExePath">Path to the launcher executable.</param>
-    /// <param name="copilotExePath">Path to the Copilot executable for icon references.</param>
-    /// <param name="pidRegistryFile">Path to the PID registry JSON file.</param>
-    /// <param name="sessionStateDir">Path to the directory containing session state.</param>
-    /// <param name="logFile">Path to the log file.</param>
-    /// <param name="hiddenForm">The hidden form used for UI thread invocation, or <c>null</c>.</param>
     [ExcludeFromCodeCoverage]
-    internal static void UpdateJumpList(string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, string logFile, Form? hiddenForm)
+    internal static void UpdateJumpList(string launcherExePath, string copilotExePath, string pidRegistryFile, string sessionStateDir, Form? hiddenForm)
     {
         try
         {
@@ -120,7 +95,7 @@ internal class JumpListService
 
             if (hiddenForm == null || !hiddenForm.IsHandleCreated)
             {
-                LogService.Log("Hidden form not ready", logFile);
+                Program.Logger.LogWarning("Hidden form not ready");
                 return;
             }
 
@@ -165,11 +140,11 @@ internal class JumpListService
             }
 
             jumpList.Refresh();
-            LogService.Log($"Jump list updated: {activeSessions.Count} sessions", logFile);
+            Program.Logger.LogInformation("Jump list updated: {Count} sessions", activeSessions.Count);
         }
         catch (Exception ex)
         {
-            LogService.Log($"UpdateJumpList error: {ex.Message}", logFile);
+            Program.Logger.LogError("UpdateJumpList error: {Error}", ex.Message);
         }
     }
 }

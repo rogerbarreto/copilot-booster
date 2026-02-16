@@ -34,6 +34,12 @@ internal class NamedSession
     public bool IsGitRepo { get; set; }
 
     /// <summary>
+    /// Gets or sets the user-defined alias for the session.
+    /// When set, this is displayed instead of the summary in the UI.
+    /// </summary>
+    public string Alias { get; set; } = "";
+
+    /// <summary>
     /// Gets or sets the timestamp when the session was last modified.
     /// </summary>
     public DateTime LastModified { get; set; }

@@ -105,4 +105,37 @@
         var result = SessionService.SearchSessions([], "test");
         Assert.Empty(result);
     }
+
+    [Fact]
+    public void SearchSessions_MatchesAlias_ReturnsTitleMatch()
+    {
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "s1", Cwd = @"C:\code", Folder = "code", Summary = "Some name", Alias = "My Custom Alias" },
+            new() { Id = "s2", Cwd = @"C:\other", Folder = "other", Summary = "Other session" },
+        };
+
+        var result = SessionService.SearchSessions(sessions, "Custom Alias");
+
+        Assert.Single(result);
+        Assert.Equal("s1", result[0].Id);
+    }
+
+    [Fact]
+    public void SearchSessions_AliasMatchBeforeMetadata()
+    {
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "alias-in-id", Cwd = @"C:\code", Folder = "code", Summary = "No match" },
+            new() { Id = "s2", Cwd = @"C:\other", Folder = "other", Summary = "No match", Alias = "alias-in-id" },
+        };
+
+        var result = SessionService.SearchSessions(sessions, "alias-in-id");
+
+        Assert.Equal(2, result.Count);
+        // Alias match (title-level) comes first
+        Assert.Equal("s2", result[0].Id);
+        // ID match (metadata) comes second
+        Assert.Equal("alias-in-id", result[1].Id);
+    }
 }

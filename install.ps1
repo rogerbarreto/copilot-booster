@@ -45,10 +45,43 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 Write-Host "Published to: $PublishDir" -ForegroundColor Green
 
-# 3. Build and run installer
+# 3. Find or install Inno Setup
+Write-Host "Locating Inno Setup..." -ForegroundColor Cyan
+$iscc = Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+if (-not $iscc) {
+    # Check common install locations
+    $candidates = @(
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { $iscc = $c; break }
+    }
+}
+if (-not $iscc) {
+    Write-Host "Inno Setup not found. Installing via winget..." -ForegroundColor Yellow
+    winget install JRSoftware.InnoSetup --accept-source-agreements --accept-package-agreements --silent
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to install Inno Setup via winget"
+        return
+    }
+    # Re-check all candidates after install
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { $iscc = $c; break }
+    }
+    if (-not $iscc) {
+        Write-Error "Inno Setup installed but ISCC.exe not found in expected locations"
+        return
+    }
+    Write-Host "Inno Setup installed." -ForegroundColor Green
+}
+
+# 4. Build and run installer
 Write-Host "Building installer..." -ForegroundColor Cyan
 $issFile = Join-Path $RepoRoot "installer.iss"
-& iscc $issFile /Q
+& $iscc $issFile /Q
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Installer build failed"
     return
@@ -58,7 +91,7 @@ Write-Host "Running installer..." -ForegroundColor Cyan
 Start-Process -FilePath $setupExe
 Write-Host "Installer completed." -ForegroundColor Green
 
-# 4. Initialize settings if work dir provided
+# 5. Initialize settings if work dir provided
 if ($WorkDir) {
     $settingsFile = Join-Path $env:USERPROFILE ".copilot\launcher-settings.json"
     if (Test-Path $settingsFile) {
@@ -78,7 +111,7 @@ if ($WorkDir) {
     Write-Host "Default work dir set to: $WorkDir" -ForegroundColor Green
 }
 
-# 5. Summary
+# 6. Summary
 Write-Host ""
 Write-Host "=== Installation Complete ===" -ForegroundColor Green
 Write-Host "Executable:  $PublishDir\CopilotBooster.exe"

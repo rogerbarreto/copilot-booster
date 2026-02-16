@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -33,9 +34,9 @@ internal partial class EdgeWorkspaceService
     private string TitleMarker => $"{TitlePrefix}{this.WorkspaceId}]";
 
     /// <summary>
-    /// Cached window handle of the Edge window containing the anchor tab.
+    /// Gets or sets the cached window handle for external use (e.g. minimize, bulk scan).
     /// </summary>
-    private IntPtr _cachedHwnd;
+    internal IntPtr CachedHwnd { get; set; }
 
     /// <summary>
     /// Fires when the anchor tab is no longer found.
@@ -50,9 +51,9 @@ internal partial class EdgeWorkspaceService
         get
         {
             // Fast path: check cached window first
-            if (this._cachedHwnd != IntPtr.Zero && IsWindow(this._cachedHwnd))
+            if (this.CachedHwnd != IntPtr.Zero && IsWindow(this.CachedHwnd))
             {
-                if (FindEdgeTabInWindow(this._cachedHwnd, this.TitleMarker))
+                if (FindEdgeTabInWindow(this.CachedHwnd, this.TitleMarker))
                 {
                     return true;
                 }
@@ -60,7 +61,7 @@ internal partial class EdgeWorkspaceService
 
             // Slow path: scan all Edge windows
             var result = FindEdgeWindowWithTab(this.TitleMarker);
-            this._cachedHwnd = result;
+            this.CachedHwnd = result;
             return result != IntPtr.Zero;
         }
     }
@@ -136,16 +137,16 @@ internal partial class EdgeWorkspaceService
     /// <returns>True if a matching window was found and focused.</returns>
     internal bool Focus()
     {
-        if (this._cachedHwnd != IntPtr.Zero && IsWindow(this._cachedHwnd)
-            && FindEdgeTabInWindow(this._cachedHwnd, this.TitleMarker))
+        if (this.CachedHwnd != IntPtr.Zero && IsWindow(this.CachedHwnd)
+            && FindEdgeTabInWindow(this.CachedHwnd, this.TitleMarker))
         {
-            return WindowFocusService.TryFocusWindowHandle(this._cachedHwnd);
+            return WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
         }
 
         var hwnd = FindEdgeWindowWithTab(this.TitleMarker);
         if (hwnd != IntPtr.Zero)
         {
-            this._cachedHwnd = hwnd;
+            this.CachedHwnd = hwnd;
             return WindowFocusService.TryFocusWindowHandle(hwnd);
         }
 
@@ -271,5 +272,70 @@ internal partial class EdgeWorkspaceService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Scans all Edge windows once and returns a dictionary mapping session IDs
+    /// to their corresponding window handles, for sessions that have a matching tab.
+    /// This avoids repeating expensive UI Automation scans per-session.
+    /// </summary>
+    internal static Dictionary<string, IntPtr> BulkFindEdgeTabs(IEnumerable<string> sessionIds)
+    {
+        var result = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+
+        // Build title markers for all candidate session IDs
+        var markers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in sessionIds)
+        {
+            markers[id] = $"{TitlePrefix}{id}]";
+        }
+
+        if (markers.Count == 0)
+        {
+            return result;
+        }
+
+        try
+        {
+            var root = AutomationElement.RootElement;
+            var edgeCondition = new PropertyCondition(AutomationElement.ClassNameProperty, "Chrome_WidgetWin_1");
+            var windows = root.FindAll(TreeScope.Children, edgeCondition);
+
+            foreach (AutomationElement win in windows)
+            {
+                try
+                {
+                    var name = win.Current.Name;
+                    if (!name.Contains("Edge", StringComparison.OrdinalIgnoreCase)
+                        && !name.Contains("Copilot Booster Session", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var hwnd = new IntPtr(win.Current.NativeWindowHandle);
+
+                    // Get all tabs in this window once (expensive UI Automation call)
+                    var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+                    var tabs = AutomationElement.FromHandle(hwnd).FindAll(TreeScope.Descendants, tabCondition);
+
+                    foreach (AutomationElement tab in tabs)
+                    {
+                        var tabName = tab.Current.Name;
+                        foreach (var kvp in markers)
+                        {
+                            if (!result.ContainsKey(kvp.Key)
+                                && tabName.Contains(kvp.Value, StringComparison.OrdinalIgnoreCase))
+                            {
+                                result[kvp.Key] = hwnd;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        return result;
     }
 }

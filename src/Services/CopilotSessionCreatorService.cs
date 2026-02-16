@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -77,8 +78,7 @@ internal static class CopilotSessionCreatorService
         }
         catch (Exception ex)
         {
-            LogService.Log($"Failed to create session: {ex.Message}",
-                Path.Combine(Program.AppDataDir, "launcher.log"));
+            Program.Logger.LogError("Failed to create session: {Error}", ex.Message);
             return Task.FromResult<string?>(null);
         }
     }

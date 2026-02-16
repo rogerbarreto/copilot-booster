@@ -46,10 +46,31 @@ internal class LauncherSettings
     public bool NotifyOnBell { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets whether to auto-minimize windows from other sessions when focusing a session.
+    /// </summary>
+    [JsonPropertyName("autoHideOnFocus")]
+    public bool AutoHideOnFocus { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether the CopilotBooster window stays on top of other windows.
+    /// </summary>
+    [JsonPropertyName("alwaysOnTop")]
+    public bool AlwaysOnTop { get; set; }
+
+    /// <summary>
     /// Gets or sets the application theme. Valid values are <c>"system"</c>, <c>"light"</c>, and <c>"dark"</c>.
     /// </summary>
     [JsonPropertyName("theme")]
     public string Theme { get; set; } = "system";
+
+    /// <summary>
+    /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
+    /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
+    /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).
+    /// Set to <c>"Debug"</c> for profiling diagnostics.
+    /// </summary>
+    [JsonPropertyName("logLevel")]
+    public string? LogLevel { get; set; }
 
     /// <summary>
     /// Loads the launcher settings from the default settings file.

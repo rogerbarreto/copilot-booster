@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] - 2026-02-16
+
+### Added
+
+- **Session aliases** — sessions now have a stable alias field separate from the Copilot CLI's dynamic session name. Aliases persist across name changes and are shown in the session list with a tooltip displaying the current name.
+- **Auto-hide on focus** — clicking to focus a session automatically minimizes tracked windows (terminals, IDEs, Edge) from other sessions, keeping your desktop clean. Enabled by default; configurable in Settings.
+- **Always on top** — new setting to keep the CopilotBooster window above all other windows.
+- **Configurable log level** — set `"logLevel": "Debug"` in `launcher-settings.json` to enable performance profiling and diagnostic output.
+
+### Fixed
+
+- **IDE tracking lost when opening .sln** — Visual Studio windows are now re-captured by process ID when the window handle changes (e.g., opening a solution file).
+- **Edge windows not minimized** — auto-hide now correctly includes Edge workspace windows.
+- **Collection modified during enumeration** — fixed a race condition between the background refresh thread and UI focus actions.
+
+### Improved
+
+- **93× faster first load** — replaced per-session Edge workspace probing (84 seconds for 90 sessions) with a single bulk UI Automation scan (~1 second).
+- **Git status caching** — git repository checks are now cached for the app lifetime, eliminating redundant filesystem walks on every refresh cycle.
+- **Migrated to `ILogger`** — replaced custom `LogService` with `Microsoft.Extensions.Logging.ILogger` for structured logging with proper log levels.
+
 ## [0.9.0] - 2026-02-15
 
 ### Added
@@ -231,6 +252,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - MIT license.
 - GitHub Actions release workflow with `.zip` artifact publishing.
 
+[0.10.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.9.0...v0.10.0
 [0.8.0]: https://github.com/rogerbarreto/copilot-booster/compare/v0.7.1...v0.8.0
 [0.6.3]: https://github.com/rogerbarreto/copilot-booster/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/rogerbarreto/copilot-booster/compare/v0.6.1...v0.6.2

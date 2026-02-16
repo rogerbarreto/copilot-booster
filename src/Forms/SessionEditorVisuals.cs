@@ -12,14 +12,15 @@ namespace CopilotBooster.Forms;
 internal static class SessionEditorVisuals
 {
     /// <summary>
-    /// Displays a modal dialog for editing a session's summary and CWD.
+    /// Displays a modal dialog for editing a session's alias, name (summary), and CWD.
     /// </summary>
+    /// <param name="currentAlias">The current session alias.</param>
     /// <param name="currentSummary">The current session summary/name.</param>
     /// <param name="currentCwd">The current working directory.</param>
-    /// <returns>A tuple of (newSummary, newCwd) on save, or <c>null</c> if the user cancels.</returns>
-    internal static (string Summary, string Cwd)? ShowEditor(string currentSummary, string currentCwd)
+    /// <returns>A tuple of (Alias, Summary, Cwd) on save, or <c>null</c> if the user cancels.</returns>
+    internal static (string Alias, string Summary, string Cwd)? ShowEditor(string currentAlias, string currentSummary, string currentCwd)
     {
-        (string Summary, string Cwd)? result = null;
+        (string Alias, string Summary, string Cwd)? result = null;
 
         var form = new Form
         {
@@ -29,7 +30,7 @@ internal static class SessionEditorVisuals
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 220
+            Height = 270
         };
 
         try
@@ -44,10 +45,29 @@ internal static class SessionEditorVisuals
 
         int y = 14;
 
+        // Session Alias
+        var lblAlias = new Label
+        {
+            Text = "Session Alias (your label — won't change)",
+            AutoSize = true,
+            Location = new Point(14, y)
+        };
+        form.Controls.Add(lblAlias);
+        y += 20;
+
+        var txtAlias = new TextBox
+        {
+            Text = currentAlias,
+            Location = new Point(14, y),
+            Width = 450
+        };
+        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtAlias));
+        y += 34;
+
         // Session Name
         var lblName = new Label
         {
-            Text = "Session Name",
+            Text = "Session Name (managed by Copilot CLI)",
             AutoSize = true,
             Location = new Point(14, y)
         };
@@ -123,7 +143,7 @@ internal static class SessionEditorVisuals
 
         btnSave.Click += (s, e) =>
         {
-            result = (txtName.Text.Trim(), txtCwd.Text.Trim());
+            result = (txtAlias.Text.Trim(), txtName.Text.Trim(), txtCwd.Text.Trim());
             form.DialogResult = DialogResult.OK;
             form.Close();
         };

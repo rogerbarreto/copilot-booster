@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using CopilotBooster.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
+using Microsoft.Extensions.Logging;
 
 [assembly: InternalsVisibleTo("CopilotBooster.Tests")]
 
@@ -43,6 +44,7 @@ internal class Program
     internal static readonly string PidRegistryFile = Path.Combine(AppDataDir, "active-pids.json");
     internal static readonly string TerminalCacheFile = Path.Combine(AppDataDir, "terminal-cache.json");
     internal static readonly string IdeCacheFile = Path.Combine(AppDataDir, "ide-cache.json");
+    internal static readonly string SessionAliasFile = Path.Combine(AppDataDir, "session-aliases.json");
     private static readonly string s_signalFile = Path.Combine(AppDataDir, "ui-signal.txt");
     private static readonly string s_lastUpdateFile = Path.Combine(AppDataDir, "jumplist-lastupdate.txt");
     private static readonly string s_logFile = Path.Combine(AppDataDir, "launcher.log");
@@ -56,6 +58,15 @@ internal class Program
     /// Current launcher settings loaded from disk.
     /// </summary>
     internal static LauncherSettings _settings = null!;
+
+    /// <summary>
+    /// Application-wide logger. Uses <see cref="LogLevel.Debug"/> for profiling,
+    /// <see cref="LogLevel.Information"/> for general operational logs.
+    /// Minimum level is <see cref="LogLevel.Information"/> by default;
+    /// pass <c>--profile</c> or build in DEBUG to include debug-level output.
+    /// </summary>
+    internal static ILogger Logger { get; set; } = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
     private static Form? s_hiddenForm;
     private static Process? s_copilotProcess;
     private static MainForm? s_mainForm;
@@ -100,25 +111,25 @@ internal class Program
                         File.Delete(oldPath);
 
                         migrationOccurred = true;
-                        LogService.Log($"Migrated {fileName} from ~/.copilot/ to %APPDATA%\\CopilotBooster\\", s_logFile);
+                        Logger.LogInformation("Migrated {FileName} from ~/.copilot/ to %APPDATA%\\CopilotBooster\\", fileName);
                     }
                     catch (Exception ex)
                     {
                         // Log individual file migration failure but continue with other files
-                        LogService.Log($"Failed to migrate {fileName}: {ex.Message}", s_logFile);
+                        Logger.LogWarning("Failed to migrate {FileName}: {Error}", fileName, ex.Message);
                     }
                 }
             }
 
             if (migrationOccurred)
             {
-                LogService.Log("File migration completed successfully", s_logFile);
+                Logger.LogInformation("File migration completed successfully");
             }
         }
         catch (Exception ex)
         {
             // Wrap in try/catch so migration failure does not prevent startup
-            LogService.Log($"Migration error: {ex.Message}", s_logFile);
+            Logger.LogError("Migration error: {Error}", ex.Message);
         }
     }
 
@@ -179,20 +190,38 @@ internal class Program
         // Ensure AppDataDir exists before any file operations
         Directory.CreateDirectory(AppDataDir);
 
+        // Parse arguments early to determine log level
+        var parsed = ParseArguments(args);
+
+        // Load settings (creates defaults on first run)
+        _settings = LauncherSettings.Load();
+
+        // Initialize logger — priority: settings > compile-time default
+        LogLevel minLevel;
+        if (_settings.LogLevel != null && Enum.TryParse<LogLevel>(_settings.LogLevel, ignoreCase: true, out var configuredLevel))
+        {
+            minLevel = configuredLevel;
+        }
+        else
+        {
+#if DEBUG
+            minLevel = LogLevel.Debug;
+#else
+            minLevel = LogLevel.Information;
+#endif
+        }
+        Logger = new FileLogger(s_logFile, minLevel);
+
         // Perform one-time migration of files from old location
         MigrateFromCopilotDir();
 
-        LogService.Log("Launcher started", s_logFile);
+        Logger.LogInformation("Launcher started");
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
-        // Load settings (creates defaults on first run)
-        _settings = LauncherSettings.Load();
         ThemeService.ApplyTheme(_settings.Theme);
 
-        // Parse arguments
-        var parsed = ParseArguments(args);
         string? resumeSessionId = parsed.ResumeSessionId;
         bool openExisting = parsed.OpenExisting;
         bool showSettings = parsed.ShowSettings;
@@ -200,7 +229,8 @@ internal class Program
         string? openIdeSessionId = parsed.OpenIdeSessionId;
         string? workDir = parsed.WorkDir;
 
-        LogService.Log($"Args: resume={resumeSessionId ?? "null"}, openExisting={openExisting}, settings={showSettings}, newSession={newSession}", s_logFile);
+        Logger.LogInformation("Args: resume={ResumeId}, openExisting={OpenExisting}, settings={ShowSettings}, newSession={NewSession}",
+            resumeSessionId ?? "null", openExisting, showSettings, newSession);
 
         // Settings / Existing Sessions / Open IDE share a single MainForm window
         if (showSettings || openExisting || newSession || openIdeSessionId != null || (workDir == null && resumeSessionId == null))
@@ -223,7 +253,7 @@ internal class Program
                     File.WriteAllText(s_signalFile, desiredTab.ToString());
                 }
                 catch { }
-                LogService.Log($"Signaled existing MainForm to switch to tab {desiredTab}", s_logFile);
+                Logger.LogInformation("Signaled existing MainForm to switch to tab {Tab}", desiredTab);
                 return;
             }
 
@@ -279,7 +309,7 @@ internal class Program
                 // CopilotPid stores the cmd.exe PID that hosts the copilot process
                 if (WindowFocusService.TryFocusProcessWindow(existing.CopilotPid))
                 {
-                    LogService.Log($"Focused terminal (cmd PID {existing.CopilotPid}) for session {resumeSessionId}", s_logFile);
+                    Logger.LogInformation("Focused terminal (cmd PID {CopilotPid}) for session {SessionId}", existing.CopilotPid, resumeSessionId);
                     return;
                 }
             }
@@ -304,7 +334,7 @@ internal class Program
 
         workDir ??= defaultWorkDir;
 
-        LogService.Log($"WorkDir: {workDir}, Resume: {resumeSessionId ?? "none"}", s_logFile);
+        Logger.LogInformation("WorkDir: {WorkDir}, Resume: {ResumeId}", workDir, resumeSessionId ?? "none");
 
         // Create form - visible in taskbar for jump list but no visible window
         s_hiddenForm = new Form
@@ -345,7 +375,7 @@ internal class Program
     {
         var myPid = Environment.ProcessId;
         PidRegistryService.RegisterPid(myPid, s_copilotDir, PidRegistryFile);
-        LogService.Log($"Registered PID: {myPid}", s_logFile);
+        Logger.LogInformation("Registered PID: {Pid}", myPid);
 
         // Try to become the jump list updater (single instance)
         bool isUpdater = false;
@@ -353,21 +383,21 @@ internal class Program
         try
         {
             updaterMutex = new Mutex(true, UpdaterMutexName, out isUpdater);
-            LogService.Log($"Is updater: {isUpdater}", s_logFile);
+            Logger.LogInformation("Is updater: {IsUpdater}", isUpdater);
         }
         catch (Exception ex)
         {
-            LogService.Log($"Mutex error: {ex.Message}", s_logFile);
+            Logger.LogError("Mutex error: {Error}", ex.Message);
         }
 
         var cts = new CancellationTokenSource();
         if (isUpdater)
         {
-            var updaterThread = new Thread(() => JumpListService.UpdaterLoop(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm, cts.Token)) { IsBackground = true };
+            var updaterThread = new Thread(() => JumpListService.UpdaterLoop(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_hiddenForm, cts.Token)) { IsBackground = true };
             updaterThread.Start();
         }
 
-        LogService.Log("Starting copilot...", s_logFile);
+        Logger.LogInformation("Starting copilot...");
 
         // Snapshot existing sessions before launch
         var existingSessions = new HashSet<string>(
@@ -398,7 +428,7 @@ internal class Program
         };
 
         s_copilotProcess = Process.Start(psi);
-        LogService.Log($"Started copilot with PID: {s_copilotProcess?.Id}", s_logFile);
+        Logger.LogInformation("Started copilot with PID: {Pid}", s_copilotProcess?.Id);
 
         // Update jump list after session creation delay
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };
@@ -421,7 +451,7 @@ internal class Program
                 int cmdPid = s_copilotProcess?.Id ?? 0;
                 PidRegistryService.UpdatePidSessionId(myPid, sessionId, PidRegistryFile, copilotPid: cmdPid);
                 TerminalCacheService.CacheTerminal(TerminalCacheFile, sessionId, cmdPid);
-                LogService.Log($"Mapped PID {myPid} to session {sessionId}, cmd PID {cmdPid}", s_logFile);
+                Logger.LogInformation("Mapped PID {MyPid} to session {SessionId}, cmd PID {CmdPid}", myPid, sessionId, cmdPid);
 
                 // For new sessions, update the console window title now that we know the session ID
                 if (resumeSessionId == null && s_copilotProcess != null)
@@ -438,15 +468,14 @@ internal class Program
                 }
             }
 
-            LogService.Log("Updating jump list...", s_logFile);
-            JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm);
-            LogService.Log("Jump list updated", s_logFile);
+            Logger.LogInformation("Updating jump list...");
+            JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_hiddenForm);
 
             // Watch for copilot exit
             var exitWatcher = new Thread(() =>
             {
                 s_copilotProcess?.WaitForExit();
-                LogService.Log("copilot exited", s_logFile);
+                Logger.LogInformation("copilot exited");
 
                 if (sessionId != null)
                 {
@@ -454,7 +483,7 @@ internal class Program
                 }
 
                 PidRegistryService.UnregisterPid(myPid, PidRegistryFile);
-                JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_logFile, s_hiddenForm);
+                JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_hiddenForm);
 
                 cts.Cancel();
                 updaterMutex?.ReleaseMutex();

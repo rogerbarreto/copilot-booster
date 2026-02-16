@@ -42,6 +42,8 @@ internal class MainForm : Form
     private ListView _idesList = null!;
     private TextBox _workDirBox = null!;
     private CheckBox _notifyOnBellCheck = null!;
+    private CheckBox _autoHideOnFocusCheck = null!;
+    private CheckBox _alwaysOnTopCheck = null!;
     private ComboBox _themeCombo = null!;
     private bool _suppressThemeChange;
 
@@ -110,6 +112,7 @@ internal class MainForm : Form
         this.MinimumSize = new Size(550, 400);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.FormBorderStyle = FormBorderStyle.Sizable;
+        this.TopMost = Program._settings.AlwaysOnTop;
 
         try
         {
@@ -255,9 +258,10 @@ internal class MainForm : Form
                 return;
             }
 
-            var edited = SessionEditorVisuals.ShowEditor(session.Summary, session.Cwd);
+            var edited = SessionEditorVisuals.ShowEditor(session.Alias, session.Summary, session.Cwd);
             if (edited != null)
             {
+                SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
                 if (SessionService.UpdateSession(sessionDir, edited.Value.Summary, edited.Value.Cwd))
                 {
@@ -284,6 +288,11 @@ internal class MainForm : Form
                 var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, sourceDir).ConfigureAwait(true);
                 if (newSessionId != null)
                 {
+                    if (!string.IsNullOrWhiteSpace(sessionName))
+                    {
+                        SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                    }
+
                     this._interactionManager.LaunchSession(newSessionId);
                     await this.RefreshGridAsync().ConfigureAwait(true);
                 }
@@ -310,6 +319,11 @@ internal class MainForm : Form
                         var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, sourceDir).ConfigureAwait(true);
                         if (newSessionId != null)
                         {
+                            if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
+                            {
+                                SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
+                            }
+
                             this._interactionManager.LaunchSession(newSessionId);
                             await this.RefreshGridAsync().ConfigureAwait(true);
                         }
@@ -411,7 +425,7 @@ internal class MainForm : Form
         this._sessionsVisuals.OnDeleteSession += async (sid) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sid);
-            var sessionName = session?.Summary ?? sid;
+            var sessionName = !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary ?? sid;
             var result = MessageBox.Show(
                 $"Delete session \"{sessionName}\"?\n\n" +
                 "This will only remove the session from Copilot — your code and files are not affected.\n" +
@@ -537,6 +551,28 @@ internal class MainForm : Form
         };
         notifyPanel.Controls.Add(this._notifyOnBellCheck);
 
+        // Auto-hide on focus
+        var autoHidePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        this._autoHideOnFocusCheck = new CheckBox
+        {
+            Text = "Auto-hide other session windows on focus",
+            Checked = Program._settings.AutoHideOnFocus,
+            AutoSize = true,
+            Location = new Point(8, 5)
+        };
+        autoHidePanel.Controls.Add(this._autoHideOnFocusCheck);
+
+        // Always on top
+        var alwaysOnTopPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        this._alwaysOnTopCheck = new CheckBox
+        {
+            Text = "Always on top",
+            Checked = Program._settings.AlwaysOnTop,
+            AutoSize = true,
+            Location = new Point(8, 5)
+        };
+        alwaysOnTopPanel.Controls.Add(this._alwaysOnTopCheck);
+
         // Theme
         var themePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
         var themeLabel = new Label { Text = "Theme:", AutoSize = true, Location = new Point(8, 7) };
@@ -596,6 +632,8 @@ internal class MainForm : Form
         {
             SettingsVisuals.ReloadSettingsUI(this._toolsList, this._dirsList, this._idesList, this._workDirBox, this._themeCombo);
             this._notifyOnBellCheck.Checked = Program._settings.NotifyOnBell;
+            this._autoHideOnFocusCheck.Checked = Program._settings.AutoHideOnFocus;
+            this._alwaysOnTopCheck.Checked = Program._settings.AlwaysOnTop;
             this._suppressThemeChange = true;
             this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
             this._suppressThemeChange = false;
@@ -614,6 +652,9 @@ internal class MainForm : Form
             }
 
             Program._settings.NotifyOnBell = this._notifyOnBellCheck.Checked;
+            Program._settings.AutoHideOnFocus = this._autoHideOnFocusCheck.Checked;
+            Program._settings.AlwaysOnTop = this._alwaysOnTopCheck.Checked;
+            this.TopMost = Program._settings.AlwaysOnTop;
             Program._settings.Save();
             MessageBox.Show("Settings saved.", "Copilot Booster", MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
@@ -623,6 +664,8 @@ internal class MainForm : Form
 
         settingsContainer.Controls.Add(settingsTabs);
         settingsContainer.Controls.Add(themePanel);
+        settingsContainer.Controls.Add(autoHidePanel);
+        settingsContainer.Controls.Add(alwaysOnTopPanel);
         settingsContainer.Controls.Add(notifyPanel);
         settingsContainer.Controls.Add(workDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
@@ -643,6 +686,11 @@ internal class MainForm : Form
             var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
             if (newSessionId != null)
             {
+                if (!string.IsNullOrWhiteSpace(sessionName))
+                {
+                    SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                }
+
                 this._interactionManager.LaunchSession(newSessionId);
                 await this.RefreshGridAsync().ConfigureAwait(true);
             }
@@ -663,6 +711,11 @@ internal class MainForm : Form
                     var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                     if (newSessionId != null)
                     {
+                        if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
+                        {
+                            SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
+                        }
+
                         this._interactionManager.LaunchSession(newSessionId);
                         await this.RefreshGridAsync().ConfigureAwait(true);
                     }
@@ -711,6 +764,11 @@ internal class MainForm : Form
             var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
             if (newSessionId != null)
             {
+                if (!string.IsNullOrWhiteSpace(sessionName))
+                {
+                    SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                }
+
                 this._interactionManager.LaunchSession(newSessionId);
                 await this.RefreshGridAsync().ConfigureAwait(true);
             }
@@ -925,6 +983,20 @@ internal class MainForm : Form
 
         // Re-run refresh with started sessions seeded (bells now suppressed)
         snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+
+        // Sort active sessions to the top on initial load
+        var activeIds = new HashSet<string>(snapshot.ActiveTextBySessionId.Keys, StringComparer.OrdinalIgnoreCase);
+        this._cachedSessions.Sort((a, b) =>
+        {
+            bool aActive = activeIds.Contains(a.Id);
+            bool bActive = activeIds.Contains(b.Id);
+            if (aActive != bActive)
+            {
+                return aActive ? -1 : 1;
+            }
+
+            return b.LastModified.CompareTo(a.LastModified);
+        });
 
         this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
         this._sessionsVisuals.LoadingOverlay.Visible = false;

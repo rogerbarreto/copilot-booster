@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using CopilotBooster.Models;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
@@ -185,6 +186,12 @@ internal class SessionService
     }
 
     /// <summary>
+    /// Cache of Git repository detection results keyed by CWD path.
+    /// Once discovered, a directory's git status won't change during the app lifetime.
+    /// </summary>
+    private static readonly Dictionary<string, bool> s_gitRepoCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Loads named sessions from the session state directory, ordered by most recently modified.
     /// Automatically deletes empty sessions (no events.jsonl) that are not currently active.
     /// </summary>
@@ -193,20 +200,37 @@ internal class SessionService
     /// <returns>A list of named sessions with summaries.</returns>
     internal static List<NamedSession> LoadNamedSessions(string sessionStateDir, string? pidRegistryFile = null)
     {
+        var profiling = Program.Logger.IsEnabled(LogLevel.Debug);
+        var totalSw = profiling ? Stopwatch.StartNew() : null;
         var results = new List<NamedSession>();
         if (!Directory.Exists(sessionStateDir))
         {
             return results;
         }
 
+        var sw = profiling ? Stopwatch.StartNew() : null;
         HashSet<string>? activeIds = null;
         if (pidRegistryFile != null)
         {
             activeIds = GetActiveSessionIds(pidRegistryFile, sessionStateDir);
         }
+        var activeIdsMs = sw?.ElapsedMilliseconds ?? 0;
 
-        var sessions = Directory.GetDirectories(sessionStateDir)
-            .OrderByDescending(d => Directory.GetLastWriteTime(d))
+        sw?.Restart();
+        var dirs = Directory.GetDirectories(sessionStateDir);
+        var getDirsMs = sw?.ElapsedMilliseconds ?? 0;
+
+        sw?.Restart();
+        var sortedDirs = dirs.OrderByDescending(d => Directory.GetLastWriteTime(d)).ToArray();
+        var sortDirsMs = sw?.ElapsedMilliseconds ?? 0;
+
+        int gitCacheMisses = 0;
+        int gitCacheHits = 0;
+        long gitTotalMs = 0;
+        int deletedCount = 0;
+
+        sw?.Restart();
+        var sessions = sortedDirs
             .Select(d =>
             {
                 var wsFile = Path.Combine(d, "workspace.yaml");
@@ -244,7 +268,7 @@ internal class SessionService
                     var hasEvents = File.Exists(Path.Combine(d, "events.jsonl"));
                     if (!hasEvents && activeIds != null && !activeIds.Contains(id))
                     {
-                        try { Directory.Delete(d, recursive: true); } catch { }
+                        try { Directory.Delete(d, recursive: true); deletedCount++; } catch { }
                         return null;
                     }
 
@@ -252,7 +276,22 @@ internal class SessionService
                     var displaySummary = string.IsNullOrWhiteSpace(summary)
                         ? (string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "")
                         : summary;
-                    var isGitRepo = !string.IsNullOrEmpty(cwd) && GitService.IsGitRepository(cwd);
+                    var isGitRepo = false;
+                    if (!string.IsNullOrEmpty(cwd))
+                    {
+                        if (!s_gitRepoCache.TryGetValue(cwd, out isGitRepo))
+                        {
+                            var gitSw = profiling ? Stopwatch.StartNew() : null;
+                            isGitRepo = GitService.IsGitRepository(cwd);
+                            gitTotalMs += gitSw?.ElapsedMilliseconds ?? 0;
+                            s_gitRepoCache[cwd] = isGitRepo;
+                            gitCacheMisses++;
+                        }
+                        else
+                        {
+                            gitCacheHits++;
+                        }
+                    }
                     return new NamedSession
                     {
                         Id = id,
@@ -270,6 +309,7 @@ internal class SessionService
             })
             .Where(s => s != null)
             .ToList();
+        var parseMs = sw?.ElapsedMilliseconds ?? 0;
 
         foreach (var s in sessions)
         {
@@ -277,6 +317,18 @@ internal class SessionService
             {
                 results.Add(s);
             }
+        }
+
+        if (profiling)
+        {
+            totalSw!.Stop();
+            Program.Logger.LogDebug(
+                "LoadNamedSessions: total={TotalMs}ms | activeIds={ActiveIdsMs}ms | getDirs={GetDirsMs}ms ({DirCount} dirs) | " +
+                "sortDirs={SortDirsMs}ms | parse={ParseMs}ms | git: misses={GitMisses} ({GitMs}ms) hits={GitHits} | " +
+                "deleted={Deleted} | results={Results}",
+                totalSw.ElapsedMilliseconds, activeIdsMs, getDirsMs, dirs.Length,
+                sortDirsMs, parseMs, gitCacheMisses, gitTotalMs, gitCacheHits,
+                deletedCount, results.Count);
         }
 
         return results;
@@ -318,7 +370,8 @@ internal class SessionService
         foreach (var session in sessions)
         {
             if (session.Summary.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                session.Folder.Contains(query, StringComparison.OrdinalIgnoreCase))
+                session.Folder.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                session.Alias.Contains(query, StringComparison.OrdinalIgnoreCase))
             {
                 titleMatches.Add(session);
             }

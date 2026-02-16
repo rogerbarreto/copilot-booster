@@ -161,17 +161,6 @@ internal class ActiveStatusTracker
         {
             parts.Add("Edge");
         }
-        else if (!this._edgeInitialScanDone && !this._edgeWorkspaces.ContainsKey(sessionId))
-        {
-            // On first refresh, probe for Edge workspaces opened before app restart
-            var probe = new EdgeWorkspaceService(sessionId);
-            if (probe.IsOpen)
-            {
-                probe.WindowClosed += () => this.OnEdgeWorkspaceClosed?.Invoke(sessionId);
-                this._edgeWorkspaces[sessionId] = probe;
-                parts.Add("Edge");
-            }
-        }
 
         return string.Join("\n", parts);
     }
@@ -236,9 +225,70 @@ internal class ActiveStatusTracker
             return;
         }
 
+        // Auto-hide: minimize tracked windows from other sessions
+        if (Program._settings.AutoHideOnFocus)
+        {
+            this.MinimizeOtherSessions(sessionId);
+        }
+
         // Directly focus the target matching the clicked line
         var index = Math.Min(clickedLineIndex, focusTargets.Count - 1);
         focusTargets[index].focus();
+    }
+
+    /// <summary>
+    /// Minimizes all tracked windows belonging to sessions other than the specified one.
+    /// Only targets windows tracked by CopilotBooster (terminals, IDEs, Edge workspaces).
+    /// </summary>
+    internal void MinimizeOtherSessions(string excludeSessionId)
+    {
+        // Snapshot to avoid concurrent modification with Refresh
+        var trackedWindows = this._activeTrackedWindows.ToList();
+        foreach (var kvp in trackedWindows)
+        {
+            if (string.Equals(kvp.Key, excludeSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var (_, _, hwnd) in kvp.Value)
+            {
+                if (hwnd != IntPtr.Zero && WindowFocusService.IsWindowAlive(hwnd))
+                {
+                    WindowFocusService.MinimizeWindow(hwnd);
+                }
+            }
+        }
+
+        var trackedProcs = this._trackedProcesses.ToList();
+        foreach (var kvp in trackedProcs)
+        {
+            if (string.Equals(kvp.Key, excludeSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var proc in kvp.Value.ToList())
+            {
+                if (proc.Hwnd != IntPtr.Zero && WindowFocusService.IsWindowAlive(proc.Hwnd))
+                {
+                    WindowFocusService.MinimizeWindow(proc.Hwnd);
+                }
+            }
+        }
+
+        foreach (var kvp in this._edgeWorkspaces.ToList())
+        {
+            if (string.Equals(kvp.Key, excludeSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (kvp.Value.IsOpen && kvp.Value.CachedHwnd != IntPtr.Zero)
+            {
+                WindowFocusService.MinimizeWindow(kvp.Value.CachedHwnd);
+            }
+        }
     }
 
     /// <summary>
@@ -290,7 +340,7 @@ internal class ActiveStatusTracker
         }
 
         // Clean up dead tracked processes and capture HWNDs for those that don't have one yet
-        foreach (var kvp in this._trackedProcesses)
+        foreach (var kvp in this._trackedProcesses.ToList())
         {
             for (int i = kvp.Value.Count - 1; i >= 0; i--)
             {
@@ -301,6 +351,24 @@ internal class ActiveStatusTracker
                 {
                     if (!WindowFocusService.IsWindowAlive(proc.Hwnd))
                     {
+                        // HWND died — try to recapture from the same PID (e.g. VS opening a .sln)
+                        if (proc.Pid > 0)
+                        {
+                            bool stillAlive;
+                            try { stillAlive = !Process.GetProcessById(proc.Pid).HasExited; }
+                            catch { stillAlive = false; }
+
+                            if (stillAlive)
+                            {
+                                var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
+                                if (newHwnd != IntPtr.Zero)
+                                {
+                                    proc.Hwnd = newHwnd;
+                                    continue;
+                                }
+                            }
+                        }
+
                         kvp.Value.RemoveAt(i);
                     }
 
@@ -361,6 +429,29 @@ internal class ActiveStatusTracker
             this._edgeWorkspaces.Remove(id);
         }
 
+        // Bulk-probe for pre-existing Edge workspaces on first refresh (single UI Automation scan)
+        if (!this._edgeInitialScanDone)
+        {
+            var sessionIdsToProbe = sessions
+                .Where(s => !this._edgeWorkspaces.ContainsKey(s.Id))
+                .Select(s => s.Id)
+                .ToList();
+
+            if (sessionIdsToProbe.Count > 0)
+            {
+                var edgeMatches = EdgeWorkspaceService.BulkFindEdgeTabs(sessionIdsToProbe);
+                foreach (var kvp in edgeMatches)
+                {
+                    var ws = new EdgeWorkspaceService(kvp.Key);
+                    ws.CachedHwnd = kvp.Value;
+                    ws.WindowClosed += () => this.OnEdgeWorkspaceClosed?.Invoke(kvp.Key);
+                    this._edgeWorkspaces[kvp.Key] = ws;
+                }
+            }
+
+            this._edgeInitialScanDone = true;
+        }
+
         // Build active text for each session
         var activeTextBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var sessionNamesById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -410,8 +501,6 @@ internal class ActiveStatusTracker
                 break;
             }
         }
-
-        this._edgeInitialScanDone = true;
 
         return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById, statusIconBySessionId);
     }
