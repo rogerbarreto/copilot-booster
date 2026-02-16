@@ -85,6 +85,7 @@ internal partial class EdgeWorkspaceService
         var sessionHtml = GetSessionHtmlPath();
         if (sessionHtml == null)
         {
+            Program.Logger.LogWarning("session.html not found in {BaseDir}", AppContext.BaseDirectory);
             return false;
         }
 
