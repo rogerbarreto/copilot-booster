@@ -21,12 +21,13 @@ internal static class NewSessionNameVisuals
         var form = new Form
         {
             Text = "New Copilot Session",
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 200,
+            Height = 220,
             TopMost = Program._settings.AlwaysOnTop
         };
 

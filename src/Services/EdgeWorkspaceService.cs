@@ -275,25 +275,14 @@ internal partial class EdgeWorkspaceService
     }
 
     /// <summary>
-    /// Scans all Edge windows once and returns a dictionary mapping session IDs
-    /// to their corresponding window handles, for sessions that have a matching tab.
-    /// This avoids repeating expensive UI Automation scans per-session.
+    /// Scans all Edge windows for tabs containing "Copilot Booster Session [sessionId]"
+    /// and returns a mapping of session ID → window handle.
+    /// This is Edge-first: we scan Edge windows (fewer) and extract session IDs
+    /// from tab names, avoiding per-session probing.
     /// </summary>
-    internal static Dictionary<string, IntPtr> BulkFindEdgeTabs(IEnumerable<string> sessionIds)
+    internal static Dictionary<string, IntPtr> ScanEdgeForSessionTabs()
     {
         var result = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
-
-        // Build title markers for all candidate session IDs
-        var markers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var id in sessionIds)
-        {
-            markers[id] = $"{TitlePrefix}{id}]";
-        }
-
-        if (markers.Count == 0)
-        {
-            return result;
-        }
 
         try
         {
@@ -314,20 +303,16 @@ internal partial class EdgeWorkspaceService
 
                     var hwnd = new IntPtr(win.Current.NativeWindowHandle);
 
-                    // Get all tabs in this window once (expensive UI Automation call)
                     var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
                     var tabs = AutomationElement.FromHandle(hwnd).FindAll(TreeScope.Descendants, tabCondition);
 
                     foreach (AutomationElement tab in tabs)
                     {
                         var tabName = tab.Current.Name;
-                        foreach (var kvp in markers)
+                        var sessionId = ExtractSessionId(tabName);
+                        if (sessionId != null && !result.ContainsKey(sessionId))
                         {
-                            if (!result.ContainsKey(kvp.Key)
-                                && tabName.Contains(kvp.Value, StringComparison.OrdinalIgnoreCase))
-                            {
-                                result[kvp.Key] = hwnd;
-                            }
+                            result[sessionId] = hwnd;
                         }
                     }
                 }
@@ -337,5 +322,26 @@ internal partial class EdgeWorkspaceService
         catch { }
 
         return result;
+    }
+
+    /// <summary>
+    /// Extracts the session ID from a tab name like "Copilot Booster Session [guid] ...".
+    /// </summary>
+    private static string? ExtractSessionId(string tabName)
+    {
+        var startIdx = tabName.IndexOf(TitlePrefix, StringComparison.OrdinalIgnoreCase);
+        if (startIdx < 0)
+        {
+            return null;
+        }
+
+        var idStart = startIdx + TitlePrefix.Length;
+        var endIdx = tabName.IndexOf(']', idStart);
+        if (endIdx < 0)
+        {
+            return null;
+        }
+
+        return tabName[idStart..endIdx];
     }
 }

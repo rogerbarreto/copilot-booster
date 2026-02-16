@@ -62,6 +62,7 @@ internal static class CwdPickerVisuals
         var form = new Form
         {
             Text = "New Session — Select Working Directory",
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             Size = new Size(600, 420),
             MinimumSize = new Size(450, 300),
             StartPosition = FormStartPosition.CenterScreen,

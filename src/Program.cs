@@ -486,7 +486,6 @@ internal class Program
                 JumpListService.TryUpdateJumpListWithLock(UpdateLockName, s_lastUpdateFile, s_launcherExePath, CopilotExePath, PidRegistryFile, SessionStateDir, s_hiddenForm);
 
                 cts.Cancel();
-                updaterMutex?.ReleaseMutex();
                 updaterMutex?.Dispose();
 
                 s_hiddenForm?.Invoke(() => Application.Exit());

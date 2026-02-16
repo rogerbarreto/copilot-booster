@@ -422,6 +422,27 @@ internal static partial class WindowFocusService
     }
 
     /// <summary>
+    /// Gets the title text of a window handle.
+    /// </summary>
+    internal static string GetWindowTitle(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return string.Empty;
+        }
+
+        int len = GetWindowTextLength(hwnd);
+        if (len == 0)
+        {
+            return string.Empty;
+        }
+
+        var sb = new System.Text.StringBuilder(len + 1);
+        GetWindowText(hwnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Checks if a window handle is still valid and visible.
     /// </summary>
     internal static bool IsWindowAlive(IntPtr hwnd)

@@ -25,12 +25,13 @@ internal static class WorkspaceCreatorVisuals
         var form = new Form
         {
             Text = "Create New Workspace",
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 340,
+            Height = 380,
             TopMost = Program._settings.AlwaysOnTop
         };
 

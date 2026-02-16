@@ -97,7 +97,7 @@ internal class ExistingSessionsVisuals
             EnableHeadersVisualStyles = false,
             ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
-                Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f, FontStyle.Bold),
                 BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210),
                 ForeColor = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText,
                 SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210),
@@ -123,8 +123,8 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["Session"]!.MinimumWidth = 100;
         this.SessionGrid.Columns["CWD"]!.Width = 110;
         this.SessionGrid.Columns["CWD"]!.MinimumWidth = 60;
-        this.SessionGrid.Columns["Date"]!.Width = 130;
-        this.SessionGrid.Columns["Date"]!.MinimumWidth = 80;
+        this.SessionGrid.Columns["Date"]!.Width = 160;
+        this.SessionGrid.Columns["Date"]!.MinimumWidth = 100;
         this.SessionGrid.Columns["Active"]!.Width = 100;
         this.SessionGrid.Columns["Active"]!.MinimumWidth = 60;
 

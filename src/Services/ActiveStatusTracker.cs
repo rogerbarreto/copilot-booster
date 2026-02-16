@@ -28,7 +28,6 @@ internal class ActiveStatusTracker
     private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
-    private bool _edgeInitialScanDone;
     private bool _ideInitialLoadDone;
 
     private static readonly HashSet<string> s_ignoredSummaries = new(StringComparer.OrdinalIgnoreCase)
@@ -242,6 +241,25 @@ internal class ActiveStatusTracker
     /// </summary>
     internal void MinimizeOtherSessions(string excludeSessionId)
     {
+        // Collect HWNDs belonging to the focused session so we never minimize them
+        var excludeHwnds = new HashSet<IntPtr>();
+        if (this._activeTrackedWindows.TryGetValue(excludeSessionId, out var focusedWindows))
+        {
+            foreach (var (_, _, hwnd) in focusedWindows)
+            {
+                if (hwnd != IntPtr.Zero)
+                {
+                    excludeHwnds.Add(hwnd);
+                }
+            }
+        }
+
+        if (this._edgeWorkspaces.TryGetValue(excludeSessionId, out var focusedEdge)
+            && focusedEdge.CachedHwnd != IntPtr.Zero)
+        {
+            excludeHwnds.Add(focusedEdge.CachedHwnd);
+        }
+
         // Snapshot to avoid concurrent modification with Refresh
         var trackedWindows = this._activeTrackedWindows.ToList();
         foreach (var kvp in trackedWindows)
@@ -253,7 +271,9 @@ internal class ActiveStatusTracker
 
             foreach (var (_, _, hwnd) in kvp.Value)
             {
-                if (hwnd != IntPtr.Zero && WindowFocusService.IsWindowAlive(hwnd))
+                if (hwnd != IntPtr.Zero && !excludeHwnds.Contains(hwnd)
+                    && WindowFocusService.IsWindowAlive(hwnd)
+                    && !IsCmdExeTitle(hwnd))
                 {
                     WindowFocusService.MinimizeWindow(hwnd);
                 }
@@ -270,7 +290,8 @@ internal class ActiveStatusTracker
 
             foreach (var proc in kvp.Value.ToList())
             {
-                if (proc.Hwnd != IntPtr.Zero && WindowFocusService.IsWindowAlive(proc.Hwnd))
+                if (proc.Hwnd != IntPtr.Zero && !excludeHwnds.Contains(proc.Hwnd)
+                    && WindowFocusService.IsWindowAlive(proc.Hwnd))
                 {
                     WindowFocusService.MinimizeWindow(proc.Hwnd);
                 }
@@ -284,11 +305,22 @@ internal class ActiveStatusTracker
                 continue;
             }
 
+            // IsOpen refreshes CachedHwnd if needed
             if (kvp.Value.IsOpen && kvp.Value.CachedHwnd != IntPtr.Zero)
             {
                 WindowFocusService.MinimizeWindow(kvp.Value.CachedHwnd);
             }
         }
+    }
+
+    /// <summary>
+    /// Returns true if the window title is a generic cmd.exe title (not yet renamed by copilot).
+    /// These windows should not be minimized since they can't be reliably re-focused.
+    /// </summary>
+    private static bool IsCmdExeTitle(IntPtr hwnd)
+    {
+        var title = WindowFocusService.GetWindowTitle(hwnd);
+        return title.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -429,28 +461,8 @@ internal class ActiveStatusTracker
             this._edgeWorkspaces.Remove(id);
         }
 
-        // Bulk-probe for pre-existing Edge workspaces on first refresh (single UI Automation scan)
-        if (!this._edgeInitialScanDone)
-        {
-            var sessionIdsToProbe = sessions
-                .Where(s => !this._edgeWorkspaces.ContainsKey(s.Id))
-                .Select(s => s.Id)
-                .ToList();
-
-            if (sessionIdsToProbe.Count > 0)
-            {
-                var edgeMatches = EdgeWorkspaceService.BulkFindEdgeTabs(sessionIdsToProbe);
-                foreach (var kvp in edgeMatches)
-                {
-                    var ws = new EdgeWorkspaceService(kvp.Key);
-                    ws.CachedHwnd = kvp.Value;
-                    ws.WindowClosed += () => this.OnEdgeWorkspaceClosed?.Invoke(kvp.Key);
-                    this._edgeWorkspaces[kvp.Key] = ws;
-                }
-            }
-
-            this._edgeInitialScanDone = true;
-        }
+        // Edge workspace scanning happens separately via ScanAndTrackEdgeWorkspaces()
+        // which must run on the UI (STA) thread for UI Automation to work.
 
         // Build active text for each session
         var activeTextBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -588,5 +600,29 @@ internal class ActiveStatusTracker
     internal bool TryGetEdge(string sessionId, [NotNullWhen(true)] out EdgeWorkspaceService? workspace)
     {
         return this._edgeWorkspaces.TryGetValue(sessionId, out workspace);
+    }
+
+    /// <summary>
+    /// Scans all Edge windows for session tabs and registers any newly found workspaces.
+    /// Must be called on the UI (STA) thread since it uses UI Automation.
+    /// </summary>
+    /// <returns>True if new Edge workspaces were discovered.</returns>
+    internal bool ScanAndTrackEdgeWorkspaces()
+    {
+        var edgeMatches = EdgeWorkspaceService.ScanEdgeForSessionTabs();
+        bool changed = false;
+        foreach (var kvp in edgeMatches)
+        {
+            if (!this._edgeWorkspaces.ContainsKey(kvp.Key))
+            {
+                var ws = new EdgeWorkspaceService(kvp.Key);
+                ws.CachedHwnd = kvp.Value;
+                ws.WindowClosed += () => this.OnEdgeWorkspaceClosed?.Invoke(kvp.Key);
+                this._edgeWorkspaces[kvp.Key] = ws;
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 }

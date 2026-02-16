@@ -33,9 +33,10 @@ internal static class CopilotSessionCreatorService
 
             if (sourceWsFile != null && File.Exists(sourceWsFile))
             {
-                // Copy from source and override id, cwd, summary
+                // Copy from source and override id, cwd, summary, name
                 var lines = File.ReadAllLines(sourceWsFile);
                 var updatedLines = new List<string>();
+                bool foundName = false;
                 foreach (var line in lines)
                 {
                     if (line.StartsWith("id:"))
@@ -50,6 +51,11 @@ internal static class CopilotSessionCreatorService
                     {
                         updatedLines.Add($"summary: {sessionName ?? ""}");
                     }
+                    else if (line.StartsWith("name:"))
+                    {
+                        updatedLines.Add($"name: {sessionName ?? ""}");
+                        foundName = true;
+                    }
                     else if (line.StartsWith("created_at:") || line.StartsWith("updated_at:"))
                     {
                         updatedLines.Add($"{line.Split(':')[0]}: {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}");
@@ -63,6 +69,13 @@ internal static class CopilotSessionCreatorService
                         updatedLines.Add(line);
                     }
                 }
+
+                // Ensure name: is always present
+                if (!foundName && !string.IsNullOrWhiteSpace(sessionName))
+                {
+                    updatedLines.Add($"name: {sessionName}");
+                }
+
                 File.WriteAllLines(wsFile, updatedLines);
             }
             else
@@ -126,6 +139,7 @@ internal static class CopilotSessionCreatorService
         if (!string.IsNullOrWhiteSpace(sessionName))
         {
             lines.Add($"summary: {sessionName}");
+            lines.Add($"name: {sessionName}");
         }
 
         File.WriteAllLines(wsFile, lines);

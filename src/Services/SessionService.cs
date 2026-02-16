@@ -394,7 +394,7 @@ internal class SessionService
     /// <param name="newSummary">The new summary value.</param>
     /// <param name="newCwd">The new current working directory value.</param>
     /// <returns><c>true</c> if the update succeeded; otherwise, <c>false</c>.</returns>
-    internal static bool UpdateSession(string sessionDir, string newSummary, string newCwd)
+    internal static bool UpdateSessionCwd(string sessionDir, string newCwd)
     {
         var wsFile = Path.Combine(sessionDir, "workspace.yaml");
         if (!File.Exists(wsFile))
@@ -406,21 +406,11 @@ internal class SessionService
         {
             var lines = File.ReadAllLines(wsFile);
             var updatedLines = new List<string>();
-            bool foundSummary = false, foundCwd = false, foundName = false;
+            bool foundCwd = false;
 
             foreach (var line in lines)
             {
-                if (line.StartsWith("summary:"))
-                {
-                    updatedLines.Add($"summary: {newSummary}");
-                    foundSummary = true;
-                }
-                else if (line.StartsWith("name:"))
-                {
-                    updatedLines.Add($"name: {newSummary}");
-                    foundName = true;
-                }
-                else if (line.StartsWith("cwd:"))
+                if (line.StartsWith("cwd:"))
                 {
                     updatedLines.Add($"cwd: {newCwd}");
                     foundCwd = true;
@@ -429,16 +419,6 @@ internal class SessionService
                 {
                     updatedLines.Add(line);
                 }
-            }
-
-            if (!foundSummary)
-            {
-                updatedLines.Add($"summary: {newSummary}");
-            }
-
-            if (!foundName)
-            {
-                updatedLines.Add($"name: {newSummary}");
             }
 
             if (!foundCwd)

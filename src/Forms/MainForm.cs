@@ -108,6 +108,7 @@ internal class MainForm : Form
     private void InitializeFormProperties()
     {
         this.Text = "Copilot Booster";
+        this.Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f);
         this.Size = new Size(1000, 550);
         this.MinimumSize = new Size(550, 400);
         this.StartPosition = FormStartPosition.CenterScreen;
@@ -258,12 +259,12 @@ internal class MainForm : Form
                 return;
             }
 
-            var edited = SessionEditorVisuals.ShowEditor(session.Alias, session.Summary, session.Cwd);
+            var edited = SessionEditorVisuals.ShowEditor(session.Id, session.Alias, session.Summary, session.Cwd);
             if (edited != null)
             {
                 SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
-                if (SessionService.UpdateSession(sessionDir, edited.Value.Summary, edited.Value.Cwd))
+                if (SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd))
                 {
                     this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
                     var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
@@ -957,6 +958,14 @@ internal class MainForm : Form
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
             this._cachedSessions = sessions;
             var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+
+            // Edge scan uses UI Automation which requires STA — run on UI thread
+            if (this._activeTracker.ScanAndTrackEdgeWorkspaces())
+            {
+                // Re-build snapshot to include newly discovered Edge workspaces
+                snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
+            }
+
             this._sessionsVisuals.GridVisuals.ApplySnapshot(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
 
             // Bell notification: detect transitions and fire toast

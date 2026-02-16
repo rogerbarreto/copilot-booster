@@ -235,6 +235,7 @@ internal static class SettingsVisuals
         var form = new Form
         {
             Text = title,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             Size = new Size(500, 190),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
@@ -289,6 +290,7 @@ internal static class SettingsVisuals
         var form = new Form
         {
             Text = title,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             Size = new Size(450, 150),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
