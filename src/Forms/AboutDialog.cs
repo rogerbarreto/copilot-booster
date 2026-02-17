@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Services;
 
@@ -16,6 +17,7 @@ internal static class AboutDialog
 {
     private const string RepoUrl = "https://github.com/rogerbarreto/copilot-booster";
     private const string IssuesUrl = "https://github.com/rogerbarreto/copilot-booster/issues";
+    private const string ChangelogUrlTemplate = "https://github.com/rogerbarreto/copilot-booster/releases/tag/v{0}";
 
     internal static void Show(IWin32Window owner)
     {
@@ -25,7 +27,7 @@ internal static class AboutDialog
         var dialog = new Form
         {
             Text = "About Copilot Booster",
-            Size = new Size(400, 360),
+            Size = new Size(400, 390),
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterParent,
             MaximizeBox = false,
@@ -109,21 +111,41 @@ internal static class AboutDialog
         };
         issuesLink.LinkClicked += (s, e) => OpenUrl(IssuesUrl);
 
+        // Changelog link
+        var changelogLink = new LinkLabel
+        {
+            Text = $"What's New in v{version}",
+            AutoSize = true,
+            Location = new Point(125, 240),
+            LinkColor = linkColor,
+            ActiveLinkColor = linkColor,
+            VisitedLinkColor = linkColor
+        };
+        changelogLink.LinkClicked += (s, e) => OpenUrl(string.Format(ChangelogUrlTemplate, version));
+
         // Check for Updates button
         var updateButton = new Button
         {
             Text = "Check for Updates",
-            Width = 160,
+            Width = 250,
             Height = 30,
-            Location = new Point(110, 250)
+            Location = new Point(65, 275)
         };
+        bool isShowingResult = false;
         updateButton.Click += async (s, e) =>
         {
+            if (isShowingResult)
+            {
+                return;
+            }
+
             updateButton.Enabled = false;
             updateButton.Text = "Checking...";
             try
             {
-                var update = await UpdateService.CheckForUpdateAsync().ConfigureAwait(true);
+                var updateTask = UpdateService.CheckForUpdateAsync();
+                await Task.WhenAll(updateTask, Task.Delay(2000)).ConfigureAwait(true);
+                var update = await updateTask.ConfigureAwait(true);
                 if (update?.TagName != null)
                 {
                     var result = MessageBox.Show(
@@ -135,24 +157,36 @@ internal static class AboutDialog
                     {
                         OpenUrl(update.InstallerUrl);
                     }
+
+                    updateButton.Enabled = true;
+                    updateButton.Text = "Check for Updates";
                 }
                 else
                 {
-                    MessageBox.Show("You're running the latest version.", "Up to Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    updateButton.Enabled = true;
+                    isShowingResult = true;
+                    updateButton.BackColor = Color.FromArgb(30, 100, 30);
+                    updateButton.ForeColor = Color.White;
+                    updateButton.FlatStyle = FlatStyle.Flat;
+                    updateButton.Text = "✔ You're up to date";
+                    await Task.Delay(5000).ConfigureAwait(true);
+                    isShowingResult = false;
+                    updateButton.BackColor = SystemColors.Control;
+                    updateButton.ForeColor = SystemColors.ControlText;
+                    updateButton.FlatStyle = FlatStyle.Standard;
+                    updateButton.Text = "Check for Updates";
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to check for updates: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
+                updateButton.Text = $"✘ {ex.Message}";
+                await Task.Delay(5000).ConfigureAwait(true);
                 updateButton.Enabled = true;
                 updateButton.Text = "Check for Updates";
             }
         };
 
-        mainPanel.Controls.AddRange([logoPicture, nameLabel, versionLabel, creatorLabel, repoLink, issuesLink, updateButton]);
+        mainPanel.Controls.AddRange([logoPicture, nameLabel, versionLabel, creatorLabel, repoLink, issuesLink, changelogLink, updateButton]);
         dialog.Controls.Add(mainPanel);
         dialog.ShowDialog(owner);
     }
