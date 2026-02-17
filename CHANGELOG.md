@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0] - 2026-02-17
+
+### Added
+
+- **Archived sessions** — sessions can now be archived via right-click context menu, moving them to a separate "Archived" tab for a cleaner active list. Unarchive from the same menu.
+- **Pinned sessions** — pin sessions to keep them at the top of the list regardless of column sorting. Configurable sort order for pinned items (last updated or alias name) in Settings.
+- **Session Files folder** — right-click "Open Files Folder" opens a dedicated Explorer window per session (`~/.CopilotBooster/{sessionId}/Files`), with HWND tracking for focus management.
+- **Open Plan.md** — right-click context menu option to open a session's `plan.md` file directly (shown only when the file exists).
+- **Open CWD in Explorer** — right-click to open the session's working directory in Explorer (untracked).
+- **Search debounce** — search input now waits 500ms after the last keystroke before filtering, reducing UI churn during typing.
+- **Settings gear button** — ⚙ button in the toolbar for quick access to Settings dialog.
+- **About dialog** — accessible from Settings, shows app logo, version, creator, GitHub links, and a Check for Updates button.
+- **Max active sessions** — configurable limit (default 50, 0 = unlimited) in Settings.
+- **New Session dialog** — "New Session" is now a button with a modal directory picker dialog including Create/Cancel buttons.
+- **Settings as modal dialog** — Settings moved from a tab to a standalone modal dialog.
+- **Explorer in Running column** — tracked Explorer windows now appear in the "Running" column with click-to-focus support.
+- **STA task scheduler** — Edge UI Automation scans now run on a dedicated background STA thread instead of blocking the UI thread.
+
+### Changed
+
+- **Column renamed** — "Activity" column renamed to "Running" for clarity.
+- **Tab layout** — replaced 3-tab layout (Sessions/New Session/Settings) with a single-panel sessions view and sub-tabs (Active/Archived) with counts.
+- **Async refresh** — all `RefreshActiveStatus` calls now run on background threads, keeping the UI responsive.
+- **Archive/pin operations** — use lightweight row removal instead of full grid repopulate for instant visual feedback.
+
+### Fixed
+
+- **ListBox item clipping** — fixed descenders (`g`, `y`) and underscores being cut off in all owner-drawn ListBoxes by setting proper `ItemHeight`.
+- **Dialog TopMost** — Settings, New Session, and About dialogs now inherit `TopMost` from the main form when AlwaysOnTop is enabled.
+- **About logo quality** — uses embedded high-res PNG (722×714) instead of low-res icon bitmap conversion.
+
 ## [0.11.0] - 2026-02-16
 
 ### Added

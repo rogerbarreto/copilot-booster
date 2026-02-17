@@ -34,6 +34,14 @@ internal class NewSessionVisuals
     internal event Func<string, Task>? OnRemoveDirectory;
     internal event Func<string, Task>? OnDoubleClicked;
 
+    internal async void TriggerNewSessionAsync(string selectedCwd)
+    {
+        if (this.OnNewSession != null)
+        {
+            await this.OnNewSession.Invoke(selectedCwd).ConfigureAwait(true);
+        }
+    }
+
     /// <summary>
     /// Callback to determine context menu visibility state.
     /// Returns (isGit, isPinned, sessionCount).
@@ -42,7 +50,7 @@ internal class NewSessionVisuals
 
     private readonly Dictionary<string, bool> _cwdGitStatus = new(StringComparer.OrdinalIgnoreCase);
 
-    internal NewSessionVisuals(TabPage newSessionTab)
+    internal NewSessionVisuals(Control parentControl)
     {
         this.BuildCwdListView();
         this.BuildCwdContextMenu();
@@ -55,9 +63,9 @@ internal class NewSessionVisuals
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular)
         };
 
-        newSessionTab.Controls.Add(this.LoadingOverlay);
+        parentControl.Controls.Add(this.LoadingOverlay);
         this.LoadingOverlay.BringToFront();
-        newSessionTab.Controls.Add(this.CwdListView);
+        parentControl.Controls.Add(this.CwdListView);
     }
 
     /// <summary>

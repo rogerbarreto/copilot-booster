@@ -210,26 +210,30 @@ internal class SessionGridVisuals
             && existingOrder.All(id => displayedIds.Contains(id)))
         {
             // Re-order displayed list to match existing grid order, appending new sessions at the end
+            // But always keep pinned sessions at the top in their own order
+            var pinned = displayed.Where(s => s.IsPinned).ToList();
+            var unpinned = displayed.Where(s => !s.IsPinned).ToList();
+
             var existingSet = new HashSet<string>(existingOrder, StringComparer.OrdinalIgnoreCase);
-            var ordered = new List<NamedSession>();
+            var orderedUnpinned = new List<NamedSession>();
             foreach (var id in existingOrder)
             {
-                var s = displayed.Find(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+                var s = unpinned.Find(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
                 if (s != null)
                 {
-                    ordered.Add(s);
+                    orderedUnpinned.Add(s);
                 }
             }
 
-            foreach (var s in displayed)
+            foreach (var s in unpinned)
             {
                 if (!existingSet.Contains(s.Id))
                 {
-                    ordered.Add(s);
+                    orderedUnpinned.Add(s);
                 }
             }
 
-            displayed = ordered;
+            displayed = [.. pinned, .. orderedUnpinned];
         }
 
         this._grid.Rows.Clear();
@@ -246,6 +250,10 @@ internal class SessionGridVisuals
             var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
             var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
             var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+            if (session.IsPinned)
+            {
+                displayName = "\U0001F4CC " + displayName;
+            }
             var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, activeText);
             var row = this._grid.Rows[rowIndex];
             row.Tag = session.Id;
@@ -284,6 +292,10 @@ internal class SessionGridVisuals
                 // Find the session to check for alias
                 var session = sessions.Find(s => s.Id == sessionId);
                 var displayName = session != null && !string.IsNullOrEmpty(session.Alias) ? session.Alias : newName;
+                if (session != null && session.IsPinned)
+                {
+                    displayName = "\U0001F4CC " + displayName;
+                }
                 var currentDisplay = row.Cells[1].Value?.ToString();
                 if (currentDisplay != displayName)
                 {
@@ -356,6 +368,10 @@ internal class SessionGridVisuals
             var newActiveText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
             var newStatusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
             var newDisplayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+            if (session.IsPinned)
+            {
+                newDisplayName = "\U0001F4CC " + newDisplayName;
+            }
             var rowIndex = this._grid.Rows.Add(newStatusIcon, newDisplayName, cwdText, dateText, newActiveText);
             var newRow = this._grid.Rows[rowIndex];
             newRow.Tag = session.Id;
@@ -400,6 +416,41 @@ internal class SessionGridVisuals
     internal string? GetSelectedSessionId()
     {
         return this._grid.CurrentRow?.Tag as string;
+    }
+
+    internal int GetSelectedRowIndex()
+    {
+        return this._grid.CurrentRow?.Index ?? -1;
+    }
+
+    internal void SelectRowByIndex(int index)
+    {
+        if (this._grid.Rows.Count == 0)
+        {
+            return;
+        }
+
+        index = Math.Clamp(index, 0, this._grid.Rows.Count - 1);
+        this._grid.ClearSelection();
+        this._grid.Rows[index].Selected = true;
+        this._grid.CurrentCell = this._grid.Rows[index].Cells[0];
+    }
+
+    /// <summary>
+    /// Removes a single row by session ID and selects the adjacent row.
+    /// </summary>
+    internal void RemoveRowBySessionId(string sessionId)
+    {
+        for (int i = 0; i < this._grid.Rows.Count; i++)
+        {
+            if (this._grid.Rows[i].Tag is string id
+                && string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                this._grid.Rows.RemoveAt(i);
+                this.SelectRowByIndex(i);
+                return;
+            }
+        }
     }
 
     internal void AdvanceSpinnerFrame()

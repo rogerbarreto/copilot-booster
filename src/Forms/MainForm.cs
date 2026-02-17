@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
@@ -18,34 +19,23 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal class MainForm : Form
 {
-    private readonly TabControl _mainTabs;
-    private readonly TabPage _sessionsTab;
-    private readonly TabPage _newSessionTab;
-    private readonly TabPage _settingsTab;
+    private readonly Panel _sessionsPanel;
 
     // Sessions tab controls
     private readonly ExistingSessionsVisuals _sessionsVisuals = null!;
     private List<NamedSession> _cachedSessions = new();
+    private ActiveStatusSnapshot _lastSnapshot = new([], [], []);
     private readonly ActiveStatusTracker _activeTracker = new();
     private readonly SessionRefreshCoordinator _refreshCoordinator;
     private readonly SessionInteractionManager _interactionManager;
-    private Timer? _activeStatusTimer;
-    private Timer? _spinnerTimer;
+    private System.Windows.Forms.Timer? _activeStatusTimer;
+    private System.Windows.Forms.Timer? _spinnerTimer;
     private BellNotificationService? _bellService;
 
-    // New Session tab controls
-    private readonly NewSessionVisuals _newSessionVisuals = null!;
+    // New Session support
     private readonly SessionDataService _sessionDataService = new();
 
-    // Settings tab controls
-    private ListBox _toolsList = null!;
-    private ListBox _dirsList = null!;
-    private ListView _idesList = null!;
-    private TextBox _workDirBox = null!;
-    private CheckBox _notifyOnBellCheck = null!;
-    private CheckBox _autoHideOnFocusCheck = null!;
-    private CheckBox _alwaysOnTopCheck = null!;
-    private ComboBox _themeCombo = null!;
+    // Settings tab controls (created inside dialog)
     private bool _suppressThemeChange;
 
     // Update banner
@@ -70,37 +60,14 @@ internal class MainForm : Form
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
 
-        this._mainTabs = new TabControl { Dock = DockStyle.Fill };
-        if (!Application.IsDarkModeEnabled)
-        {
-            this._mainTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-            this._mainTabs.DrawItem += (s, e) =>
-            {
-                bool selected = e.Index == this._mainTabs.SelectedIndex;
-                var back = selected ? SystemColors.Window : Color.FromArgb(220, 220, 220);
-                var fore = SystemColors.ControlText;
-                using var brush = new SolidBrush(back);
-                e.Graphics.FillRectangle(brush, e.Bounds);
-                var text = this._mainTabs.TabPages[e.Index].Text;
-                TextRenderer.DrawText(e.Graphics, text, this._mainTabs.Font, e.Bounds, fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            };
-        }
-        this._sessionsTab = new TabPage("Existing Sessions");
-        this._settingsTab = new TabPage("Settings");
-        this._newSessionTab = new TabPage("New Session");
+        this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
-        this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsTab, this._activeTracker);
+        this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsPanel, this._activeTracker);
         this.WireSessionsEvents();
-        this.BuildSettingsTab();
-        this._newSessionVisuals = new NewSessionVisuals(this._newSessionTab);
-        this.WireNewSessionEvents();
         this.SetupUpdateBanner();
         this.SetupTrayIcon();
 
-        this._mainTabs.TabPages.Add(this._newSessionTab);
-        this._mainTabs.TabPages.Add(this._sessionsTab);
-        this._mainTabs.TabPages.Add(this._settingsTab);
-        this.Controls.Add(this._mainTabs);
+        this.Controls.Add(this._sessionsPanel);
         this.Controls.Add(this._updateLabel);
 
         this.SetupTimersAndEvents(initialTab);
@@ -126,7 +93,7 @@ internal class MainForm : Form
     {
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("Show", null, (s, e) => this.RestoreFromTray());
-        trayMenu.Items.Add("Settings", null, (s, e) => this.ShowTab(2));
+        trayMenu.Items.Add("Settings", null, (s, e) => this.ShowSettingsDialog());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Quit", null, (s, e) =>
         {
@@ -173,13 +140,10 @@ internal class MainForm : Form
         };
     }
 
-    private void ShowTab(int tabIndex)
+    private void ShowSettingsDialog()
     {
         this.RestoreFromTray();
-        if (tabIndex >= 0 && tabIndex < this._mainTabs.TabPages.Count)
-        {
-            this._mainTabs.SelectedIndex = tabIndex;
-        }
+        this.BuildAndShowSettingsDialog();
     }
 
     /// <summary>
@@ -228,14 +192,29 @@ internal class MainForm : Form
         this._sessionsVisuals.OnRefreshRequested += async () =>
         {
             this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-            var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
-            this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+            this.ApplySessionStates(this._cachedSessions);
+            var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+            this.PopulateGridWithFilter(snapshot);
         };
 
         this._sessionsVisuals.OnSearchChanged += () =>
         {
-            var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
-            this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+            this.PopulateGridWithFilter(this._lastSnapshot);
+        };
+
+        this._sessionsVisuals.OnTabChanged += () =>
+        {
+            this.PopulateGridWithFilter(this._lastSnapshot);
+        };
+
+        this._sessionsVisuals.OnNewSessionClicked += () =>
+        {
+            this.ShowNewSessionDialogAsync();
+        };
+
+        this._sessionsVisuals.OnSettingsClicked += () =>
+        {
+            this.ShowSettingsDialog();
         };
 
         this._sessionsVisuals.OnSessionDoubleClicked += (sid) =>
@@ -274,8 +253,8 @@ internal class MainForm : Form
                 if (SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd))
                 {
                     this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-                    var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
-                    this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+                    var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+                    this.PopulateGridWithFilter(snapshot);
                 }
             }
         };
@@ -447,15 +426,118 @@ internal class MainForm : Form
                 MessageBoxDefaultButton.Button2);
             if (result == DialogResult.Yes && this._interactionManager.DeleteSession(sid))
             {
-                this._cachedSessions = (List<NamedSession>)this._refreshCoordinator.LoadSessions();
-                var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
-                this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+                this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+                var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+                this.PopulateGridWithFilter(snapshot);
             }
+        };
+
+        this._sessionsVisuals.OnOpenCwdExplorer += (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session != null && !string.IsNullOrEmpty(session.Cwd))
+            {
+                SessionInteractionManager.OpenExplorer(session.Cwd);
+            }
+        };
+
+        this._sessionsVisuals.OnOpenFilesFolder += (sid) =>
+        {
+            var proc = SessionInteractionManager.OpenSessionFilesFolder(sid);
+            if (proc != null)
+            {
+                this._activeTracker.TrackExplorerWindow(sid, proc);
+                this.RefreshActiveStatusAsync();
+            }
+        };
+
+        this._sessionsVisuals.OnOpenPlan += (sid) =>
+        {
+            SessionInteractionManager.OpenPlanFile(Program.SessionStateDir, sid);
+        };
+
+        this._sessionsVisuals.HasPlanFile = (sid) =>
+        {
+            return SessionInteractionManager.HasPlanFile(Program.SessionStateDir, sid);
+        };
+
+        this._sessionsVisuals.OnArchiveSession += (sid) =>
+        {
+            SessionArchiveService.SetArchived(Program.SessionStateFile, sid, true);
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session != null)
+            {
+                session.IsArchived = true;
+            }
+
+            this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
+            this.UpdateTabCounts();
+        };
+
+        this._sessionsVisuals.OnUnarchiveSession += (sid) =>
+        {
+            SessionArchiveService.SetArchived(Program.SessionStateFile, sid, false);
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session != null)
+            {
+                session.IsArchived = false;
+            }
+
+            this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
+            this.UpdateTabCounts();
+        };
+
+        this._sessionsVisuals.IsSessionArchived = (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            return session?.IsArchived ?? false;
+        };
+
+        this._sessionsVisuals.OnPinSession += (sid) =>
+        {
+            SessionArchiveService.SetPinned(Program.SessionStateFile, sid, true);
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session != null)
+            {
+                session.IsPinned = true;
+            }
+
+            this.PopulateGridWithFilter(this._lastSnapshot);
+        };
+
+        this._sessionsVisuals.OnUnpinSession += (sid) =>
+        {
+            SessionArchiveService.SetPinned(Program.SessionStateFile, sid, false);
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session != null)
+            {
+                session.IsPinned = false;
+            }
+
+            this.PopulateGridWithFilter(this._lastSnapshot);
+        };
+
+        this._sessionsVisuals.IsSessionPinned = (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            return session?.IsPinned ?? false;
         };
     }
 
-    private void BuildSettingsTab()
+    private void BuildAndShowSettingsDialog()
     {
+        var dialog = new Form
+        {
+            Text = "Settings",
+            Size = new Size(700, 500),
+            MinimumSize = new Size(500, 400),
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.Sizable,
+            Font = this.Font,
+            Icon = this.Icon,
+            TopMost = this.TopMost
+        };
+
         var settingsContainer = new Panel { Dock = DockStyle.Fill };
         var settingsTabs = new TabControl { Dock = DockStyle.Fill };
         if (!Application.IsDarkModeEnabled)
@@ -475,31 +557,31 @@ internal class MainForm : Form
 
         // Allowed Tools
         var toolsTab = new TabPage("Allowed Tools");
-        this._toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
-        SettingsVisuals.ApplyThemedSelection(this._toolsList);
+        var toolsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
+        SettingsVisuals.ApplyThemedSelection(toolsList);
         foreach (var tool in Program._settings.AllowedTools)
         {
-            this._toolsList.Items.Add(tool);
+            toolsList.Items.Add(tool);
         }
-        var toolsButtons = SettingsVisuals.CreateListButtons(this._toolsList, "Tool name:", "Add Tool", addBrowse: false);
-        toolsTab.Controls.Add(this._toolsList);
+        var toolsButtons = SettingsVisuals.CreateListButtons(toolsList, "Tool name:", "Add Tool", addBrowse: false);
+        toolsTab.Controls.Add(toolsList);
         toolsTab.Controls.Add(toolsButtons);
 
         // Allowed Directories
         var dirsTab = new TabPage("Allowed Directories");
-        this._dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
-        SettingsVisuals.ApplyThemedSelection(this._dirsList);
+        var dirsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
+        SettingsVisuals.ApplyThemedSelection(dirsList);
         foreach (var dir in Program._settings.AllowedDirs)
         {
-            this._dirsList.Items.Add(dir);
+            dirsList.Items.Add(dir);
         }
-        var dirsButtons = SettingsVisuals.CreateListButtons(this._dirsList, "Directory path:", "Add Directory", addBrowse: true);
-        dirsTab.Controls.Add(this._dirsList);
+        var dirsButtons = SettingsVisuals.CreateListButtons(dirsList, "Directory path:", "Add Directory", addBrowse: true);
+        dirsTab.Controls.Add(dirsList);
         dirsTab.Controls.Add(dirsButtons);
 
         // IDEs
         var idesTab = new TabPage("IDEs");
-        this._idesList = new ListView
+        var idesList = new ListView
         {
             Dock = DockStyle.Fill,
             View = View.Details,
@@ -507,17 +589,17 @@ internal class MainForm : Form
             MultiSelect = false,
             GridLines = !Application.IsDarkModeEnabled
         };
-        this._idesList.Columns.Add("Description", 200);
-        this._idesList.Columns.Add("Path", 400);
+        idesList.Columns.Add("Description", 200);
+        idesList.Columns.Add("Path", 400);
         foreach (var ide in Program._settings.Ides)
         {
             var item = new ListViewItem(ide.Description);
             item.SubItems.Add(ide.Path);
-            this._idesList.Items.Add(item);
+            idesList.Items.Add(item);
         }
-        SettingsVisuals.ApplyThemedSelection(this._idesList);
-        var ideButtons = SettingsVisuals.CreateIdeButtons(this._idesList);
-        idesTab.Controls.Add(this._idesList);
+        SettingsVisuals.ApplyThemedSelection(idesList);
+        var ideButtons = SettingsVisuals.CreateIdeButtons(idesList);
+        idesTab.Controls.Add(idesList);
         idesTab.Controls.Add(ideButtons);
 
         settingsTabs.TabPages.Add(toolsTab);
@@ -527,7 +609,7 @@ internal class MainForm : Form
         // Default Work Dir
         var workDirPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
         var workDirLabel = new Label { Text = "Default Work Dir:", AutoSize = true, Location = new Point(8, 12) };
-        this._workDirBox = new TextBox
+        var workDirBox = new TextBox
         {
             Text = Program._settings.DefaultWorkDir,
             Location = new Point(130, 9),
@@ -543,66 +625,66 @@ internal class MainForm : Form
         };
         workDirBrowse.Click += (s, e) =>
         {
-            using var fbd = new FolderBrowserDialog { SelectedPath = this._workDirBox.Text };
+            using var fbd = new FolderBrowserDialog { SelectedPath = workDirBox.Text };
             if (fbd.ShowDialog() == DialogResult.OK)
             {
-                this._workDirBox.Text = fbd.SelectedPath;
+                workDirBox.Text = fbd.SelectedPath;
             }
         };
-        workDirPanel.Controls.AddRange([workDirLabel, SettingsVisuals.WrapWithBorder(this._workDirBox), workDirBrowse]);
+        workDirPanel.Controls.AddRange([workDirLabel, SettingsVisuals.WrapWithBorder(workDirBox), workDirBrowse]);
 
         // Notifications
         var notifyPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
-        this._notifyOnBellCheck = new CheckBox
+        var notifyOnBellCheck = new CheckBox
         {
             Text = "Notify when session is ready (\U0001F514)",
             Checked = Program._settings.NotifyOnBell,
             AutoSize = true,
             Location = new Point(8, 5)
         };
-        notifyPanel.Controls.Add(this._notifyOnBellCheck);
+        notifyPanel.Controls.Add(notifyOnBellCheck);
 
         // Auto-hide on focus
         var autoHidePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
-        this._autoHideOnFocusCheck = new CheckBox
+        var autoHideOnFocusCheck = new CheckBox
         {
             Text = "Auto-hide other session windows on focus",
             Checked = Program._settings.AutoHideOnFocus,
             AutoSize = true,
             Location = new Point(8, 5)
         };
-        autoHidePanel.Controls.Add(this._autoHideOnFocusCheck);
+        autoHidePanel.Controls.Add(autoHideOnFocusCheck);
 
         // Always on top
         var alwaysOnTopPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
-        this._alwaysOnTopCheck = new CheckBox
+        var alwaysOnTopCheck = new CheckBox
         {
             Text = "Always on top",
             Checked = Program._settings.AlwaysOnTop,
             AutoSize = true,
             Location = new Point(8, 5)
         };
-        alwaysOnTopPanel.Controls.Add(this._alwaysOnTopCheck);
+        alwaysOnTopPanel.Controls.Add(alwaysOnTopCheck);
 
         // Theme
         var themePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
         var themeLabel = new Label { Text = "Theme:", AutoSize = true, Location = new Point(8, 7) };
-        this._themeCombo = new ComboBox
+        var themeCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             Location = new Point(130, 4),
             Width = 150
         };
-        this._themeCombo.Items.AddRange(new object[] { "System (default)", "Light", "Dark" });
-        this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
-        this._themeCombo.SelectedIndexChanged += (s, e) =>
+        themeCombo.Items.AddRange(new object[] { "System (default)", "Light", "Dark" });
+        themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
+        themeCombo.SelectedIndexChanged += (s, e) =>
         {
             if (this._suppressThemeChange)
             {
                 return;
             }
 
-            var theme = ThemeService.IndexToTheme(this._themeCombo.SelectedIndex);
+            var theme = ThemeService.IndexToTheme(themeCombo.SelectedIndex);
             if (theme == Program._settings.Theme)
             {
                 return;
@@ -623,11 +705,44 @@ internal class MainForm : Form
             else
             {
                 this._suppressThemeChange = true;
-                this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
+                themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
                 this._suppressThemeChange = false;
             }
         };
-        themePanel.Controls.AddRange([themeLabel, this._themeCombo]);
+        themePanel.Controls.AddRange([themeLabel, themeCombo]);
+
+        // Max active sessions
+        var maxSessionsPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var maxSessionsLabel = new Label { Text = "Max active sessions:", AutoSize = true, Location = new Point(8, 7) };
+        var maxSessionsBox = new NumericUpDown
+        {
+            Minimum = 0,
+            Maximum = 1000,
+            Value = Program._settings.MaxActiveSessions,
+            Location = new Point(160, 4),
+            Width = 70
+        };
+        var maxSessionsHint = new Label
+        {
+            Text = "(0 = unlimited)",
+            AutoSize = true,
+            Location = new Point(235, 7),
+            ForeColor = Application.IsDarkModeEnabled ? Color.Gray : Color.DimGray
+        };
+        maxSessionsPanel.Controls.AddRange([maxSessionsLabel, maxSessionsBox, maxSessionsHint]);
+
+        // Pinned order
+        var pinnedOrderPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var pinnedOrderLabel = new Label { Text = "Pinned order:", AutoSize = true, Location = new Point(8, 7) };
+        var pinnedOrderCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(160, 4),
+            Width = 180
+        };
+        pinnedOrderCombo.Items.AddRange(new object[] { "Last updated (default)", "Alias / Name" });
+        pinnedOrderCombo.SelectedIndex = string.Equals(Program._settings.PinnedOrder, "alias", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        pinnedOrderPanel.Controls.AddRange([pinnedOrderLabel, pinnedOrderCombo]);
 
         // Bottom buttons
         var settingsBottomPanel = new FlowLayoutPanel
@@ -641,39 +756,44 @@ internal class MainForm : Form
         var btnCancel = new Button { Text = "Cancel", Width = 90 };
         btnCancel.Click += (s, e) =>
         {
-            SettingsVisuals.ReloadSettingsUI(this._toolsList, this._dirsList, this._idesList, this._workDirBox, this._themeCombo);
-            this._notifyOnBellCheck.Checked = Program._settings.NotifyOnBell;
-            this._autoHideOnFocusCheck.Checked = Program._settings.AutoHideOnFocus;
-            this._alwaysOnTopCheck.Checked = Program._settings.AlwaysOnTop;
-            this._suppressThemeChange = true;
-            this._themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
-            this._suppressThemeChange = false;
+            dialog.Close();
         };
 
         var btnSave = new Button { Text = "Save", Width = 90 };
         btnSave.Click += (s, e) =>
         {
-            Program._settings.AllowedTools = this._toolsList.Items.Cast<string>().ToList();
-            Program._settings.AllowedDirs = this._dirsList.Items.Cast<string>().ToList();
-            Program._settings.DefaultWorkDir = this._workDirBox.Text.Trim();
+            Program._settings.AllowedTools = toolsList.Items.Cast<string>().ToList();
+            Program._settings.AllowedDirs = dirsList.Items.Cast<string>().ToList();
+            Program._settings.DefaultWorkDir = workDirBox.Text.Trim();
             Program._settings.Ides = [];
-            foreach (ListViewItem item in this._idesList.Items)
+            foreach (ListViewItem item in idesList.Items)
             {
                 Program._settings.Ides.Add(new IdeEntry { Description = item.Text, Path = item.SubItems[1].Text });
             }
 
-            Program._settings.NotifyOnBell = this._notifyOnBellCheck.Checked;
-            Program._settings.AutoHideOnFocus = this._autoHideOnFocusCheck.Checked;
-            Program._settings.AlwaysOnTop = this._alwaysOnTopCheck.Checked;
+            Program._settings.NotifyOnBell = notifyOnBellCheck.Checked;
+            Program._settings.AutoHideOnFocus = autoHideOnFocusCheck.Checked;
+            Program._settings.AlwaysOnTop = alwaysOnTopCheck.Checked;
+            Program._settings.MaxActiveSessions = (int)maxSessionsBox.Value;
+            Program._settings.PinnedOrder = pinnedOrderCombo.SelectedIndex == 1 ? "alias" : "created";
             this.TopMost = Program._settings.AlwaysOnTop;
             Program._settings.Save();
-            MessageBox.Show("Settings saved.", "Copilot Booster", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            dialog.Close();
+        };
+
+        var btnAbout = new Button { Text = "About", Width = 90 };
+        btnAbout.Click += (s, e) =>
+        {
+            AboutDialog.Show(dialog);
         };
 
         settingsBottomPanel.Controls.Add(btnCancel);
         settingsBottomPanel.Controls.Add(btnSave);
+        settingsBottomPanel.Controls.Add(btnAbout);
 
         settingsContainer.Controls.Add(settingsTabs);
+        settingsContainer.Controls.Add(pinnedOrderPanel);
+        settingsContainer.Controls.Add(maxSessionsPanel);
         settingsContainer.Controls.Add(themePanel);
         settingsContainer.Controls.Add(autoHidePanel);
         settingsContainer.Controls.Add(alwaysOnTopPanel);
@@ -681,130 +801,8 @@ internal class MainForm : Form
         settingsContainer.Controls.Add(workDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
 
-        this._settingsTab.Controls.Add(settingsContainer);
-    }
-
-    private void WireNewSessionEvents()
-    {
-        this._newSessionVisuals.OnNewSession += async (selectedCwd) =>
-        {
-            var sessionName = NewSessionNameVisuals.ShowNamePrompt();
-            if (sessionName == null)
-            {
-                return;
-            }
-
-            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
-            if (newSessionId != null)
-            {
-                if (!string.IsNullOrWhiteSpace(sessionName))
-                {
-                    SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
-                }
-
-                this._interactionManager.LaunchSession(newSessionId);
-                await this.RefreshGridAsync().ConfigureAwait(true);
-            }
-            else
-            {
-                MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        };
-
-        this._newSessionVisuals.OnNewSessionWorkspace += async (selectedCwd) =>
-        {
-            var gitRoot = SessionService.FindGitRoot(selectedCwd);
-            if (gitRoot != null)
-            {
-                var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot);
-                if (wsResult != null)
-                {
-                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
-                    if (newSessionId != null)
-                    {
-                        if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
-                        {
-                            SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
-                        }
-
-                        this._interactionManager.LaunchSession(newSessionId);
-                        await this.RefreshGridAsync().ConfigureAwait(true);
-                    }
-                    else
-                    {
-                        MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            }
-        };
-
-        this._newSessionVisuals.OnOpenExplorer += (selectedCwd) =>
-        {
-            SessionInteractionManager.OpenExplorer(selectedCwd);
-        };
-
-        this._newSessionVisuals.OnOpenTerminal += (selectedCwd) =>
-        {
-            SessionInteractionManager.OpenTerminalSimple(selectedCwd);
-        };
-
-        this._newSessionVisuals.OnAddDirectory += async () =>
-        {
-            using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
-            if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
-            {
-                PinnedDirectoryService.Add(fbd.SelectedPath);
-                await this.RefreshNewSessionListAsync().ConfigureAwait(true);
-            }
-        };
-
-        this._newSessionVisuals.OnRemoveDirectory += async (selectedCwd) =>
-        {
-            PinnedDirectoryService.Remove(selectedCwd);
-            await this.RefreshNewSessionListAsync().ConfigureAwait(true);
-        };
-
-        this._newSessionVisuals.OnDoubleClicked += async (selectedCwd) =>
-        {
-            var sessionName = NewSessionNameVisuals.ShowNamePrompt();
-            if (sessionName == null)
-            {
-                return;
-            }
-
-            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
-            if (newSessionId != null)
-            {
-                if (!string.IsNullOrWhiteSpace(sessionName))
-                {
-                    SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
-                }
-
-                this._interactionManager.LaunchSession(newSessionId);
-                await this.RefreshGridAsync().ConfigureAwait(true);
-            }
-            else
-            {
-                MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        };
-
-        this._newSessionVisuals.GetCwdMenuInfo = (path, cwdGitStatus) =>
-        {
-            bool isGit = cwdGitStatus.TryGetValue(path, out bool g) && g;
-
-            int sessionCount = 0;
-            if (this._newSessionVisuals.CwdListView.SelectedItems.Count > 0
-                && int.TryParse(this._newSessionVisuals.CwdListView.SelectedItems[0].SubItems[1].Text, out int count))
-            {
-                sessionCount = count;
-            }
-
-            var pinnedDirs = PinnedDirectoryService.GetAll();
-            bool isPinned = pinnedDirs.Exists(d => string.Equals(d, path, StringComparison.OrdinalIgnoreCase));
-
-            return (isGit, isPinned, sessionCount);
-        };
+        dialog.Controls.Add(settingsContainer);
+        dialog.ShowDialog(this);
     }
 
     private void SetupUpdateBanner()
@@ -826,10 +824,6 @@ internal class MainForm : Form
 
     private void SetupTimersAndEvents(int initialTab)
     {
-        if (initialTab >= 0 && initialTab < this._mainTabs.TabPages.Count)
-        {
-            this._mainTabs.SelectedIndex = initialTab;
-        }
 
         this._activeTracker.OnEdgeWorkspaceClosed = (sid) =>
         {
@@ -848,11 +842,11 @@ internal class MainForm : Form
             }
         };
 
-        this._activeStatusTimer = new Timer { Interval = 3000 };
+        this._activeStatusTimer = new System.Windows.Forms.Timer { Interval = 3000 };
         this._activeStatusTimer.Tick += (s, e) => this.RefreshActiveStatusAsync();
         this._activeStatusTimer.Start();
 
-        this._spinnerTimer = new Timer { Interval = 100 };
+        this._spinnerTimer = new System.Windows.Forms.Timer { Interval = 100 };
         this._spinnerTimer.Tick += (s, e) => this._sessionsVisuals.GridVisuals.AdvanceSpinnerFrame();
         this._spinnerTimer.Start();
 
@@ -925,21 +919,21 @@ internal class MainForm : Form
     /// <param name="tabIndex">The zero-based index of the tab to activate.</param>
     public async void SwitchToTabAsync(int tabIndex)
     {
-        if (tabIndex >= 0 && tabIndex < this._mainTabs.TabPages.Count)
-        {
-            this._mainTabs.SelectedIndex = tabIndex;
-        }
-
         if (tabIndex == 0)
         {
-            await this.RefreshNewSessionListAsync().ConfigureAwait(true);
+            this.ShowNewSessionDialogAsync();
         }
 
         if (tabIndex == 1)
         {
             this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
             var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
-            this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+            this.PopulateGridWithFilter(snapshot);
+        }
+
+        if (tabIndex == 2)
+        {
+            this.BuildAndShowSettingsDialog();
         }
 
         if (this.WindowState == FormWindowState.Minimized)
@@ -959,6 +953,88 @@ internal class MainForm : Form
 
     private bool _refreshInProgress;
 
+    /// <summary>
+    /// Applies archive/pin states from the state file to loaded sessions.
+    /// </summary>
+    private void ApplySessionStates(List<NamedSession> sessions)
+    {
+        var states = SessionArchiveService.Load(Program.SessionStateFile);
+        foreach (var session in sessions)
+        {
+            if (states.TryGetValue(session.Id, out var state))
+            {
+                session.IsArchived = state.IsArchived;
+                session.IsPinned = state.IsPinned;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns sessions filtered by the current tab (Active/Archived),
+    /// with pinned sessions sorted to the top.
+    /// </summary>
+    private List<NamedSession> GetFilteredSessions()
+    {
+        bool showArchived = this._sessionsVisuals.IsArchivedTabSelected;
+        var filtered = this._cachedSessions.Where(s => s.IsArchived == showArchived).ToList();
+
+        // Sort pinned sessions to top with configurable sub-ordering
+        var pinnedOrder = Program._settings.PinnedOrder;
+        filtered.Sort((a, b) =>
+        {
+            if (a.IsPinned != b.IsPinned)
+            {
+                return a.IsPinned ? -1 : 1;
+            }
+
+            if (a.IsPinned && b.IsPinned)
+            {
+                if (string.Equals(pinnedOrder, "alias", StringComparison.OrdinalIgnoreCase))
+                {
+                    var nameA = !string.IsNullOrEmpty(a.Alias) ? a.Alias : a.Summary;
+                    var nameB = !string.IsNullOrEmpty(b.Alias) ? b.Alias : b.Summary;
+                    return string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
+                }
+
+                // Default: by LastModified descending (newest first)
+                return b.LastModified.CompareTo(a.LastModified);
+            }
+
+            return 0;
+        });
+
+        return filtered;
+    }
+
+    /// <summary>
+    /// Populates the grid with the current tab's filtered sessions and updates tab counts.
+    /// </summary>
+    private void PopulateGridWithFilter(ActiveStatusSnapshot snapshot)
+    {
+        this._lastSnapshot = snapshot;
+        var filtered = this.GetFilteredSessions();
+        this._sessionsVisuals.GridVisuals.Populate(filtered, snapshot, this._sessionsVisuals.SearchBox.Text);
+        this.UpdateTabCounts();
+    }
+
+    private void UpdateTabCounts()
+    {
+        var searchQuery = this._sessionsVisuals.SearchBox.Text;
+        var isSearching = !string.IsNullOrWhiteSpace(searchQuery);
+
+        var activeSessions = this._cachedSessions.Where(s => !s.IsArchived).ToList();
+        var archivedSessions = this._cachedSessions.Where(s => s.IsArchived).ToList();
+
+        int activeCount = isSearching
+            ? SessionService.SearchSessions(activeSessions, searchQuery!).Count
+            : activeSessions.Count;
+        int archivedCount = isSearching
+            ? SessionService.SearchSessions(archivedSessions, searchQuery!).Count
+            : archivedSessions.Count;
+
+        this._sessionsVisuals.UpdateTabCounts(activeCount, archivedCount);
+    }
+
     private async void RefreshActiveStatusAsync()
     {
         if (this._refreshInProgress)
@@ -971,16 +1047,24 @@ internal class MainForm : Form
         {
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
             this._cachedSessions = sessions;
+            this.ApplySessionStates(this._cachedSessions);
             var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
-            // Edge scan uses UI Automation which requires STA — run on UI thread
-            if (this._activeTracker.ScanAndTrackEdgeWorkspaces())
+            // Edge scan uses UI Automation (COM/STA) — run on a dedicated STA thread
+            bool edgeChanged = await Task.Factory.StartNew(
+                () => this._activeTracker.ScanAndTrackEdgeWorkspaces(),
+                CancellationToken.None,
+                TaskCreationOptions.None,
+                StaTaskScheduler.Instance).ConfigureAwait(true);
+            if (edgeChanged)
             {
                 // Re-build snapshot to include newly discovered Edge workspaces
-                snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
+                snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
             }
 
-            this._sessionsVisuals.GridVisuals.ApplySnapshot(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+            var filtered = this.GetFilteredSessions();
+            this._sessionsVisuals.GridVisuals.ApplySnapshot(filtered, snapshot, this._sessionsVisuals.SearchBox.Text);
+            this.UpdateTabCounts();
 
             // Bell notification: detect transitions and fire toast
             this._bellService?.CheckAndNotify(snapshot);
@@ -995,6 +1079,7 @@ internal class MainForm : Form
     {
         var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
         this._cachedSessions = sessions;
+        this.ApplySessionStates(this._cachedSessions);
         var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
         // Seed startup Copilot CLI sessions — suppress bell until they transition to working
@@ -1007,10 +1092,15 @@ internal class MainForm : Form
         // Re-run refresh with started sessions seeded (bells now suppressed)
         snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
-        // Sort active sessions to the top on initial load
+        // Sort active sessions to the top on initial load, pinned first
         var activeIds = new HashSet<string>(snapshot.ActiveTextBySessionId.Keys, StringComparer.OrdinalIgnoreCase);
         this._cachedSessions.Sort((a, b) =>
         {
+            if (a.IsPinned != b.IsPinned)
+            {
+                return a.IsPinned ? -1 : 1;
+            }
+
             bool aActive = activeIds.Contains(a.Id);
             bool bActive = activeIds.Contains(b.Id);
             if (aActive != bActive)
@@ -1021,25 +1111,200 @@ internal class MainForm : Form
             return b.LastModified.CompareTo(a.LastModified);
         });
 
-        this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+        this.PopulateGridWithFilter(snapshot);
         this._sessionsVisuals.LoadingOverlay.Visible = false;
-
-        await this.RefreshNewSessionListAsync().ConfigureAwait(true);
     }
 
     private async Task RefreshGridAsync()
     {
         this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-        var snapshot = this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions);
-        this._sessionsVisuals.GridVisuals.Populate(this._cachedSessions, snapshot, this._sessionsVisuals.SearchBox.Text);
+        this.ApplySessionStates(this._cachedSessions);
+        var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+        this.PopulateGridWithFilter(snapshot);
     }
 
-    private async Task RefreshNewSessionListAsync()
+    private async void ShowNewSessionDialogAsync()
     {
-        var pinnedDirs = PinnedDirectoryService.GetAll();
-        var data = await Task.Run(() => this._sessionDataService.LoadAll(Program.SessionStateDir, Program.PidRegistryFile, pinnedDirs)).ConfigureAwait(true);
-        this._newSessionVisuals.Populate(data);
-        this._newSessionVisuals.LoadingOverlay.Visible = false;
+        var dialog = new Form
+        {
+            Text = "New Session — Select Directory",
+            Size = new Size(650, 450),
+            MinimumSize = new Size(450, 300),
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.Sizable,
+            Font = this.Font,
+            Icon = this.Icon,
+            TopMost = this.TopMost
+        };
+
+        var dialogPanel = new Panel { Dock = DockStyle.Fill };
+
+        var bottomPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 45,
+            FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(8, 6, 8, 6)
+        };
+
+        var btnCancel = new Button { Text = "Cancel", Width = 90 };
+        btnCancel.Click += (s, e) => dialog.Close();
+
+        var btnCreate = new Button { Text = "Create", Width = 90 };
+        bottomPanel.Controls.Add(btnCancel);
+        bottomPanel.Controls.Add(btnCreate);
+
+        dialog.Controls.Add(dialogPanel);
+        dialog.Controls.Add(bottomPanel);
+
+        var dialogVisuals = new NewSessionVisuals(dialogPanel);
+
+        // Wire Create button to trigger the same flow as context menu "New Session"
+        btnCreate.Click += (s, e) =>
+        {
+            if (dialogVisuals.CwdListView.SelectedItems.Count > 0)
+            {
+                var selectedCwd = dialogVisuals.CwdListView.SelectedItems[0].Tag as string ?? "";
+                dialogVisuals.TriggerNewSessionAsync(selectedCwd);
+            }
+        };
+
+        // Wire events identically to the old tab-based visuals
+        dialogVisuals.OnNewSession += async (selectedCwd) =>
+        {
+            var sessionName = NewSessionNameVisuals.ShowNamePrompt();
+            if (sessionName == null)
+            {
+                return;
+            }
+
+            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
+            if (newSessionId != null)
+            {
+                if (!string.IsNullOrWhiteSpace(sessionName))
+                {
+                    SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                }
+
+                this._interactionManager.LaunchSession(newSessionId);
+                dialog.Close();
+                await this.RefreshGridAsync().ConfigureAwait(true);
+            }
+            else
+            {
+                MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        dialogVisuals.OnNewSessionWorkspace += async (selectedCwd) =>
+        {
+            var gitRoot = SessionService.FindGitRoot(selectedCwd);
+            if (gitRoot != null)
+            {
+                var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot);
+                if (wsResult != null)
+                {
+                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
+                    if (newSessionId != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
+                        {
+                            SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
+                        }
+
+                        this._interactionManager.LaunchSession(newSessionId);
+                        dialog.Close();
+                        await this.RefreshGridAsync().ConfigureAwait(true);
+                    }
+                    else
+                    {
+                        MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        };
+
+        dialogVisuals.OnOpenExplorer += (selectedCwd) =>
+        {
+            SessionInteractionManager.OpenExplorer(selectedCwd);
+        };
+
+        dialogVisuals.OnOpenTerminal += (selectedCwd) =>
+        {
+            SessionInteractionManager.OpenTerminalSimple(selectedCwd);
+        };
+
+        dialogVisuals.OnAddDirectory += async () =>
+        {
+            using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
+            if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
+            {
+                PinnedDirectoryService.Add(fbd.SelectedPath);
+                var pinnedDirs = PinnedDirectoryService.GetAll();
+                var data = await Task.Run(() => this._sessionDataService.LoadAll(Program.SessionStateDir, Program.PidRegistryFile, pinnedDirs)).ConfigureAwait(true);
+                dialogVisuals.Populate(data);
+                dialogVisuals.LoadingOverlay.Visible = false;
+            }
+        };
+
+        dialogVisuals.OnRemoveDirectory += async (selectedCwd) =>
+        {
+            PinnedDirectoryService.Remove(selectedCwd);
+            var pinnedDirs = PinnedDirectoryService.GetAll();
+            var data = await Task.Run(() => this._sessionDataService.LoadAll(Program.SessionStateDir, Program.PidRegistryFile, pinnedDirs)).ConfigureAwait(true);
+            dialogVisuals.Populate(data);
+            dialogVisuals.LoadingOverlay.Visible = false;
+        };
+
+        dialogVisuals.OnDoubleClicked += async (selectedCwd) =>
+        {
+            var sessionName = NewSessionNameVisuals.ShowNamePrompt();
+            if (sessionName == null)
+            {
+                return;
+            }
+
+            var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
+            if (newSessionId != null)
+            {
+                if (!string.IsNullOrWhiteSpace(sessionName))
+                {
+                    SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                }
+
+                this._interactionManager.LaunchSession(newSessionId);
+                dialog.Close();
+                await this.RefreshGridAsync().ConfigureAwait(true);
+            }
+            else
+            {
+                MessageBox.Show("Failed to create session. Check that Copilot CLI is installed and authenticated.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        dialogVisuals.GetCwdMenuInfo = (path, cwdGitStatus) =>
+        {
+            bool isGit = cwdGitStatus.TryGetValue(path, out bool g) && g;
+            int sessionCount = 0;
+            if (dialogVisuals.CwdListView.SelectedItems.Count > 0
+                && int.TryParse(dialogVisuals.CwdListView.SelectedItems[0].SubItems[1].Text, out int count))
+            {
+                sessionCount = count;
+            }
+
+            var pinnedDirs = PinnedDirectoryService.GetAll();
+            bool isPinned = pinnedDirs.Exists(d => string.Equals(d, path, StringComparison.OrdinalIgnoreCase));
+
+            return (isGit, isPinned, sessionCount);
+        };
+
+        // Load data
+        var allPinnedDirs = PinnedDirectoryService.GetAll();
+        var sessionData = await Task.Run(() => this._sessionDataService.LoadAll(Program.SessionStateDir, Program.PidRegistryFile, allPinnedDirs)).ConfigureAwait(true);
+        dialogVisuals.Populate(sessionData);
+        dialogVisuals.LoadingOverlay.Visible = false;
+
+        dialog.ShowDialog(this);
     }
 
     /// <summary>

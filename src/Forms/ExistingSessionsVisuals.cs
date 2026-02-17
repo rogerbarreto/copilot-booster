@@ -19,6 +19,15 @@ internal class ExistingSessionsVisuals
     internal DataGridView SessionGrid = null!;
     internal SessionGridVisuals GridVisuals = null!;
     internal Label LoadingOverlay = null!;
+    internal TabControl SessionTabs = null!;
+    internal TabPage ActiveTab = null!;
+    internal TabPage ArchivedTab = null!;
+    internal Button NewSessionButton = null!;
+
+    /// <summary>
+    /// Gets whether the archived tab is currently selected.
+    /// </summary>
+    internal bool IsArchivedTabSelected => this.SessionTabs.SelectedTab == this.ArchivedTab;
 
     /// <summary>Fired when the user clicks Refresh.</summary>
     internal event Action? OnRefreshRequested;
@@ -29,6 +38,15 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when the user filters sessions via the search box.</summary>
     internal event Action? OnSearchChanged;
 
+    /// <summary>Fired when the session tab (Active/Archived) changes.</summary>
+    internal event Action? OnTabChanged;
+
+    /// <summary>Fired when the New Session button is clicked.</summary>
+    internal event Action? OnNewSessionClicked;
+
+    /// <summary>Fired when the Settings button is clicked.</summary>
+    internal event Action? OnSettingsClicked;
+
     // Context menu events — arg is always the selected session id.
     internal event Action<string>? OnOpenSession;
     internal event Action<string>? OnEditSession;
@@ -37,6 +55,13 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenTerminal;
     internal event Action<string>? OnOpenEdge;
     internal event Action<string>? OnDeleteSession;
+    internal event Action<string>? OnOpenFilesFolder;
+    internal event Action<string>? OnOpenPlan;
+    internal event Action<string>? OnOpenCwdExplorer;
+    internal event Action<string>? OnArchiveSession;
+    internal event Action<string>? OnUnarchiveSession;
+    internal event Action<string>? OnPinSession;
+    internal event Action<string>? OnUnpinSession;
 
     /// <summary>
     /// Fired for IDE context-menu clicks.
@@ -50,12 +75,56 @@ internal class ExistingSessionsVisuals
     /// </summary>
     internal Func<string, (bool hasGitRoot, bool isSubfolder)>? GetGitRootInfo;
 
-    internal ExistingSessionsVisuals(TabPage sessionsTab, ActiveStatusTracker activeTracker)
+    /// <summary>
+    /// Callback to determine if a session has a plan.md file.
+    /// </summary>
+    internal Func<string, bool>? HasPlanFile;
+
+    /// <summary>
+    /// Callback to determine if a session is archived.
+    /// </summary>
+    internal Func<string, bool>? IsSessionArchived;
+
+    /// <summary>
+    /// Callback to determine if a session is pinned.
+    /// </summary>
+    internal Func<string, bool>? IsSessionPinned;
+
+    internal ExistingSessionsVisuals(Control parentControl, ActiveStatusTracker activeTracker)
     {
         this.InitializeSessionGrid();
         var searchPanel = this.BuildSearchPanel();
         this.GridVisuals = new SessionGridVisuals(this.SessionGrid, activeTracker);
         this.BuildGridContextMenu();
+
+        // Sub-tabs: Active / Archived
+        this.ActiveTab = new TabPage("Active");
+        this.ArchivedTab = new TabPage("Archived");
+        this.SessionTabs = new TabControl { Dock = DockStyle.Fill };
+        if (!Application.IsDarkModeEnabled)
+        {
+            this.SessionTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            this.SessionTabs.DrawItem += (s, e) =>
+            {
+                bool selected = e.Index == this.SessionTabs.SelectedIndex;
+                var back = selected ? SystemColors.Window : Color.FromArgb(220, 220, 220);
+                var fore = SystemColors.ControlText;
+                using var brush = new SolidBrush(back);
+                e.Graphics.FillRectangle(brush, e.Bounds);
+                var text = this.SessionTabs.TabPages[e.Index].Text;
+                TextRenderer.DrawText(e.Graphics, text, this.SessionTabs.Font, e.Bounds, fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            };
+        }
+        this.SessionTabs.TabPages.Add(this.ActiveTab);
+        this.SessionTabs.TabPages.Add(this.ArchivedTab);
+        this.ActiveTab.Controls.Add(this.SessionGrid);
+        this.SessionTabs.SelectedIndexChanged += (s, e) =>
+        {
+            // Move the grid to the newly selected tab
+            var selectedTab = this.SessionTabs.SelectedTab!;
+            selectedTab.Controls.Add(this.SessionGrid);
+            this.OnTabChanged?.Invoke();
+        };
 
         this.LoadingOverlay = new Label
         {
@@ -65,10 +134,10 @@ internal class ExistingSessionsVisuals
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 14f, FontStyle.Regular)
         };
 
-        sessionsTab.Controls.Add(this.LoadingOverlay);
+        parentControl.Controls.Add(this.LoadingOverlay);
         this.LoadingOverlay.BringToFront();
-        sessionsTab.Controls.Add(this.SessionGrid);
-        sessionsTab.Controls.Add(searchPanel);
+        parentControl.Controls.Add(this.SessionTabs);
+        parentControl.Controls.Add(searchPanel);
     }
 
     private void InitializeSessionGrid()
@@ -118,15 +187,21 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns.Add("Session", "Session");
         this.SessionGrid.Columns.Add("CWD", "CWD");
         this.SessionGrid.Columns.Add("Date", "Date");
-        this.SessionGrid.Columns.Add("Active", "Active");
+        var runningAppsCol = new DataGridViewTextBoxColumn
+        {
+            Name = "RunningApps",
+            HeaderText = "Running",
+            ToolTipText = "Applications running in session context"
+        };
+        this.SessionGrid.Columns.Add(runningAppsCol);
         this.SessionGrid.Columns["Session"]!.Width = 300;
         this.SessionGrid.Columns["Session"]!.MinimumWidth = 100;
         this.SessionGrid.Columns["CWD"]!.Width = 110;
         this.SessionGrid.Columns["CWD"]!.MinimumWidth = 60;
         this.SessionGrid.Columns["Date"]!.Width = 160;
         this.SessionGrid.Columns["Date"]!.MinimumWidth = 100;
-        this.SessionGrid.Columns["Active"]!.Width = 100;
-        this.SessionGrid.Columns["Active"]!.MinimumWidth = 60;
+        this.SessionGrid.Columns["RunningApps"]!.Width = 100;
+        this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
 
         bool adjustingSessionWidth = false;
         void AdjustSessionColumnWidth()
@@ -141,7 +216,7 @@ internal class ExistingSessionsVisuals
                 var otherWidth = this.SessionGrid.Columns["Status"]!.Width
                     + this.SessionGrid.Columns["CWD"]!.Width
                     + this.SessionGrid.Columns["Date"]!.Width
-                    + this.SessionGrid.Columns["Active"]!.Width
+                    + this.SessionGrid.Columns["RunningApps"]!.Width
                     + (this.SessionGrid.RowHeadersVisible ? this.SessionGrid.RowHeadersWidth : 0)
                     + SystemInformation.VerticalScrollBarWidth + 2;
                 var fill = this.SessionGrid.ClientSize.Width - otherWidth;
@@ -210,11 +285,21 @@ internal class ExistingSessionsVisuals
     private Panel BuildSearchPanel()
     {
         var searchPanel = new Panel { Dock = DockStyle.Top, Height = 34 };
+
+        this.NewSessionButton = new Button
+        {
+            Text = "New Session",
+            Width = 100,
+            Height = 27,
+            Location = new Point(5, 3)
+        };
+        this.NewSessionButton.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
+
         var searchLabel = new Label
         {
             Text = "Search:",
             AutoSize = true,
-            Location = new Point(5, 9)
+            Location = new Point(112, 9)
         };
         var btnRefreshTop = new Button
         {
@@ -222,13 +307,28 @@ internal class ExistingSessionsVisuals
             Width = 65,
             Height = 27,
             Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Location = new Point(searchPanel.Width - 70, 3)
+            Location = new Point(searchPanel.Width - 105, 3)
         };
-        searchPanel.Resize += (s, e) => btnRefreshTop.Left = searchPanel.ClientSize.Width - 70;
+        searchPanel.Resize += (s, e) => btnRefreshTop.Left = searchPanel.ClientSize.Width - 105;
         btnRefreshTop.Click += (s, e) => this.OnRefreshRequested?.Invoke();
+
+        var btnSettings = new Button
+        {
+            Text = "⚙",
+            Width = 32,
+            Height = 27,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            Location = new Point(searchPanel.Width - 37, 3),
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 12f),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand
+        };
+        btnSettings.FlatAppearance.BorderSize = 0;
+        searchPanel.Resize += (s, e) => btnSettings.Left = searchPanel.ClientSize.Width - 37;
+        btnSettings.Click += (s, e) => this.OnSettingsClicked?.Invoke();
         this.SearchBox = new TextBox
         {
-            Location = new Point(55, 4),
+            Location = new Point(162, 4),
             Width = 100,
             Height = 20,
             Multiline = true,
@@ -245,11 +345,23 @@ internal class ExistingSessionsVisuals
             }
         };
         var searchBorder = SettingsVisuals.WrapWithBorder(this.SearchBox);
-        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 130;
-        this.SearchBox.TextChanged += (s, e) => this.OnSearchChanged?.Invoke();
+        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 275;
+        var debounceTimer = new Timer { Interval = 500 };
+        debounceTimer.Tick += (s, e) =>
+        {
+            debounceTimer.Stop();
+            this.OnSearchChanged?.Invoke();
+        };
+        this.SearchBox.TextChanged += (s, e) =>
+        {
+            debounceTimer.Stop();
+            debounceTimer.Start();
+        };
         searchPanel.Controls.Add(searchBorder);
+        searchPanel.Controls.Add(btnSettings);
         searchPanel.Controls.Add(btnRefreshTop);
         searchPanel.Controls.Add(searchLabel);
+        searchPanel.Controls.Add(this.NewSessionButton);
         return searchPanel;
     }
 
@@ -365,6 +477,87 @@ internal class ExistingSessionsVisuals
 
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
+        var menuOpenCwdExplorer = new ToolStripMenuItem("Open CWD in Explorer");
+        menuOpenCwdExplorer.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenCwdExplorer?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenCwdExplorer);
+
+        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files Folder");
+        menuOpenFilesFolder.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenFilesFolder?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenFilesFolder);
+
+        var menuOpenPlan = new ToolStripMenuItem("Open Plan");
+        menuOpenPlan.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenPlan?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenPlan);
+
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
+        var menuPinSession = new ToolStripMenuItem("Pin Session");
+        menuPinSession.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnPinSession?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuPinSession);
+
+        var menuUnpinSession = new ToolStripMenuItem("Unpin Session");
+        menuUnpinSession.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnUnpinSession?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuUnpinSession);
+
+        var menuArchiveSession = new ToolStripMenuItem("Archive Session");
+        menuArchiveSession.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnArchiveSession?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuArchiveSession);
+
+        var menuUnarchiveSession = new ToolStripMenuItem("Unarchive Session");
+        menuUnarchiveSession.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnUnarchiveSession?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuUnarchiveSession);
+
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
         var menuDeleteSession = new ToolStripMenuItem("Delete Session");
         menuDeleteSession.Click += (s, e) =>
         {
@@ -390,6 +583,20 @@ internal class ExistingSessionsVisuals
             {
                 item.Visible = isSubfolder;
             }
+
+            // Plan visibility
+            bool hasPlan = sessionId != null && this.HasPlanFile != null && this.HasPlanFile(sessionId);
+            menuOpenPlan.Visible = hasPlan;
+
+            // Archive/Unarchive visibility
+            bool isArchived = sessionId != null && this.IsSessionArchived != null && this.IsSessionArchived(sessionId);
+            menuArchiveSession.Visible = !isArchived;
+            menuUnarchiveSession.Visible = isArchived;
+
+            // Pin/Unpin visibility
+            bool isPinned = sessionId != null && this.IsSessionPinned != null && this.IsSessionPinned(sessionId);
+            menuPinSession.Visible = !isPinned;
+            menuUnpinSession.Visible = isPinned;
         };
 
         this.SessionGrid.ContextMenuStrip = gridContextMenu;
@@ -403,5 +610,14 @@ internal class ExistingSessionsVisuals
                 this.SessionGrid.CurrentCell = this.SessionGrid.Rows[e.RowIndex].Cells[0];
             }
         };
+    }
+
+    /// <summary>
+    /// Updates the tab titles with session counts.
+    /// </summary>
+    internal void UpdateTabCounts(int activeCount, int archivedCount)
+    {
+        this.ActiveTab.Text = $"Active ({activeCount})";
+        this.ArchivedTab.Text = $"Archived ({archivedCount})";
     }
 }

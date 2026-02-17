@@ -28,6 +28,7 @@ internal class ActiveStatusTracker
     private Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>> _activeTrackedWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IntPtr> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _ideInitialLoadDone;
 
@@ -157,6 +158,12 @@ internal class ActiveStatusTracker
             }
         }
 
+        if (this._explorerWindows.TryGetValue(sessionId, out var explorerHwnd)
+            && WindowFocusService.IsWindowAlive(explorerHwnd))
+        {
+            parts.Add("Explorer");
+        }
+
         if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
         {
             parts.Add("Edge");
@@ -218,6 +225,13 @@ internal class ActiveStatusTracker
         if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
         {
             focusTargets.Add(("Edge", () => ws.Focus()));
+        }
+
+        if (this._explorerWindows.TryGetValue(sessionId, out var explorerHwnd)
+            && WindowFocusService.IsWindowAlive(explorerHwnd))
+        {
+            var capturedHwnd = explorerHwnd;
+            focusTargets.Add(("Explorer", () => WindowFocusService.TryFocusWindowHandle(capturedHwnd)));
         }
 
         if (focusTargets.Count == 0)
@@ -528,6 +542,19 @@ internal class ActiveStatusTracker
             this._trackedProcesses[sessionId] = new List<ActiveProcess>();
         }
         this._trackedProcesses[sessionId].Add(process);
+    }
+
+    /// <summary>
+    /// Tracks an Explorer window HWND for a session. The HWND is cached for the app's lifetime.
+    /// </summary>
+    internal void TrackExplorerWindow(string sessionId, Process explorerProc)
+    {
+        // Explorer.exe spawns a child window; find it via PID
+        var hwnd = WindowFocusService.FindWindowHandleByPid(explorerProc.Id);
+        if (hwnd != IntPtr.Zero)
+        {
+            this._explorerWindows[sessionId] = hwnd;
+        }
     }
 
     /// <summary>

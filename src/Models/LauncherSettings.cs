@@ -66,6 +66,20 @@ internal class LauncherSettings
     public string Theme { get; set; } = "system";
 
     /// <summary>
+    /// Gets or sets the maximum number of active (non-archived) sessions allowed.
+    /// Set to 0 for unlimited. Default is 50.
+    /// </summary>
+    [JsonPropertyName("maxActiveSessions")]
+    public int MaxActiveSessions { get; set; } = 50;
+
+    /// <summary>
+    /// Gets or sets the sort order for pinned sessions.
+    /// Valid values: <c>"created"</c> (default, by creation/update time), <c>"alias"</c> (alphabetical by alias/name).
+    /// </summary>
+    [JsonPropertyName("pinnedOrder")]
+    public string PinnedOrder { get; set; } = "created";
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).

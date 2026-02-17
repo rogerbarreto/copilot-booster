@@ -170,6 +170,74 @@ internal class SessionInteractionManager
     }
 
     /// <summary>
+    /// Opens the session's dedicated files folder in Explorer.
+    /// Creates the folder if it doesn't exist.
+    /// </summary>
+    /// <param name="sessionId">The session ID.</param>
+    /// <returns>The started Explorer process, or <c>null</c> if the launch failed.</returns>
+    internal static Process? OpenSessionFilesFolder(string sessionId)
+    {
+        var filesDir = GetSessionFilesPath(sessionId);
+        try
+        {
+            Directory.CreateDirectory(filesDir);
+            return Process.Start(new ProcessStartInfo("explorer.exe", filesDir) { UseShellExecute = true });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the path to the session's dedicated files folder.
+    /// </summary>
+    internal static string GetSessionFilesPath(string sessionId)
+    {
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".CopilotBooster", sessionId, "Files");
+    }
+
+    /// <summary>
+    /// Opens a session's plan.md file in the default editor.
+    /// </summary>
+    /// <param name="sessionStateDir">The session state directory.</param>
+    /// <param name="sessionId">The session ID.</param>
+    /// <returns>The started process, or <c>null</c> if the file doesn't exist or launch failed.</returns>
+    internal static Process? OpenPlanFile(string sessionStateDir, string sessionId)
+    {
+        var planPath = GetPlanFilePath(sessionStateDir, sessionId);
+        if (!File.Exists(planPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Process.Start(new ProcessStartInfo(planPath) { UseShellExecute = true });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the path to a session's plan.md file.
+    /// </summary>
+    internal static string GetPlanFilePath(string sessionStateDir, string sessionId)
+    {
+        return Path.Combine(sessionStateDir, sessionId, "plan.md");
+    }
+
+    /// <summary>
+    /// Checks if a session has a plan.md file.
+    /// </summary>
+    internal static bool HasPlanFile(string sessionStateDir, string sessionId)
+    {
+        return File.Exists(GetPlanFilePath(sessionStateDir, sessionId));
+    }
+
+    /// <summary>
     /// Reads the CWD from a session's workspace.yaml file.
     /// </summary>
     /// <param name="sessionId">The session ID to look up.</param>

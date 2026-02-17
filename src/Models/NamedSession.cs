@@ -43,4 +43,14 @@ internal class NamedSession
     /// Gets or sets the timestamp when the session was last modified.
     /// </summary>
     public DateTime LastModified { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this session has been archived.
+    /// </summary>
+    public bool IsArchived { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this session is pinned to the top of the list.
+    /// </summary>
+    public bool IsPinned { get; set; }
 }

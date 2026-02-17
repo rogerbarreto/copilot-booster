@@ -317,6 +317,7 @@ internal static class SettingsVisuals
     internal static void ApplyThemedSelection(ListBox listBox)
     {
         listBox.DrawMode = DrawMode.OwnerDrawFixed;
+        listBox.ItemHeight = listBox.Font.Height + 6;
         listBox.DrawItem += (s, e) =>
         {
             if (e.Index < 0)
