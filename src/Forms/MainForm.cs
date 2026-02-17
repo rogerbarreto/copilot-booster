@@ -412,7 +412,7 @@ internal class MainForm : Form
             return (false, false);
         };
 
-        this._sessionsVisuals.OnDeleteSession += async (sid) =>
+        this._sessionsVisuals.OnDeleteSession += (sid) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sid);
             var sessionName = !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary ?? sid;
@@ -426,9 +426,10 @@ internal class MainForm : Form
                 MessageBoxDefaultButton.Button2);
             if (result == DialogResult.Yes && this._interactionManager.DeleteSession(sid))
             {
-                this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-                var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
-                this.PopulateGridWithFilter(snapshot);
+                SessionArchiveService.Remove(Program.SessionStateFile, sid);
+                this._cachedSessions.RemoveAll(x => x.Id == sid);
+                this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
+                this.UpdateTabCounts();
             }
         };
 

@@ -150,7 +150,7 @@ internal class ExistingSessionsVisuals
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
+            MultiSelect = true,
             RowHeadersVisible = false,
             BorderStyle = BorderStyle.None,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
@@ -515,8 +515,7 @@ internal class ExistingSessionsVisuals
         var menuPinSession = new ToolStripMenuItem("Pin Session");
         menuPinSession.Click += (s, e) =>
         {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
             {
                 this.OnPinSession?.Invoke(sid);
             }
@@ -526,8 +525,7 @@ internal class ExistingSessionsVisuals
         var menuUnpinSession = new ToolStripMenuItem("Unpin Session");
         menuUnpinSession.Click += (s, e) =>
         {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
             {
                 this.OnUnpinSession?.Invoke(sid);
             }
@@ -537,8 +535,7 @@ internal class ExistingSessionsVisuals
         var menuArchiveSession = new ToolStripMenuItem("Archive Session");
         menuArchiveSession.Click += (s, e) =>
         {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
             {
                 this.OnArchiveSession?.Invoke(sid);
             }
@@ -548,8 +545,7 @@ internal class ExistingSessionsVisuals
         var menuUnarchiveSession = new ToolStripMenuItem("Unarchive Session");
         menuUnarchiveSession.Click += (s, e) =>
         {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
             {
                 this.OnUnarchiveSession?.Invoke(sid);
             }
@@ -571,32 +567,71 @@ internal class ExistingSessionsVisuals
 
         gridContextMenu.Opening += (s, e) =>
         {
+            var selectedIds = this.GridVisuals.GetSelectedSessionIds();
+            bool isMultiSelect = selectedIds.Count > 1;
+
+            // Single-select only items — disabled in multi-select
+            menuOpenSession.Enabled = !isMultiSelect;
+            editMenuItem.Enabled = !isMultiSelect;
+            menuOpenNewSession.Enabled = !isMultiSelect;
+            menuOpenNewSessionWorkspace.Enabled = !isMultiSelect;
+            menuOpenTerminal.Enabled = !isMultiSelect;
+            menuOpenEdge.Enabled = !isMultiSelect;
+            menuOpenCwdExplorer.Enabled = !isMultiSelect;
+            menuOpenFilesFolder.Enabled = !isMultiSelect;
+            menuOpenPlan.Enabled = !isMultiSelect;
+            menuDeleteSession.Enabled = !isMultiSelect;
+            foreach (var item in ideRepoMenuItems)
+            {
+                item.Enabled = !isMultiSelect;
+            }
+
+            // IDE CWD items — disable in multi-select
+            foreach (ToolStripItem item in gridContextMenu.Items)
+            {
+                if (item is ToolStripMenuItem mi && mi.Text is string text && text.StartsWith("Open in ") && text.EndsWith("(CWD)") && mi != menuOpenCwdExplorer)
+                {
+                    mi.Enabled = !isMultiSelect;
+                }
+            }
+
+            // Single-select visibility logic
             bool hasGitRoot = false;
             bool isSubfolder = false;
             var sessionId = this.GridVisuals.GetSelectedSessionId();
-            if (sessionId != null && this.GetGitRootInfo != null)
+            if (!isMultiSelect && sessionId != null && this.GetGitRootInfo != null)
             {
                 (hasGitRoot, isSubfolder) = this.GetGitRootInfo(sessionId);
             }
-            menuOpenNewSessionWorkspace.Visible = hasGitRoot;
+            menuOpenNewSessionWorkspace.Visible = !isMultiSelect && hasGitRoot;
             foreach (var item in ideRepoMenuItems)
             {
-                item.Visible = isSubfolder;
+                item.Visible = !isMultiSelect || isSubfolder;
             }
 
             // Plan visibility
-            bool hasPlan = sessionId != null && this.HasPlanFile != null && this.HasPlanFile(sessionId);
+            bool hasPlan = !isMultiSelect && sessionId != null && this.HasPlanFile != null && this.HasPlanFile(sessionId);
             menuOpenPlan.Visible = hasPlan;
 
-            // Archive/Unarchive visibility
-            bool isArchived = sessionId != null && this.IsSessionArchived != null && this.IsSessionArchived(sessionId);
-            menuArchiveSession.Visible = !isArchived;
-            menuUnarchiveSession.Visible = isArchived;
+            // Archive/Unarchive visibility — respect current tab context
+            if (isMultiSelect)
+            {
+                bool onArchivedTab = this.IsArchivedTabSelected;
+                menuArchiveSession.Visible = !onArchivedTab;
+                menuUnarchiveSession.Visible = onArchivedTab;
+                menuPinSession.Visible = true;
+                menuUnpinSession.Visible = true;
+            }
+            else
+            {
+                bool isArchived = sessionId != null && this.IsSessionArchived != null && this.IsSessionArchived(sessionId);
+                menuArchiveSession.Visible = !isArchived;
+                menuUnarchiveSession.Visible = isArchived;
 
-            // Pin/Unpin visibility
-            bool isPinned = sessionId != null && this.IsSessionPinned != null && this.IsSessionPinned(sessionId);
-            menuPinSession.Visible = !isPinned;
-            menuUnpinSession.Visible = isPinned;
+                bool isPinned = sessionId != null && this.IsSessionPinned != null && this.IsSessionPinned(sessionId);
+                menuPinSession.Visible = !isPinned;
+                menuUnpinSession.Visible = isPinned;
+            }
         };
 
         this.SessionGrid.ContextMenuStrip = gridContextMenu;
@@ -605,9 +640,12 @@ internal class ExistingSessionsVisuals
         {
             if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
             {
-                this.SessionGrid.ClearSelection();
-                this.SessionGrid.Rows[e.RowIndex].Selected = true;
-                this.SessionGrid.CurrentCell = this.SessionGrid.Rows[e.RowIndex].Cells[0];
+                if (!this.SessionGrid.Rows[e.RowIndex].Selected)
+                {
+                    this.SessionGrid.ClearSelection();
+                    this.SessionGrid.Rows[e.RowIndex].Selected = true;
+                    this.SessionGrid.CurrentCell = this.SessionGrid.Rows[e.RowIndex].Cells[0];
+                }
             }
         };
     }

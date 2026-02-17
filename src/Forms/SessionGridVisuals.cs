@@ -418,6 +418,20 @@ internal class SessionGridVisuals
         return this._grid.CurrentRow?.Tag as string;
     }
 
+    internal List<string> GetSelectedSessionIds()
+    {
+        var ids = new List<string>();
+        foreach (DataGridViewRow row in this._grid.SelectedRows)
+        {
+            if (row.Tag is string id)
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
     internal int GetSelectedRowIndex()
     {
         return this._grid.CurrentRow?.Index ?? -1;
