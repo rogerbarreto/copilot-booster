@@ -21,7 +21,7 @@ internal static class WindowHandleCacheService
     internal static void Save(
         string cacheFile,
         Dictionary<string, List<ActiveProcess>> trackedProcesses,
-        Dictionary<string, IntPtr> explorerWindows,
+        Dictionary<string, List<(string Label, IntPtr Hwnd)>> explorerWindows,
         Dictionary<string, EdgeWorkspaceService> edgeWorkspaces)
     {
         try
@@ -41,9 +41,12 @@ internal static class WindowHandleCacheService
 
             foreach (var kvp in explorerWindows)
             {
-                if (kvp.Value != IntPtr.Zero)
+                foreach (var (label, hwnd) in kvp.Value)
                 {
-                    entries.Add(new HandleEntry(kvp.Key, "explorer", "Explorer", null, kvp.Value.ToInt64()));
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        entries.Add(new HandleEntry(kvp.Key, "explorer", label, null, hwnd.ToInt64()));
+                    }
                 }
             }
 
@@ -72,11 +75,11 @@ internal static class WindowHandleCacheService
     /// </summary>
     internal static (
         Dictionary<string, List<ActiveProcess>> Processes,
-        Dictionary<string, IntPtr> Explorers,
+        Dictionary<string, List<(string Label, IntPtr Hwnd)>> Explorers,
         Dictionary<string, IntPtr> Edges) Load(string cacheFile)
     {
         var processes = new Dictionary<string, List<ActiveProcess>>(StringComparer.OrdinalIgnoreCase);
-        var explorers = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+        var explorers = new Dictionary<string, List<(string Label, IntPtr Hwnd)>>(StringComparer.OrdinalIgnoreCase);
         var edges = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
 
         try
@@ -108,7 +111,12 @@ internal static class WindowHandleCacheService
                         break;
 
                     case "explorer":
-                        explorers[entry.SessionId] = hwnd;
+                        if (!explorers.ContainsKey(entry.SessionId))
+                        {
+                            explorers[entry.SessionId] = [];
+                        }
+
+                        explorers[entry.SessionId].Add((entry.Name, hwnd));
                         break;
 
                     case "edge":

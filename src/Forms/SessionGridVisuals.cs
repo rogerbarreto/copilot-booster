@@ -63,21 +63,11 @@ internal class SessionGridVisuals
             var activeText = row.Cells[4].Value as string;
             if (!string.IsNullOrEmpty(activeText) && row.Tag is string sessionId)
             {
-                var lines = activeText.Split('\n');
-                var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
-                var padding = row.Cells[4].InheritedStyle.Padding;
-                int clickedLine = lines.Length - 1;
-                int cumY = padding.Top;
-                for (int i = 0; i < lines.Length; i++)
+                var clickedLine = this.HitTestLinkLine(row, e.Location);
+                if (clickedLine >= 0)
                 {
-                    cumY += TextRenderer.MeasureText(lines[i], font).Height;
-                    if (e.Location.Y < cumY)
-                    {
-                        clickedLine = i;
-                        break;
-                    }
+                    this._activeTracker.FocusActiveProcess(sessionId, clickedLine);
                 }
-                this._activeTracker.FocusActiveProcess(sessionId, clickedLine);
 
                 // Suppress bell until session transitions to working again
                 this._activeTracker.InitStartedSessions([sessionId]);
@@ -100,23 +90,8 @@ internal class SessionGridVisuals
                 var activeText = row.Cells[4].Value as string;
                 if (!string.IsNullOrEmpty(activeText))
                 {
-                    var lines = activeText.Split('\n');
-                    var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
-                    var padding = row.Cells[4].InheritedStyle.Padding;
-                    int cumY = padding.Top;
-                    bool overLink = false;
-                    for (int i = 0; i < lines.Length; i++)
-                    {
-                        var sz = TextRenderer.MeasureText(lines[i], font);
-                        if (e.Location.Y >= cumY && e.Location.Y < cumY + sz.Height
-                            && e.Location.X >= padding.Left && e.Location.X < padding.Left + sz.Width)
-                        {
-                            overLink = true;
-                            break;
-                        }
-                        cumY += sz.Height;
-                    }
-                    this._grid.Cursor = overLink ? Cursors.Hand : Cursors.Default;
+                    var hit = this.HitTestLinkLine(row, e.Location);
+                    this._grid.Cursor = hit >= 0 ? Cursors.Hand : Cursors.Default;
                     return;
                 }
             }
@@ -170,21 +145,69 @@ internal class SessionGridVisuals
 
             var lines = text.Split('\n');
             var isSelected = (e.State & DataGridViewElementStates.Selected) != 0;
-            var linkColor = isSelected ? Color.White : Application.IsDarkModeEnabled ? Color.FromArgb(100, 180, 255) : Color.FromArgb(0, 102, 204);
+            var linkColor = isSelected
+                ? (Application.IsDarkModeEnabled ? Color.FromArgb(140, 220, 255) : Color.FromArgb(0, 60, 160))
+                : (Application.IsDarkModeEnabled ? Color.FromArgb(100, 180, 255) : Color.FromArgb(0, 102, 204));
             var linkFont = new Font(e.CellStyle!.Font ?? this._grid.Font, FontStyle.Underline);
             var padding = e.CellStyle.Padding;
-            int ly = e.CellBounds.Y + padding.Top;
+            const int lineSpacing = 2;
+
+            // Calculate total content height for vertical centering
+            var lineHeight = TextRenderer.MeasureText(e.Graphics!, "X", linkFont).Height;
+            int totalHeight = (lines.Length * lineHeight) + ((lines.Length - 1) * lineSpacing);
+            int ly = e.CellBounds.Y + ((e.CellBounds.Height - totalHeight) / 2);
 
             foreach (var line in lines)
             {
                 var size = TextRenderer.MeasureText(e.Graphics!, line, linkFont);
-                TextRenderer.DrawText(e.Graphics!, line, linkFont, new Point(e.CellBounds.X + padding.Left, ly), linkColor);
-                ly += size.Height;
+                int lx = e.CellBounds.X + ((e.CellBounds.Width - size.Width) / 2);
+                TextRenderer.DrawText(e.Graphics!, line, linkFont, new Point(lx, ly), linkColor);
+                ly += size.Height + lineSpacing;
             }
 
             linkFont.Dispose();
             e.Handled = true;
         };
+    }
+
+    /// <summary>
+    /// Hit-tests a mouse location against the centered link lines in the Running column.
+    /// Returns the 0-based line index if over a link, or -1 if not.
+    /// </summary>
+    private int HitTestLinkLine(DataGridViewRow row, Point location)
+    {
+        var activeText = row.Cells[4].Value as string;
+        if (string.IsNullOrEmpty(activeText))
+        {
+            return -1;
+        }
+
+        var lines = activeText.Split('\n');
+        var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
+        var linkFont = new Font(font, FontStyle.Underline);
+        var cellBounds = this._grid.GetCellDisplayRectangle(4, row.Index, false);
+        const int lineSpacing = 2;
+
+        var lineHeight = TextRenderer.MeasureText("X", linkFont).Height;
+        int totalHeight = (lines.Length * lineHeight) + ((lines.Length - 1) * lineSpacing);
+        int ly = (cellBounds.Height - totalHeight) / 2;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var sz = TextRenderer.MeasureText(lines[i], linkFont);
+            int lx = (cellBounds.Width - sz.Width) / 2;
+            if (location.Y >= ly && location.Y < ly + sz.Height
+                && location.X >= lx && location.X < lx + sz.Width)
+            {
+                linkFont.Dispose();
+                return i;
+            }
+
+            ly += sz.Height + lineSpacing;
+        }
+
+        linkFont.Dispose();
+        return -1;
     }
 
     internal void Populate(List<NamedSession> sessions, ActiveStatusSnapshot snapshot, string? searchQuery)
@@ -236,6 +259,16 @@ internal class SessionGridVisuals
             displayed = [.. pinned, .. orderedUnpinned];
         }
 
+        // Preserve selection across repopulate
+        var selectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataGridViewRow row in this._grid.SelectedRows)
+        {
+            if (row.Tag is string id)
+            {
+                selectedIds.Add(id);
+            }
+        }
+
         this._grid.Rows.Clear();
 
         foreach (var session in displayed)
@@ -272,6 +305,19 @@ internal class SessionGridVisuals
             {
                 row.DefaultCellStyle.BackColor = ActiveRowColor;
                 row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
+            }
+        }
+
+        // Restore selection
+        if (selectedIds.Count > 0)
+        {
+            this._grid.ClearSelection();
+            foreach (DataGridViewRow row in this._grid.Rows)
+            {
+                if (row.Tag is string id && selectedIds.Contains(id))
+                {
+                    row.Selected = true;
+                }
             }
         }
 

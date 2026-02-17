@@ -28,7 +28,7 @@ internal class ActiveStatusTracker
     private Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>> _activeTrackedWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, IntPtr> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<(string Label, IntPtr Hwnd)>> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _handleCacheInitialLoadDone;
 
@@ -158,10 +158,15 @@ internal class ActiveStatusTracker
             }
         }
 
-        if (this._explorerWindows.TryGetValue(sessionId, out var explorerHwnd)
-            && WindowFocusService.IsWindowAlive(explorerHwnd))
+        if (this._explorerWindows.TryGetValue(sessionId, out var explorers))
         {
-            parts.Add("Explorer");
+            foreach (var (label, hwnd) in explorers)
+            {
+                if (WindowFocusService.IsWindowAlive(hwnd))
+                {
+                    parts.Add(label);
+                }
+            }
         }
 
         if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
@@ -222,11 +227,16 @@ internal class ActiveStatusTracker
             }
         }
 
-        if (this._explorerWindows.TryGetValue(sessionId, out var explorerHwnd)
-            && WindowFocusService.IsWindowAlive(explorerHwnd))
+        if (this._explorerWindows.TryGetValue(sessionId, out var explorers))
         {
-            var capturedHwnd = explorerHwnd;
-            focusTargets.Add(("Explorer", () => WindowFocusService.TryFocusWindowHandle(capturedHwnd)));
+            foreach (var (label, hwnd) in explorers)
+            {
+                if (WindowFocusService.IsWindowAlive(hwnd))
+                {
+                    var capturedHwnd = hwnd;
+                    focusTargets.Add((label, () => WindowFocusService.TryFocusWindowHandle(capturedHwnd)));
+                }
+            }
         }
 
         if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
@@ -275,10 +285,15 @@ internal class ActiveStatusTracker
             excludeHwnds.Add(focusedEdge.CachedHwnd);
         }
 
-        if (this._explorerWindows.TryGetValue(excludeSessionId, out var focusedExplorer)
-            && focusedExplorer != IntPtr.Zero)
+        if (this._explorerWindows.TryGetValue(excludeSessionId, out var focusedExplorers))
         {
-            excludeHwnds.Add(focusedExplorer);
+            foreach (var (_, hwnd) in focusedExplorers)
+            {
+                if (hwnd != IntPtr.Zero)
+                {
+                    excludeHwnds.Add(hwnd);
+                }
+            }
         }
 
         // Snapshot to avoid concurrent modification with Refresh
@@ -340,10 +355,13 @@ internal class ActiveStatusTracker
                 continue;
             }
 
-            if (kvp.Value != IntPtr.Zero && !excludeHwnds.Contains(kvp.Value)
-                && WindowFocusService.IsWindowAlive(kvp.Value))
+            foreach (var (_, hwnd) in kvp.Value)
             {
-                WindowFocusService.MinimizeWindow(kvp.Value);
+                if (hwnd != IntPtr.Zero && !excludeHwnds.Contains(hwnd)
+                    && WindowFocusService.IsWindowAlive(hwnd))
+                {
+                    WindowFocusService.MinimizeWindow(hwnd);
+                }
             }
         }
     }
@@ -508,16 +526,21 @@ internal class ActiveStatusTracker
         }
 
         // Clean up dead explorer windows
-        var deadExplorers = new List<string>();
         foreach (var kvp in this._explorerWindows)
         {
-            if (!WindowFocusService.IsWindowAlive(kvp.Value))
+            kvp.Value.RemoveAll(e => !WindowFocusService.IsWindowAlive(e.Hwnd));
+        }
+
+        var emptyExplorers = new List<string>();
+        foreach (var kvp in this._explorerWindows)
+        {
+            if (kvp.Value.Count == 0)
             {
-                deadExplorers.Add(kvp.Key);
+                emptyExplorers.Add(kvp.Key);
             }
         }
 
-        foreach (var id in deadExplorers)
+        foreach (var id in emptyExplorers)
         {
             this._explorerWindows.Remove(id);
         }
@@ -613,12 +636,27 @@ internal class ActiveStatusTracker
     /// via Shell COM ShellWindows. Explorer.exe is single-instance so PID-based
     /// lookup doesn't work — the spawned process exits immediately.
     /// </summary>
-    internal void TrackExplorerWindow(string sessionId, string folderPath)
+    internal void TrackExplorerWindow(string sessionId, string folderPath, string label = "Explorer")
     {
         var hwnd = FindExplorerByPath(folderPath);
         if (hwnd != IntPtr.Zero)
         {
-            this._explorerWindows[sessionId] = hwnd;
+            if (!this._explorerWindows.ContainsKey(sessionId))
+            {
+                this._explorerWindows[sessionId] = [];
+            }
+
+            // Replace existing entry with same label, or add new
+            var list = this._explorerWindows[sessionId];
+            var idx = list.FindIndex(e => string.Equals(e.Label, label, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+            {
+                list[idx] = (label, hwnd);
+            }
+            else
+            {
+                list.Add((label, hwnd));
+            }
         }
     }
 

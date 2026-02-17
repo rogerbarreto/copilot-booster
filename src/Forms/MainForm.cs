@@ -477,7 +477,7 @@ internal class MainForm : Form
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(1500).ConfigureAwait(false);
-                    this._activeTracker.TrackExplorerWindow(sid, session.Cwd);
+                    this._activeTracker.TrackExplorerWindow(sid, session.Cwd, "Explorer (CWD)");
                     this.BeginInvoke(this.RefreshActiveStatusAsync);
                 });
             }
@@ -490,7 +490,7 @@ internal class MainForm : Form
             _ = Task.Run(async () =>
             {
                 await Task.Delay(1500).ConfigureAwait(false);
-                this._activeTracker.TrackExplorerWindow(sid, filesPath);
+                this._activeTracker.TrackExplorerWindow(sid, filesPath, "Files");
                 this.BeginInvoke(this.RefreshActiveStatusAsync);
             });
         };

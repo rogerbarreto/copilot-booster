@@ -197,8 +197,10 @@ internal class ExistingSessionsVisuals
         {
             Name = "RunningApps",
             HeaderText = "Running",
-            ToolTipText = "Applications running in session context"
+            ToolTipText = "Applications running in session context",
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter }
         };
+        runningAppsCol.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
         this.SessionGrid.Columns.Add(runningAppsCol);
         this.SessionGrid.Columns["Session"]!.Width = 300;
         this.SessionGrid.Columns["Session"]!.MinimumWidth = 100;
@@ -206,7 +208,7 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["CWD"]!.MinimumWidth = 60;
         this.SessionGrid.Columns["Date"]!.Width = 160;
         this.SessionGrid.Columns["Date"]!.MinimumWidth = 100;
-        this.SessionGrid.Columns["RunningApps"]!.Width = 100;
+        this.SessionGrid.Columns["RunningApps"]!.Width = 110;
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
 
         bool adjustingSessionWidth = false;
@@ -507,7 +509,8 @@ internal class ExistingSessionsVisuals
 
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files Folder");
+        var menuOpenFilesFolder = new ToolStripMenuItem("Open Artifacts");
+        menuOpenFilesFolder.ToolTipText = "Open artifacts folder dedicated to this session";
         menuOpenFilesFolder.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -518,7 +521,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenFilesFolder);
 
-        var menuOpenPlan = new ToolStripMenuItem("Open Plan");
+        var menuOpenPlan = new ToolStripMenuItem("Open Copilot Plan.md");
         menuOpenPlan.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
