@@ -429,10 +429,22 @@ internal class ExistingSessionsVisuals
         gridContextMenu.Items.Add(menuOpenTerminal);
 
         var ideRepoMenuItems = new List<ToolStripMenuItem>();
+
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
+        var menuOpenCwdExplorer = new ToolStripMenuItem("Open in Explorer (CWD)");
+        menuOpenCwdExplorer.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenCwdExplorer?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenCwdExplorer);
+
         if (Program._settings.Ides.Count > 0)
         {
-            gridContextMenu.Items.Add(new ToolStripSeparator());
-
             foreach (var ide in Program._settings.Ides)
             {
                 var capturedIde = ide;
@@ -476,17 +488,6 @@ internal class ExistingSessionsVisuals
         gridContextMenu.Items.Add(menuOpenEdge);
 
         gridContextMenu.Items.Add(new ToolStripSeparator());
-
-        var menuOpenCwdExplorer = new ToolStripMenuItem("Open CWD in Explorer");
-        menuOpenCwdExplorer.Click += (s, e) =>
-        {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
-            {
-                this.OnOpenCwdExplorer?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuOpenCwdExplorer);
 
         var menuOpenFilesFolder = new ToolStripMenuItem("Open Files Folder");
         menuOpenFilesFolder.Click += (s, e) =>

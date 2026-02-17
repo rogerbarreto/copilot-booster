@@ -45,6 +45,7 @@ internal class Program
     internal static readonly string PidRegistryFile = Path.Combine(AppDataDir, "active-pids.json");
     internal static readonly string TerminalCacheFile = Path.Combine(AppDataDir, "terminal-cache.json");
     internal static readonly string IdeCacheFile = Path.Combine(AppDataDir, "ide-cache.json");
+    internal static readonly string WindowHandleCacheFile = Path.Combine(AppDataDir, "window-handles.json");
     internal static readonly string SessionAliasFile = Path.Combine(AppDataDir, "session-aliases.json");
     internal static readonly string SessionStateFile = Path.Combine(AppDataDir, "session-states.json");
     private static readonly string s_signalFile = Path.Combine(AppDataDir, "ui-signal.txt");

@@ -439,17 +439,25 @@ internal class MainForm : Form
             if (session != null && !string.IsNullOrEmpty(session.Cwd))
             {
                 SessionInteractionManager.OpenExplorer(session.Cwd);
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(1500).ConfigureAwait(false);
+                    this._activeTracker.TrackExplorerWindow(sid, session.Cwd);
+                    this.BeginInvoke(this.RefreshActiveStatusAsync);
+                });
             }
         };
 
         this._sessionsVisuals.OnOpenFilesFolder += (sid) =>
         {
-            var proc = SessionInteractionManager.OpenSessionFilesFolder(sid);
-            if (proc != null)
+            var filesPath = SessionInteractionManager.GetSessionFilesPath(sid);
+            SessionInteractionManager.OpenSessionFilesFolder(sid);
+            _ = Task.Run(async () =>
             {
-                this._activeTracker.TrackExplorerWindow(sid, proc);
-                this.RefreshActiveStatusAsync();
-            }
+                await Task.Delay(1500).ConfigureAwait(false);
+                this._activeTracker.TrackExplorerWindow(sid, filesPath);
+                this.BeginInvoke(this.RefreshActiveStatusAsync);
+            });
         };
 
         this._sessionsVisuals.OnOpenPlan += (sid) =>
@@ -974,12 +982,12 @@ internal class MainForm : Form
     /// Returns sessions filtered by the current tab (Active/Archived),
     /// with pinned sessions sorted to the top.
     /// </summary>
-    private List<NamedSession> GetFilteredSessions()
+    private List<NamedSession> GetFilteredSessions(ActiveStatusSnapshot? snapshot = null)
     {
         bool showArchived = this._sessionsVisuals.IsArchivedTabSelected;
         var filtered = this._cachedSessions.Where(s => s.IsArchived == showArchived).ToList();
 
-        // Sort pinned sessions to top with configurable sub-ordering
+        // Sort: pinned first, then running, then by date
         var pinnedOrder = Program._settings.PinnedOrder;
         filtered.Sort((a, b) =>
         {
@@ -1001,6 +1009,17 @@ internal class MainForm : Form
                 return b.LastModified.CompareTo(a.LastModified);
             }
 
+            // Among non-pinned: running sessions first
+            if (snapshot != null)
+            {
+                bool aRunning = snapshot.ActiveTextBySessionId.ContainsKey(a.Id);
+                bool bRunning = snapshot.ActiveTextBySessionId.ContainsKey(b.Id);
+                if (aRunning != bRunning)
+                {
+                    return aRunning ? -1 : 1;
+                }
+            }
+
             return 0;
         });
 
@@ -1013,7 +1032,7 @@ internal class MainForm : Form
     private void PopulateGridWithFilter(ActiveStatusSnapshot snapshot)
     {
         this._lastSnapshot = snapshot;
-        var filtered = this.GetFilteredSessions();
+        var filtered = this.GetFilteredSessions(snapshot);
         this._sessionsVisuals.GridVisuals.Populate(filtered, snapshot, this._sessionsVisuals.SearchBox.Text);
         this.UpdateTabCounts();
     }

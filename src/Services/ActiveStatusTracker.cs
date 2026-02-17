@@ -30,7 +30,7 @@ internal class ActiveStatusTracker
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IntPtr> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
-    private bool _ideInitialLoadDone;
+    private bool _handleCacheInitialLoadDone;
 
     private static readonly HashSet<string> s_ignoredSummaries = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -222,16 +222,16 @@ internal class ActiveStatusTracker
             }
         }
 
-        if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
-        {
-            focusTargets.Add(("Edge", () => ws.Focus()));
-        }
-
         if (this._explorerWindows.TryGetValue(sessionId, out var explorerHwnd)
             && WindowFocusService.IsWindowAlive(explorerHwnd))
         {
             var capturedHwnd = explorerHwnd;
             focusTargets.Add(("Explorer", () => WindowFocusService.TryFocusWindowHandle(capturedHwnd)));
+        }
+
+        if (this._edgeWorkspaces.TryGetValue(sessionId, out var ws) && ws.IsOpen)
+        {
+            focusTargets.Add(("Edge", () => ws.Focus()));
         }
 
         if (focusTargets.Count == 0)
@@ -273,6 +273,12 @@ internal class ActiveStatusTracker
             && focusedEdge.CachedHwnd != IntPtr.Zero)
         {
             excludeHwnds.Add(focusedEdge.CachedHwnd);
+        }
+
+        if (this._explorerWindows.TryGetValue(excludeSessionId, out var focusedExplorer)
+            && focusedExplorer != IntPtr.Zero)
+        {
+            excludeHwnds.Add(focusedExplorer);
         }
 
         // Snapshot to avoid concurrent modification with Refresh
@@ -326,6 +332,20 @@ internal class ActiveStatusTracker
                 WindowFocusService.MinimizeWindow(kvp.Value.CachedHwnd);
             }
         }
+
+        foreach (var kvp in this._explorerWindows.ToList())
+        {
+            if (string.Equals(kvp.Key, excludeSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (kvp.Value != IntPtr.Zero && !excludeHwnds.Contains(kvp.Value)
+                && WindowFocusService.IsWindowAlive(kvp.Value))
+            {
+                WindowFocusService.MinimizeWindow(kvp.Value);
+            }
+        }
     }
 
     /// <summary>
@@ -372,16 +392,45 @@ internal class ActiveStatusTracker
         var openTerminalIds = new HashSet<string>(this._activeTrackedWindows.Keys, StringComparer.OrdinalIgnoreCase);
         this.SyncTerminalCache(openTerminalIds);
 
-        // Load cached IDE entries on first refresh (restores IDE tracking across app restarts)
-        if (!this._ideInitialLoadDone)
+        // Load cached window handles on first refresh (restores IDE/Explorer/Edge tracking across app restarts)
+        if (!this._handleCacheInitialLoadDone)
         {
-            this._ideInitialLoadDone = true;
-            var cached = IdeCacheService.Load(Program.IdeCacheFile);
-            foreach (var kvp in cached)
+            this._handleCacheInitialLoadDone = true;
+            var (cachedProcesses, cachedExplorers, cachedEdges) = WindowHandleCacheService.Load(Program.WindowHandleCacheFile);
+            foreach (var kvp in cachedProcesses)
             {
                 if (!this._trackedProcesses.ContainsKey(kvp.Key))
                 {
                     this._trackedProcesses[kvp.Key] = kvp.Value;
+                }
+            }
+
+            foreach (var kvp in cachedExplorers)
+            {
+                if (!this._explorerWindows.ContainsKey(kvp.Key))
+                {
+                    this._explorerWindows[kvp.Key] = kvp.Value;
+                }
+            }
+
+            foreach (var kvp in cachedEdges)
+            {
+                if (!this._edgeWorkspaces.ContainsKey(kvp.Key))
+                {
+                    this._edgeWorkspaces[kvp.Key] = new EdgeWorkspaceService(kvp.Key) { CachedHwnd = kvp.Value };
+                }
+            }
+
+            // Also load legacy ide-cache.json if window-handles.json doesn't exist yet
+            if (!File.Exists(Program.WindowHandleCacheFile) && File.Exists(Program.IdeCacheFile))
+            {
+                var legacyCached = IdeCacheService.Load(Program.IdeCacheFile);
+                foreach (var kvp in legacyCached)
+                {
+                    if (!this._trackedProcesses.ContainsKey(kvp.Key))
+                    {
+                        this._trackedProcesses[kvp.Key] = kvp.Value;
+                    }
                 }
             }
         }
@@ -458,8 +507,23 @@ internal class ActiveStatusTracker
             }
         }
 
-        // Persist IDE cache so tracking survives app restarts
-        IdeCacheService.Save(Program.IdeCacheFile, this._trackedProcesses);
+        // Clean up dead explorer windows
+        var deadExplorers = new List<string>();
+        foreach (var kvp in this._explorerWindows)
+        {
+            if (!WindowFocusService.IsWindowAlive(kvp.Value))
+            {
+                deadExplorers.Add(kvp.Key);
+            }
+        }
+
+        foreach (var id in deadExplorers)
+        {
+            this._explorerWindows.Remove(id);
+        }
+
+        // Persist window handle cache so tracking survives app restarts
+        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces);
 
         // Clean up closed Edge workspaces
         var closedEdge = new List<string>();
@@ -545,16 +609,73 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
-    /// Tracks an Explorer window HWND for a session. The HWND is cached for the app's lifetime.
+    /// Tracks an Explorer window HWND for a session by matching the folder path
+    /// via Shell COM ShellWindows. Explorer.exe is single-instance so PID-based
+    /// lookup doesn't work — the spawned process exits immediately.
     /// </summary>
-    internal void TrackExplorerWindow(string sessionId, Process explorerProc)
+    internal void TrackExplorerWindow(string sessionId, string folderPath)
     {
-        // Explorer.exe spawns a child window; find it via PID
-        var hwnd = WindowFocusService.FindWindowHandleByPid(explorerProc.Id);
+        var hwnd = FindExplorerByPath(folderPath);
         if (hwnd != IntPtr.Zero)
         {
             this._explorerWindows[sessionId] = hwnd;
         }
+    }
+
+    /// <summary>
+    /// Finds an open Explorer window whose location matches the given folder path
+    /// using Shell COM ShellWindows (CLSID 9BA05972-F6A8-11CF-A442-00A0C90A8F39).
+    /// </summary>
+    private static IntPtr FindExplorerByPath(string targetPath)
+    {
+        try
+        {
+            targetPath = Path.GetFullPath(targetPath).TrimEnd('\\');
+            var shellWindowsType = Type.GetTypeFromCLSID(new Guid("9BA05972-F6A8-11CF-A442-00A0C90A8F39"));
+            if (shellWindowsType == null)
+            {
+                return IntPtr.Zero;
+            }
+
+            dynamic? shellWindows = Activator.CreateInstance(shellWindowsType);
+            if (shellWindows == null)
+            {
+                return IntPtr.Zero;
+            }
+
+            int count = (int)shellWindows.Count;
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    dynamic? window = shellWindows.Item(i);
+                    if (window == null)
+                    {
+                        continue;
+                    }
+
+                    string? url = window.LocationURL?.ToString();
+                    if (url != null && url.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string path = new Uri(url).LocalPath.TrimEnd('\\');
+                        if (string.Equals(path, targetPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return (IntPtr)(long)window.HWND;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Skip individual window errors
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Shell COM explorer lookup failed: {Error}", ex.Message);
+        }
+
+        return IntPtr.Zero;
     }
 
     /// <summary>
