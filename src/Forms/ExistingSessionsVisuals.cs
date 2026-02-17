@@ -54,6 +54,7 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenAsNewSessionWorkspace;
     internal event Action<string>? OnOpenTerminal;
     internal event Action<string>? OnOpenEdge;
+    internal event Action<string>? OnSaveEdgeTabs;
     internal event Action<string>? OnDeleteSession;
     internal event Action<string>? OnOpenFilesFolder;
     internal event Action<string>? OnOpenPlan;
@@ -89,6 +90,11 @@ internal class ExistingSessionsVisuals
     /// Callback to determine if a session is pinned.
     /// </summary>
     internal Func<string, bool>? IsSessionPinned;
+
+    /// <summary>
+    /// Callback to determine if a session has an open Edge workspace.
+    /// </summary>
+    internal Func<string, bool>? IsEdgeOpen;
 
     internal ExistingSessionsVisuals(Control parentControl, ActiveStatusTracker activeTracker)
     {
@@ -487,6 +493,18 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenEdge);
 
+        var menuSaveEdgeTabs = new ToolStripMenuItem("Save Edge State");
+        menuSaveEdgeTabs.ToolTipText = "Saves all open Edge tab URLs so they can be restored next time you open Edge for this session";
+        menuSaveEdgeTabs.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnSaveEdgeTabs?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuSaveEdgeTabs);
+
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
         var menuOpenFilesFolder = new ToolStripMenuItem("Open Files Folder");
@@ -578,6 +596,7 @@ internal class ExistingSessionsVisuals
             menuOpenNewSessionWorkspace.Enabled = !isMultiSelect;
             menuOpenTerminal.Enabled = !isMultiSelect;
             menuOpenEdge.Enabled = !isMultiSelect;
+            menuSaveEdgeTabs.Enabled = !isMultiSelect;
             menuOpenCwdExplorer.Enabled = !isMultiSelect;
             menuOpenFilesFolder.Enabled = !isMultiSelect;
             menuOpenPlan.Enabled = !isMultiSelect;
@@ -613,6 +632,10 @@ internal class ExistingSessionsVisuals
             // Plan visibility
             bool hasPlan = !isMultiSelect && sessionId != null && this.HasPlanFile != null && this.HasPlanFile(sessionId);
             menuOpenPlan.Visible = hasPlan;
+
+            // Save Edge Tabs — only visible when Edge is open for this session
+            bool edgeOpen = !isMultiSelect && sessionId != null && this.IsEdgeOpen != null && this.IsEdgeOpen(sessionId);
+            menuSaveEdgeTabs.Visible = edgeOpen;
 
             // Archive/Unarchive visibility — respect current tab context
             if (isMultiSelect)

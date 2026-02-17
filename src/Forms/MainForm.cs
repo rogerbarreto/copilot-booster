@@ -40,6 +40,7 @@ internal class MainForm : Form
 
     // Update banner
     private LinkLabel _updateLabel = null!;
+    private ToastPanel _toast = null!;
 
     // System tray
     private NotifyIcon? _trayIcon;
@@ -63,6 +64,7 @@ internal class MainForm : Form
         this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
         this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsPanel, this._activeTracker);
+        this._toast = ToastPanel.AttachTo(this._sessionsPanel);
         this.WireSessionsEvents();
         this.SetupUpdateBanner();
         this.SetupTrayIcon();
@@ -396,8 +398,41 @@ internal class MainForm : Form
             this._activeTracker.TrackEdge(sid, workspace);
 
             await workspace.OpenAsync(sessionName).ConfigureAwait(true);
+
+            // Restore previously saved tabs
+            var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
+            if (savedTabs.Count > 0)
+            {
+                workspace.RestoreTabs(savedTabs);
+            }
+
             this.RefreshActiveStatusAsync();
         };
+
+        this._sessionsVisuals.OnSaveEdgeTabs += (sid) =>
+        {
+            if (!this._activeTracker.TryGetEdge(sid, out var ws) || !ws.IsOpen)
+            {
+                return;
+            }
+
+            _ = Task.Factory.StartNew(() =>
+            {
+                var urls = ws.GetTabUrls();
+                if (urls.Count > 0)
+                {
+                    EdgeTabPersistenceService.SaveTabs(sid, urls);
+                    this.BeginInvoke(() => this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored"));
+                }
+                else
+                {
+                    this.BeginInvoke(() => this._toast.Show("No tabs to save — only the session anchor tab was found"));
+                }
+            }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
+        };
+
+        this._sessionsVisuals.IsEdgeOpen = (sid) =>
+            this._activeTracker.TryGetEdge(sid, out var ws) && ws.IsOpen;
 
         this._sessionsVisuals.GetGitRootInfo = (sessionId) =>
         {

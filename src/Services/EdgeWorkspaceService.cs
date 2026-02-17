@@ -416,4 +416,162 @@ internal partial class EdgeWorkspaceService
 
         return tabName[(lastOpen + 1)..lastClose];
     }
+
+    /// <summary>
+    /// Reads the URLs of all non-anchor tabs in this workspace's Edge window by activating
+    /// each tab via UI Automation, reading the address bar, then restoring the original tab.
+    /// Must be called on an STA thread.
+    /// </summary>
+    internal List<string> GetTabUrls()
+    {
+        var urls = new List<string>();
+        if (this.CachedHwnd == IntPtr.Zero || !IsWindow(this.CachedHwnd))
+        {
+            return urls;
+        }
+
+        try
+        {
+            var window = AutomationElement.FromHandle(this.CachedHwnd);
+            var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var tabs = window.FindAll(TreeScope.Descendants, tabCondition);
+
+            // Find the address bar (Edit control with "Address and search bar" name)
+            var editCondition = new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                new PropertyCondition(AutomationElement.NameProperty, "Address and search bar"));
+            var addressBar = window.FindFirst(TreeScope.Descendants, editCondition);
+            if (addressBar == null)
+            {
+                Program.Logger.LogDebug("Could not find Edge address bar via UI Automation");
+                return urls;
+            }
+
+            // Remember the original tab's address bar URL to restore later
+            string? originalUrl = null;
+            if (addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var initVal)
+                && initVal is ValuePattern initVp)
+            {
+                originalUrl = initVp.Current.Value;
+            }
+
+            foreach (AutomationElement tab in tabs)
+            {
+                var tabName = tab.Current.Name;
+
+                // Skip the CB Session anchor tab
+                if (tabName.Contains(TitlePrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // Skip "New Tab" tabs
+                if (string.Equals(tabName, "New Tab", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(tabName, "New tab", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // Activate the tab
+                if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var patternObj)
+                    && patternObj is SelectionItemPattern selPattern)
+                {
+                    try
+                    {
+                        selPattern.Select();
+
+                        if (addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var valObj)
+                            && valObj is ValuePattern vp)
+                        {
+                            var url = vp.Current.Value;
+                            if (!string.IsNullOrWhiteSpace(url))
+                            {
+                                if (!url.Contains("://"))
+                                {
+                                    url = "https://" + url;
+                                }
+
+                                urls.Add(url);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Program.Logger.LogDebug("Failed to read URL from Edge tab '{Tab}': {Error}", tabName, ex.Message);
+                    }
+                }
+            }
+
+            // Restore the originally selected tab by finding the one whose address bar matches
+            if (originalUrl != null)
+            {
+                try
+                {
+                    var freshTabs = window.FindAll(TreeScope.Descendants, tabCondition);
+                    foreach (AutomationElement tab in freshTabs)
+                    {
+                        if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var restoreObj)
+                            && restoreObj is SelectionItemPattern restorePattern)
+                        {
+                            restorePattern.Select();
+
+                            if (addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var valObj)
+                                && valObj is ValuePattern vp
+                                && string.Equals(vp.Current.Value, originalUrl, StringComparison.OrdinalIgnoreCase))
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Program.Logger.LogDebug("Failed to restore original Edge tab: {Error}", ex.Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogWarning("Failed to read Edge tab URLs: {Error}", ex.Message);
+        }
+
+        Program.Logger.LogDebug("Read {Count} Edge tab URLs for workspace {Id}", urls.Count, this.WorkspaceId);
+        return urls;
+    }
+
+    /// <summary>
+    /// Opens each URL in a new tab in this workspace's Edge window.
+    /// </summary>
+    internal void RestoreTabs(List<string> urls)
+    {
+        if (urls.Count == 0 || this.CachedHwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var edgePath = FindEdgePath();
+        if (edgePath == null)
+        {
+            return;
+        }
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = edgePath,
+                    Arguments = $"\"{url}\"",
+                    UseShellExecute = false
+                });
+            }
+            catch (Exception ex)
+            {
+                Program.Logger.LogDebug("Failed to restore Edge tab '{Url}': {Error}", url, ex.Message);
+            }
+        }
+
+        Program.Logger.LogInformation("Restored {Count} Edge tabs for workspace {Id}", urls.Count, this.WorkspaceId);
+    }
 }

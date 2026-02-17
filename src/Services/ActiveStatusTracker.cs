@@ -527,7 +527,7 @@ internal class ActiveStatusTracker
 
         // Clean up closed Edge workspaces
         var closedEdge = new List<string>();
-        foreach (var kvp in this._edgeWorkspaces)
+        foreach (var kvp in this._edgeWorkspaces.ToList())
         {
             if (!kvp.Value.IsOpen)
             {
