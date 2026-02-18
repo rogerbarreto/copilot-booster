@@ -201,7 +201,7 @@ Workspaces are stored in `%APPDATA%\CopilotBooster\Workspaces\` and named after 
 All configuration lives in a tabbed UI with info labels and tooltips — no JSON editing required.
 
 <p align="center">
-  <img src="images/settings-tab.png" alt="Settings dialog with IDEs tab showing File Pattern column" width="700">
+  <img src="images/settings-tab.png" alt="Settings dialog with Allowed Tools, Allowed Directories, and IDEs tabs" width="700">
 </p>
 
 - **Theme** — choose between System (default), Light, or Dark theme; persisted across restarts
@@ -210,11 +210,46 @@ All configuration lives in a tabbed UI with info labels and tooltips — no JSON
 - **Auto-hide on focus** — hide other session windows when focusing one
 - **Max active sessions** — configurable limit (0 = unlimited)
 - **Pinned order** — sort pinned sessions by last updated or alias name
-- **Allowed Tools** — whitelist shell commands and MCP tools that Copilot can use without prompting
-- **Allowed Directories** — grant Copilot access to specific directories
-- **IDEs** — register your IDEs with optional file patterns (e.g., `*.sln;*.slnx`) for project file search
-- **IDE Search** — manage directories excluded from IDE file pattern search
 - **Default Work Dir** — set the default working directory for new sessions
+
+#### 🛠️ Allowed Tools
+
+Whitelist shell commands and MCP tools that Copilot can use **without prompting for confirmation**. Each entry is passed as `--allow-tool` when launching the Copilot CLI, so matching commands execute immediately — no manual approval needed.
+
+On first run, the list is empty. Here are some commonly used tools:
+
+| Tool | Description |
+|------|-------------|
+| `shell(git log:*)` | Git log commands |
+| `shell(git diff:*)` | Git diff commands |
+| `shell(git status:*)` | Git status commands |
+| `shell(Set-Location:*)` | Change directory in PowerShell |
+| `mcp__github-mcp-server` | GitHub MCP server tools |
+
+> **Tip:** Use wildcards (`*`) to allow all sub-commands under a prefix. For example, `shell(git log:*)` covers `git log`, `git log --oneline`, and any other git log variation.
+
+#### 📁 Allowed Directories
+
+Grant Copilot access to specific directories on your machine. Each entry is passed as `--add-dir` when launching the Copilot CLI, expanding the set of paths Copilot can read and write to.
+
+| Directory | Description |
+|-----------|-------------|
+| `D:\repo` | Your repository root |
+| `~\.copilot` | Copilot session state |
+
+> **Tip:** Add your top-level project folders so Copilot can navigate across repositories without being blocked by directory restrictions.
+
+#### 💻 IDEs
+
+Register your IDEs with optional file patterns (e.g., `*.sln;*.slnx`) for project file search in the context menu.
+
+#### 🔎 IDE Search
+
+Manage directories excluded from IDE file pattern search (e.g., `node_modules`, `bin`, `obj`).
+
+<p align="center">
+  <img src="images/settings-ide-search.png" alt="IDE Search settings tab with ignored directories" width="400">
+</p>
 
 ---
 
