@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.0] - 2026-02-18
+
+### Added
+
+- **Delete instant removal** — deleting a session instantly removes it from the list without requiring a full refresh.
+- **Multi-select sessions** — hold Ctrl to select individual sessions or Shift for range selection. Multi-select supports batch Pin/Unpin and Archive/Unarchive via context menu; other actions are greyed out.
+- **Edge tab save/restore** — Edge browser tabs can be saved per session via the "Save Edge State" context menu button. Opening Edge for a session restores all previously saved tabs.
+- **Per-session state** — each session now has its own state directory under `%APPDATA%\CopilotBooster\sessions\{id}\` for storing Edge tabs and other session-specific data.
+- **Unified window handle persistence** — all tracked window handles (IDE, Explorer, Edge) are persisted in a single cache file and survive app restarts. Stale handles are automatically pruned on load.
+- **Events.jsonl content-based detection** — Copilot CLI working/idle status is now detected by parsing the last event in `events.jsonl` (assistant turns, tool requests, ask_user). Replaces the old file-watcher approach.
+- **Bell notifications** — sessions that finish work show a 🔔 bell icon and red-highlighted row. Windows toast notifications pop up with the session name. Bell state persists across app restarts.
+- **Direct terminal launch** — terminals now launch via `wt.exe` (Windows Terminal) with `cmd.exe` fallback, for faster startup.
+- **Duplicate CLI prevention** — opening a session that already has a Copilot CLI running focuses the existing window instead of spawning a new one.
+- **IDE file pattern matching** — configure file patterns per IDE (e.g., `*.sln;*.slnx`) in Settings. The context menu shows a sub-menu with matched project files for quick opening.
+- **IDE Search settings tab** — new "IDE Search" tab in Settings to manage directories excluded from file pattern search (node_modules, bin, obj, etc.).
+- **Context menu icons** — all context menu items now have icons extracted from system shell resources (shell32.dll, imageres.dll) and IDE executables.
+- **Open Files** — context menu option to open the session's files folder (`~/.copilot/session-state/{id}/files`).
+- **Open Copilot Plan.md** — context menu option to open a session's plan file (visible only when it exists).
+- **Settings tab tooltips** — all settings tabs have info labels (ℹ️) and hover tooltips explaining their purpose.
+- **Running session sort priority** — sessions with active processes are sorted to the top of the list.
+
+### Changed
+
+- **Unified IDE sub-menus** — IDE context menu items are now always sub-menus containing CWD and Repo Root folders (merged when identical), plus matched project files when a pattern is configured.
+- **Context menu reorganized** — session operations (Pin, Archive, Delete) moved to top section after Open/Edit for better grouping.
+- **Brighter bell colors** — notification row backgrounds are stronger in both dark and light themes for better visibility. Selected bell rows use an even more prominent color.
+- **Darker grid borders** — light theme grid borders now use `ControlDark` to match header borders.
+- **ListView hover highlight** — owner-drawn ListViews now show a hover effect in light theme.
+- **ListView foreground fix** — fixed white text appearing in light theme ListViews due to inherited dark-mode colors.
+- **Toast notifications** — use app icon via `AppUserModelID` on Start Menu shortcuts; bell emoji in title, session name in body.
+- **Staleness threshold** — events.jsonl files older than 30 minutes are treated as unknown status, preventing false bells on old sessions.
+- **Renamed "Open Artifacts"** to **"Open Files"**.
+
+### Fixed
+
+- **False bells on startup** — stale cache entries are filtered on load; only working sessions are suppressed during startup seeding.
+- **Bell-to-working transition** — selected row background color is properly reset when a bell session starts working again.
+- **Concurrent modification crash** — session list in `ActiveStatusTracker.Refresh()` is now snapshot-copied to prevent collection modification during enumeration.
+- **VSCode Insiders icon** — IDE paths with embedded quotes are now trimmed before icon extraction.
+- **Toast icon missing** — added `AppUserModelID: CopilotBooster` to installer shortcuts so toast notifications show the app icon.
+
 ## [0.12.0] - 2026-02-17
 
 ### Added

@@ -1,7 +1,7 @@
 [Setup]
 AppId={{D4A8F1E2-7B3C-4D9E-A6C2-8E1F5B3D9A72}
 AppName=Copilot Booster
-AppVersion=0.12.0
+AppVersion=0.13.0
 AppPublisher=Community
 AppPublisherURL=https://github.com/rogerbarreto/copilot-booster
 DefaultDirName={userappdata}\CopilotBooster

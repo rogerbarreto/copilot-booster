@@ -24,10 +24,11 @@ Modern AI-assisted development isn't one task at a time — it's **multiple Copi
 | Without Copilot Booster | With Copilot Booster |
 |---|---|
 | Alt-Tab through dozens of windows to find the right terminal | Click the session → focus the exact terminal, IDE, or browser |
-| Manually track which agent is working on what | Live Active column shows Terminal, Copilot CLI, IDE, and Edge status per session |
-| One shared browser for all research | Isolated Edge workspaces per session — tabs don't bleed across tasks |
+| Manually track which agent is working on what | Live Running column shows Terminal, Copilot CLI, IDE, Edge, and Explorer status per session |
+| One shared browser for all research | Isolated Edge workspaces per session — tabs saved and restored automatically |
 | Context-switch between repos by cd-ing around | Git worktree workspaces give each agent its own branch and directory |
-| Lose track of parallel agents after a restart | Terminal and browser persistence survives app restarts |
+| Lose track of parallel agents after a restart | Window handles, terminals, and Edge tabs all persist across restarts |
+| No idea when an agent finishes | 🔔 Bell notifications with toast popups when a session is ready |
 
 ---
 
@@ -49,20 +50,22 @@ Right-click the pinned icon to access everything:
 
 ### 🔄 Session Browser & Active Context Tracking
 
-The Existing Sessions tab is the central hub. Each session shows five columns — **Status** (animated icons), **Session**, **CWD** (with ⎇ for Git repos), **Date**, and **Active** — giving you a live view of what's running where.
+The session browser is the central hub. Each session shows **Session**, **CWD** (with ⎇ for Git repos), **Date**, and **Running** columns — giving you a live view of what's running where. Sessions with active processes are automatically sorted to the top.
 
 <p align="center">
-  <img src="images/existing-sessions-active-tracking.png" alt="Existing sessions with Terminal and Copilot CLI active tracking" width="700">
+  <img src="images/existing-sessions-active-tracking.png" alt="Session browser with active tracking, bell notifications, and multi-select" width="700">
 </p>
 
-The **Active** column tracks running contexts across multiple environments:
+The **Running** column tracks running contexts across multiple environments:
 
 | Context | How it's detected |
 |---------|-------------------|
 | **Terminal** | Windows launched via "Open Terminal" are tracked by PID and cached across restarts |
-| **Copilot CLI** | Open terminal windows are scanned by matching session summaries in window titles |
+| **Copilot CLI** | Detected via `events.jsonl` content parsing — working (spinner) or idle (bell) |
 | **IDE** | IDEs launched via the Open menu are tracked by window handle and cached across restarts |
-| **Edge** | Browser workspaces are tracked via UI Automation anchor-tab detection |
+| **Edge** | Browser workspaces tracked via UI Automation anchor-tab detection |
+| **Explorer** | Explorer windows opened via context menu are tracked by HWND |
+| **Files** | Session files folder opened via context menu |
 
 Each active context is a **clickable link** — click to focus the corresponding window instantly. Re-opening an IDE that's already tracked for a session will focus the existing window instead of launching a new instance.
 
@@ -71,55 +74,80 @@ Each active context is a **clickable link** — click to focus the corresponding
 </p>
 
 Other session browser features:
+- **Multi-select** — hold Ctrl for individual selection or Shift for range selection; batch Pin/Unpin and Archive/Unarchive via context menu
 - **Search** — filter sessions by title, folder, or metadata as you type
-- **Terminal persistence** — active terminals survive app restarts
+- **Active/Archived tabs** — archive sessions to keep your active list clean; unarchive anytime
+- **Pinned sessions** — pin sessions to keep them at the top regardless of sorting
 - **Auto-refresh** — the list updates when new sessions appear or names change externally
 - **Auto-cleanup** — empty sessions with no activity are automatically removed
-- **Loading indicator** — shows "Loading sessions..." while session data is being fetched
 
 ---
 
 ### 🔔 Session Status & Toast Notifications
 
-The **Status** column shows live session state with animated icons — a spinning blue indicator when Copilot CLI is working, and a red bell when it's idle and waiting for input. Bell rows are highlighted with a soft red background for quick visual scanning.
+The status column shows live session state with animated icons — a **spinning blue indicator** when Copilot CLI is working, and a **🔔 red bell** when it's idle and waiting for input. Bell rows are highlighted with a prominent red background for quick visual scanning.
 
 <p align="center">
-  <img src="images/session-state-notification.png" alt="Session status column showing bell and spinner icons" width="700">
+  <img src="images/session-state-notification.png" alt="Session status column showing bell and spinner icons with red notification rows" width="700">
 </p>
 
-When a session finishes work, a **Windows toast notification** pops up via the system tray icon with the session name. Click the notification to instantly focus the Copilot CLI terminal.
+When a session finishes work, a **Windows toast notification** pops up with the session name. Status detection is powered by content-based parsing of `events.jsonl` — it understands assistant turns, tool requests, and `ask_user` pauses.
 
 <p align="center">
   <img src="images/toast-notification.png" alt="Toast notification when session is ready" width="350">
 </p>
 
-- **One-shot notifications** — each bell only fires once per idle transition; clicking to focus a session suppresses the bell until the next work cycle completes
+- **Content-based detection** — parses event types (assistant.turn_start, tool.execution_start, ask_user) for accurate status
+- **One-shot notifications** — each bell only fires once per idle transition
+- **Staleness threshold** — sessions inactive for 30+ minutes are ignored to prevent false bells
 - **Startup-aware** — existing idle sessions don't trigger false notifications when the app launches
-- **Configurable** — toggle notifications on/off in the Settings tab
+- **Persistent bell state** — bell notifications survive app restarts
+- **Configurable** — toggle notifications on/off in Settings
 
 ---
 
 ### 📋 Right-Click Context Menu
 
-Right-click any session row to access all actions in a single context menu:
+Right-click any session row to access all actions in a single context menu with system icons:
 
 <p align="center">
-  <img src="images/context-menu-edit.png" alt="Right-click context menu with all session actions" width="300">
+  <img src="images/context-menu.png" alt="Right-click context menu with icons, IDE sub-menus, and all session actions" width="300">
 </p>
 
 | Action | Description |
 |--------|-------------|
 | **Open Session** | Resume the session in its original working directory |
 | **Edit Session** | Rename the session or change its working directory |
+| **Pin / Unpin** | Pin sessions to keep them at the top of the list |
+| **Archive / Unarchive** | Move sessions to the Archived tab |
+| **Delete Session** | Soft-delete a session (instantly removed from the list) |
 | **Open as New Copilot Session** | Start a fresh Copilot CLI session in the same directory |
 | **Open as New Copilot Session Workspace** | Create a Git worktree workspace (Git repos only) |
-| **Open Terminal** | Launch a standalone terminal in the session's directory |
-| **Open in {IDE} (CWD)** | Open the working directory in your configured IDE |
-| **Open in {IDE} (Repo Root)** | Open the Git repository root in your IDE |
-| **Delete Session** | Soft-delete a session (renames `workspace.yaml` → `workspace-deleted.yaml` for safe recovery) |
+| **Open Terminal** | Launch a terminal via Windows Terminal (wt.exe) |
+| **Open in Explorer (CWD)** | Open the working directory in Explorer |
+| **Open in {IDE}** | Sub-menu with CWD/Repo Root folders + matched project files |
 | **Open in Edge** | Launch a managed Edge browser workspace |
+| **Save Edge State** | Manually save Edge tabs (visible when Edge is open) |
+| **Open Files** | Open the session's files folder |
+| **Open Copilot Plan.md** | Open the session's plan file (if it exists) |
 
-IDE entries are added dynamically based on your configured IDEs in Settings.
+---
+
+### 🔍 IDE File Pattern Matching
+
+Configure file patterns per IDE (e.g., `*.sln;*.slnx`) in Settings. When a pattern is set, the IDE context menu becomes a **sub-menu** that searches for matching project files and shows them for quick one-click opening.
+
+<p align="center">
+  <img src="images/context-menu-ide-submenu.png" alt="IDE sub-menu showing CWD/Repo Root and matched .sln file" width="400">
+</p>
+
+- **Fast search** — uses `git ls-files` for Git repos (respects .gitignore), falls back to directory walk with configurable ignored directories
+- **Depth-sorted** — shallowest matches shown first, up to 5 results
+- **Configurable exclusions** — manage ignored directories (node_modules, bin, obj, etc.) in the "IDE Search" settings tab
+
+<p align="center">
+  <img src="images/settings-ide-search.png" alt="IDE Search settings tab with ignored directories" width="400">
+</p>
 
 ---
 
@@ -131,35 +159,28 @@ Open a managed Microsoft Edge window linked to any session. Each workspace gets 
   <img src="images/edge-session-tracking.png" alt="Edge browser workspace with session anchor tab" width="700">
 </p>
 
-- **Active tracking** — the Edge workspace appears as a clickable link in the Active column; click to focus the window
-- **Session name in tab** — the anchor tab title shows the session name (alias or summary) for easy identification; updates live when you change the alias
-- **New tab on open** — a fresh new tab is automatically opened alongside the anchor tab so your browsing doesn't overwrite the tracker
-- **Tab-level detection** — uses UI Automation to find the anchor tab across all Edge windows, even when another tab is active
+- **Tab save/restore** — save Edge tabs via "Save Edge State" in the context menu; tabs are restored when reopening Edge for the session
+- **Active tracking** — the Edge workspace appears as a clickable link in the Running column
+- **Session name in tab** — the anchor tab title shows the session name; updates live when you change the alias
+- **Manual save** — "Save Edge State" context menu button saves all open tabs for the session
+- **Tab-level detection** — uses UI Automation to find the anchor tab across all Edge windows
 - **Auto-cleanup** — when you close the anchor tab or the Edge window, the workspace is automatically removed from tracking
-- **Re-discovery** — if you restart Copilot Booster while an Edge workspace is still open, it will be re-detected on the next refresh
 
 ---
 
 ### 📂 Smart Directory Picker
 
-The **New Session** tab shows your most-used working directories — sorted by frequency across all previous sessions. Non-existent paths are automatically cleaned up.
+The **New Session** dialog shows your most-used working directories — sorted by frequency across all previous sessions. Non-existent paths are automatically cleaned up.
 
 <p align="center">
-  <img src="images/new-session-tab.png" alt="New Session tab with directory picker and session name prompt" width="700">
+  <img src="images/new-session-tab.png" alt="New Session dialog with directory picker and session counts" width="700">
 </p>
 
 Each directory shows:
 - **# Sessions created** — how many sessions have used this path
 - **Git** — whether the directory is inside a Git repository (including worktrees)
 
-Right-click any directory to access all actions, or double-click to quickly start a new session with a name prompt:
-
-| Action | Description |
-|--------|-------------|
-| **New Copilot Session** | Create a named session in the selected directory |
-| **New Copilot Session Workspace** | Create a Git worktree workspace (Git repos only) |
-| **Add Directory** | Browse for a new directory to add to the list |
-| **Remove Directory** | Remove a manually-added directory (pinned only) |
+Right-click any directory to access all actions, or double-click to quickly start a new session with a name prompt.
 
 ---
 
@@ -168,8 +189,8 @@ Right-click any directory to access all actions, or double-click to quickly star
 For Git-enabled directories, Copilot Booster can create isolated workspaces backed by [git worktrees](https://git-scm.com/docs/git-worktree). Each workspace gets its own branch and directory — perfect for working on multiple features in parallel without stashing or switching branches.
 
 Create a workspace from two places:
-- **New Session tab** → right-click a Git directory → **New Copilot Session Workspace**
-- **Existing Sessions tab** → right-click a session → **Open as New Copilot Session Workspace**
+- **New Session** → right-click a Git directory → **New Copilot Session Workspace**
+- **Existing Sessions** → right-click a session → **Open as New Copilot Session Workspace**
 
 Workspaces are stored in `%APPDATA%\CopilotBooster\Workspaces\` and named after the repository and branch (e.g., `myrepo-feature-xyz`).
 
@@ -177,16 +198,22 @@ Workspaces are stored in `%APPDATA%\CopilotBooster\Workspaces\` and named after 
 
 ### ⚙️ Settings
 
-All configuration lives in a tabbed UI — no JSON editing required.
+All configuration lives in a tabbed UI with info labels and tooltips — no JSON editing required.
 
 <p align="center">
-  <img src="images/settings-tab.png" alt="Settings with Allowed Tools, Directories, and IDEs" width="700">
+  <img src="images/settings-tab.png" alt="Settings dialog with IDEs tab showing File Pattern column" width="700">
 </p>
 
 - **Theme** — choose between System (default), Light, or Dark theme; persisted across restarts
+- **Notify on bell** — toggle Windows toast notifications when sessions finish work
+- **Always on top** — keep the window above other windows
+- **Auto-hide on focus** — hide other session windows when focusing one
+- **Max active sessions** — configurable limit (0 = unlimited)
+- **Pinned order** — sort pinned sessions by last updated or alias name
 - **Allowed Tools** — whitelist shell commands and MCP tools that Copilot can use without prompting
 - **Allowed Directories** — grant Copilot access to specific directories
-- **IDEs** — register your IDEs for the Open menu (e.g., Visual Studio, VS Code, Rider)
+- **IDEs** — register your IDEs with optional file patterns (e.g., `*.sln;*.slnx`) for project file search
+- **IDE Search** — manage directories excluded from IDE file pattern search
 - **Default Work Dir** — set the default working directory for new sessions
 
 ---
@@ -279,17 +306,21 @@ CopilotBooster.exe --settings             # Open settings
 ## 🏗️ Architecture
 
 ```
-CopilotBooster.exe (WinForms, persistent taskbar window)
+CopilotBooster.exe (WinForms .NET 10, persistent taskbar window)
 ├── System tray icon (always visible, minimize-to-tray on close)
-├── Sets AppUserModelID for taskbar/JumpList association
+├── Sets AppUserModelID for taskbar/JumpList/toast association
 ├── Registers PID → session mapping in %APPDATA%\CopilotBooster\active-pids.json
 ├── Launches copilot.exe with --allow-tool and --add-dir from settings
 ├── Creates session workspace.yaml + events.jsonl for new sessions
-├── Active context tracking (Terminal, Copilot CLI, IDE, Edge)
+├── Active context tracking (Terminal, Copilot CLI, IDE, Edge, Explorer)
 │   ├── PID registry + process scanning for terminals
-│   ├── Window title matching for Copilot CLI detection
-│   ├── Process tracking for IDE instances
-│   └── UI Automation for Edge anchor-tab detection
+│   ├── events.jsonl content parsing for Copilot CLI status (working/idle/bell)
+│   ├── HWND tracking for IDE instances (persisted across restarts)
+│   ├── UI Automation for Edge anchor-tab detection
+│   └── HWND tracking for Explorer windows
+├── Per-session state (Edge tabs, session-specific data)
+├── IDE file pattern search (git ls-files / directory walk)
+├── Window handle cache persistence (unified for all window types)
 ├── Terminal cache persistence across restarts
 ├── Updates jump list on launch + every 5 min (background, coordinated)
 └── Cleans up on exit (unregisters PID, refreshes jump list)
@@ -299,26 +330,36 @@ CopilotBooster.exe (WinForms, persistent taskbar window)
 
 | Service | Purpose |
 |---------|---------|
-| `ActiveStatusTracker` | Aggregates active status across all context types |
+| `ActiveStatusTracker` | Aggregates active status across all context types with HWND persistence |
+| `EventsJournalService` | Content-based Copilot CLI status detection via events.jsonl parsing |
+| `BellNotificationService` | Toast notifications and bell state management |
 | `SessionDataService` | Unified session loading with Git detection caching |
 | `CopilotSessionCreatorService` | Creates new sessions with workspace.yaml and events.jsonl |
 | `EdgeWorkspaceService` | Edge browser workspace lifecycle and UI Automation |
+| `EdgeTabPersistenceService` | Save/restore Edge tabs per session |
+| `IdeFileSearchService` | Fast project file search (git ls-files / directory walk) |
+| `SessionStateService` | Per-session state directory management |
+| `WindowHandleCacheService` | Unified window handle persistence across restarts |
 | `TerminalCacheService` | Persists terminal sessions across app restarts |
 | `WindowFocusService` | HWND-based window focusing with P/Invoke |
 | `SessionService` | Session CRUD, search, and Git root detection |
+| `SessionArchiveService` | Archive and pin state persistence |
 | `CopilotLocator` | Finds the Copilot CLI executable |
 
 ### Files
 
 | Path | Purpose |
 |------|---------|
-| `%APPDATA%\CopilotBooster\launcher-settings.json` | Tools, directories, IDEs, default work dir |
+| `%APPDATA%\CopilotBooster\launcher-settings.json` | Tools, directories, IDEs, file patterns, ignored dirs |
 | `%APPDATA%\CopilotBooster\active-pids.json` | PID → session ID mapping |
 | `%APPDATA%\CopilotBooster\terminal-cache.json` | Cached terminal sessions for restart persistence |
-| `%APPDATA%\CopilotBooster\ide-cache.json` | Cached IDE window handles for restart persistence |
+| `%APPDATA%\CopilotBooster\window-handles.json` | Unified window handle cache (IDE, Explorer, Edge) |
+| `%APPDATA%\CopilotBooster\session-states.json` | Archive and pin states per session |
+| `%APPDATA%\CopilotBooster\sessions\{id}\` | Per-session state directory |
+| `%APPDATA%\CopilotBooster\sessions\{id}\edge-tabs.json` | Saved Edge tab URLs |
 | `%APPDATA%\CopilotBooster\jumplist-lastupdate.txt` | Update coordination timestamp |
 | `%APPDATA%\CopilotBooster\launcher.log` | Debug log |
-| `%APPDATA%\CopilotBooster\pinned-directories.json` | Manually-added directories for New Session tab |
+| `%APPDATA%\CopilotBooster\pinned-directories.json` | Manually-added directories for New Session |
 | `~/.copilot/session-state/` | Session metadata (managed by Copilot CLI) |
 
 ---
