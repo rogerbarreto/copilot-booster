@@ -216,6 +216,10 @@ All configuration lives in a tabbed UI with info labels and tooltips — no JSON
 
 Whitelist shell commands and MCP tools that Copilot can use **without prompting for confirmation**. Each entry is passed as `--allow-tool` when launching the Copilot CLI, so matching commands execute immediately — no manual approval needed.
 
+<p align="center">
+  <img src="images/global-allowed-tools.png" alt="Allowed Tools settings tab" width="500">
+</p>
+
 On first run, the list is empty. Here are some commonly used tools:
 
 | Tool | Description |
@@ -231,6 +235,10 @@ On first run, the list is empty. Here are some commonly used tools:
 #### 📁 Allowed Directories
 
 Grant Copilot access to specific directories on your machine. Each entry is passed as `--add-dir` when launching the Copilot CLI, expanding the set of paths Copilot can read and write to.
+
+<p align="center">
+  <img src="images/global-allowed-directories.png" alt="Allowed Directories settings tab" width="500">
+</p>
 
 | Directory | Description |
 |-----------|-------------|
