@@ -457,11 +457,13 @@ internal class ActiveStatusTracker
     /// </summary>
     internal ActiveStatusSnapshot Refresh(List<NamedSession> sessions)
     {
+        // Snapshot to avoid concurrent modification from UI thread
+        var sessionSnapshot = sessions.ToList();
         this._activeSessionIds = this.LoadActiveSessionIds();
 
         // Scan for open tracked windows by title (including session-summary matching)
         // Pass previously tracked HWNDs as fallback for Copilot CLI windows whose titles change dynamically
-        this._activeTrackedWindows = WindowFocusService.FindTrackedWindows(BuildSessionSummaryMap(sessions), this._activeTrackedWindows);
+        this._activeTrackedWindows = WindowFocusService.FindTrackedWindows(BuildSessionSummaryMap(sessionSnapshot), this._activeTrackedWindows);
 
         // Sync terminal cache with actual open windows
         var openTerminalIds = new HashSet<string>(this._activeTrackedWindows.Keys, StringComparer.OrdinalIgnoreCase);
@@ -627,7 +629,7 @@ internal class ActiveStatusTracker
         var activeTextBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var sessionNamesById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var session in sessions)
+        foreach (var session in sessionSnapshot)
         {
             var activeText = this.BuildActiveText(session.Id);
             if (!string.IsNullOrEmpty(activeText))
@@ -643,9 +645,9 @@ internal class ActiveStatusTracker
 
         // Status icons from events.jsonl — read from cache only (watcher updates async).
         // Fallback poll runs only on watcher errors, rate-limited to 1/30s.
-        this.EventsJournal.ProcessFallbackPoll(sessions.Select(s => s.Id).ToList());
+        this.EventsJournal.ProcessFallbackPoll(sessionSnapshot.Select(s => s.Id).ToList());
         var statusIconBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var session in sessions)
+        foreach (var session in sessionSnapshot)
         {
             var status = this.EventsJournal.GetCachedStatus(session.Id);
             switch (status)

@@ -374,41 +374,51 @@ internal class ExistingSessionsVisuals
         return searchPanel;
     }
 
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr ExtractIcon(IntPtr hInst, string lpszExeFileName, int nIconIndex);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
+    private static Bitmap? TryExtractIcon(string filePath, int index)
+    {
+        try
+        {
+            var hIcon = ExtractIcon(IntPtr.Zero, filePath, index);
+            if (hIcon != IntPtr.Zero)
+            {
+                using var icon = Icon.FromHandle(hIcon);
+                var bmp = new Bitmap(icon.ToBitmap(), 16, 16);
+                DestroyIcon(hIcon);
+                return bmp;
+            }
+        }
+        catch { /* ignore extraction failures */ }
+        return null;
+    }
+
     private static Bitmap? TryGetExeIcon(string exePath)
     {
         try
         {
             if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
             {
-                using var icon = Icon.ExtractAssociatedIcon(exePath);
-                if (icon != null)
-                {
-                    return new Bitmap(icon.ToBitmap(), 16, 16);
-                }
+                return TryExtractIcon(exePath, 0);
             }
         }
         catch { /* ignore icon extraction failures */ }
         return null;
     }
 
-    private static Bitmap MakeTextIcon(string text, Color color)
-    {
-        var bmp = new Bitmap(16, 16);
-        using var g = Graphics.FromImage(bmp);
-        using var font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Pixel);
-        using var brush = new SolidBrush(color);
-        var size = g.MeasureString(text, font);
-        g.DrawString(text, font, brush, (16 - size.Width) / 2, (16 - size.Height) / 2);
-        return bmp;
-    }
-
     private void BuildGridContextMenu()
     {
         var gridContextMenu = new ContextMenuStrip();
-        var iconColor = Application.IsDarkModeEnabled ? Color.White : Color.Black;
+        var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
+        var imageres = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "imageres.dll");
+        var cmdExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
 
         // --- Session operations (top group) ---
-        var menuOpenSession = new ToolStripMenuItem("Open Session") { Image = MakeTextIcon("▶", Color.LimeGreen) };
+        var menuOpenSession = new ToolStripMenuItem("Open Session") { Image = TryExtractIcon(shell32, 137) };
         menuOpenSession.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -419,7 +429,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenSession);
 
-        var editMenuItem = new ToolStripMenuItem("Edit Session") { Image = MakeTextIcon("✏", iconColor) };
+        var editMenuItem = new ToolStripMenuItem("Edit Session") { Image = TryExtractIcon(shell32, 269) };
         editMenuItem.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -430,7 +440,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(editMenuItem);
 
-        var menuPinSession = new ToolStripMenuItem("Pin Session") { Image = MakeTextIcon("📌", iconColor) };
+        var menuPinSession = new ToolStripMenuItem("Pin Session") { Image = TryExtractIcon(shell32, 173) };
         menuPinSession.Click += (s, e) =>
         {
             foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
@@ -440,7 +450,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuPinSession);
 
-        var menuUnpinSession = new ToolStripMenuItem("Unpin Session") { Image = MakeTextIcon("📌", Color.Gray) };
+        var menuUnpinSession = new ToolStripMenuItem("Unpin Session") { Image = TryExtractIcon(shell32, 173) };
         menuUnpinSession.Click += (s, e) =>
         {
             foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
@@ -450,7 +460,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuUnpinSession);
 
-        var menuArchiveSession = new ToolStripMenuItem("Archive Session") { Image = MakeTextIcon("📦", iconColor) };
+        var menuArchiveSession = new ToolStripMenuItem("Archive Session") { Image = TryExtractIcon(shell32, 145) };
         menuArchiveSession.Click += (s, e) =>
         {
             foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
@@ -460,7 +470,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuArchiveSession);
 
-        var menuUnarchiveSession = new ToolStripMenuItem("Unarchive Session") { Image = MakeTextIcon("📦", Color.Gray) };
+        var menuUnarchiveSession = new ToolStripMenuItem("Unarchive Session") { Image = TryExtractIcon(shell32, 145) };
         menuUnarchiveSession.Click += (s, e) =>
         {
             foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
@@ -470,7 +480,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuUnarchiveSession);
 
-        var menuDeleteSession = new ToolStripMenuItem("Delete Session") { Image = MakeTextIcon("🗑", Color.IndianRed) };
+        var menuDeleteSession = new ToolStripMenuItem("Delete Session") { Image = TryExtractIcon(shell32, 131) };
         menuDeleteSession.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -484,7 +494,7 @@ internal class ExistingSessionsVisuals
         // --- New session operations ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var menuOpenNewSession = new ToolStripMenuItem("Open as New Copilot Session") { Image = MakeTextIcon("➕", iconColor) };
+        var menuOpenNewSession = new ToolStripMenuItem("Open as New Copilot Session") { Image = TryExtractIcon(shell32, 1) };
         menuOpenNewSession.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -495,7 +505,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenNewSession);
 
-        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace") { Image = MakeTextIcon("➕", iconColor) };
+        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace") { Image = TryExtractIcon(shell32, 1) };
         menuOpenNewSessionWorkspace.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -509,11 +519,7 @@ internal class ExistingSessionsVisuals
         // --- Terminal ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var terminalIcon = TryGetExeIcon(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Microsoft", "WindowsApps", "wt.exe"));
-
-        var menuOpenTerminal = new ToolStripMenuItem("Open Terminal") { Image = terminalIcon ?? MakeTextIcon(">_", iconColor) };
+        var menuOpenTerminal = new ToolStripMenuItem("Open Terminal") { Image = TryExtractIcon(cmdExe, 0) };
         menuOpenTerminal.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -529,10 +535,7 @@ internal class ExistingSessionsVisuals
 
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var explorerIcon = TryGetExeIcon(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"));
-
-        var menuOpenCwdExplorer = new ToolStripMenuItem("Open in Explorer (CWD)") { Image = explorerIcon ?? MakeTextIcon("📁", iconColor) };
+        var menuOpenCwdExplorer = new ToolStripMenuItem("Open in Explorer (CWD)") { Image = TryExtractIcon(shell32, 3) };
         menuOpenCwdExplorer.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -580,7 +583,7 @@ internal class ExistingSessionsVisuals
 
         var edgeIcon = TryGetExeIcon(EdgeWorkspaceService.FindEdgePath() ?? "");
 
-        var menuOpenEdge = new ToolStripMenuItem("Open in Edge") { Image = edgeIcon ?? MakeTextIcon("🌐", iconColor) };
+        var menuOpenEdge = new ToolStripMenuItem("Open in Edge") { Image = edgeIcon };
         menuOpenEdge.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -591,7 +594,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenEdge);
 
-        var menuSaveEdgeTabs = new ToolStripMenuItem("Save Edge State") { Image = MakeTextIcon("💾", iconColor) };
+        var menuSaveEdgeTabs = new ToolStripMenuItem("Save Edge State") { Image = TryExtractIcon(imageres, 67) };
         menuSaveEdgeTabs.ToolTipText = "Saves all open Edge tab URLs so they can be restored next time you open Edge for this session";
         menuSaveEdgeTabs.Click += (s, e) =>
         {
@@ -606,7 +609,7 @@ internal class ExistingSessionsVisuals
         // --- Files ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files") { Image = MakeTextIcon("📂", iconColor) };
+        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 4) };
         menuOpenFilesFolder.ToolTipText = "Open artifacts folder dedicated to this session";
         menuOpenFilesFolder.Click += (s, e) =>
         {
@@ -618,7 +621,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenFilesFolder);
 
-        var menuOpenPlan = new ToolStripMenuItem("Open Copilot Plan.md") { Image = MakeTextIcon("📋", iconColor) };
+        var menuOpenPlan = new ToolStripMenuItem("Open Copilot Plan.md") { Image = TryExtractIcon(shell32, 70) };
         menuOpenPlan.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
