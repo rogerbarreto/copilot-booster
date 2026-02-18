@@ -959,7 +959,11 @@ internal class MainForm : Form
     {
         if (this.SelectedSessionId != null)
         {
-            this._interactionManager.LaunchSession(this.SelectedSessionId);
+            // Focus existing Copilot CLI window if already running
+            if (!this._activeTracker.TryFocusCopilotCli(this.SelectedSessionId))
+            {
+                this._interactionManager.LaunchSession(this.SelectedSessionId);
+            }
         }
     }
 

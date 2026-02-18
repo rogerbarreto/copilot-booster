@@ -194,6 +194,46 @@ internal class ActiveStatusTracker
         return string.Join("\n", parts);
     }
 
+    /// <summary>
+    /// Tries to focus an existing Copilot CLI window for the given session.
+    /// Returns true if a window was found and focused, false otherwise.
+    /// </summary>
+    internal bool TryFocusCopilotCli(string sessionId)
+    {
+        // Check tracked windows first (HWND-based, most reliable)
+        if (this._activeTrackedWindows.TryGetValue(sessionId, out var tracked))
+        {
+            var cli = tracked.FirstOrDefault(t => t.Label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase));
+            if (cli != default && WindowFocusService.IsWindowAlive(cli.Hwnd))
+            {
+                WindowFocusService.TryFocusWindowHandle(cli.Hwnd);
+                return true;
+            }
+        }
+
+        // Fallback: PID-based
+        if (this._activeSessionIds.Contains(sessionId))
+        {
+            var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
+            var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
+            if (session != null && session.CopilotPid > 0)
+            {
+                try
+                {
+                    var p = Process.GetProcessById(session.CopilotPid);
+                    if (!p.HasExited)
+                    {
+                        WindowFocusService.TryFocusProcessWindow(session.CopilotPid);
+                        return true;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        return false;
+    }
+
     internal void FocusActiveProcess(string sessionId, int clickedLineIndex)
     {
         var focusTargets = new List<(string name, Action focus)>();
