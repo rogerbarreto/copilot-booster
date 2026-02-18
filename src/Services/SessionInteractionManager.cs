@@ -194,7 +194,7 @@ internal class SessionInteractionManager
     /// </summary>
     internal static string GetSessionFilesPath(string sessionId)
     {
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".CopilotBooster", sessionId, "Files");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot", "session-state", sessionId, "files");
     }
 
     /// <summary>
