@@ -20,4 +20,18 @@
         var entry = new IdeEntry { Description = "", Path = "" };
         Assert.Equal("", entry.ToString());
     }
+
+    [Fact]
+    public void FilePattern_DefaultsToEmptyString()
+    {
+        var entry = new IdeEntry();
+        Assert.Equal("", entry.FilePattern);
+    }
+
+    [Fact]
+    public void FilePattern_CanBeSet()
+    {
+        var entry = new IdeEntry { FilePattern = "*.sln;*.csproj" };
+        Assert.Equal("*.sln;*.csproj", entry.FilePattern);
+    }
 }

@@ -210,4 +210,57 @@ public sealed class LauncherSettingsTests : IDisposable
         var loaded = LauncherSettings.Load(file);
         Assert.Equal("light", loaded.Theme);
     }
+
+    [Fact]
+    public void IdeSearchIgnoredDirs_Default_ContainsCommonDirectories()
+    {
+        var settings = new LauncherSettings();
+
+        Assert.Contains("node_modules", settings.IdeSearchIgnoredDirs);
+        Assert.Contains("bin", settings.IdeSearchIgnoredDirs);
+        Assert.Contains("obj", settings.IdeSearchIgnoredDirs);
+        Assert.Contains(".git", settings.IdeSearchIgnoredDirs);
+        Assert.Contains(".venv", settings.IdeSearchIgnoredDirs);
+        Assert.Contains("vendor", settings.IdeSearchIgnoredDirs);
+    }
+
+    [Fact]
+    public void IdeEntry_FilePattern_DefaultsToEmpty()
+    {
+        var entry = new IdeEntry();
+        Assert.Equal("", entry.FilePattern);
+    }
+
+    [Fact]
+    public void IdeEntry_FilePattern_SerializesCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings
+        {
+            Ides = [new IdeEntry { Path = @"C:\code.exe", Description = "VS Code", FilePattern = "*.sln;*.csproj" }]
+        };
+
+        settings.Save(file);
+
+        var loaded = LauncherSettings.Load(file);
+        Assert.Single(loaded.Ides);
+        Assert.Equal("*.sln;*.csproj", loaded.Ides[0].FilePattern);
+    }
+
+    [Fact]
+    public void Save_WithIdeSearchIgnoredDirs_PersistsCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings
+        {
+            IdeSearchIgnoredDirs = ["custom_dir", "another_dir"]
+        };
+
+        settings.Save(file);
+
+        var loaded = LauncherSettings.Load(file);
+        Assert.Equal(2, loaded.IdeSearchIgnoredDirs.Count);
+        Assert.Contains("custom_dir", loaded.IdeSearchIgnoredDirs);
+        Assert.Contains("another_dir", loaded.IdeSearchIgnoredDirs);
+    }
 }

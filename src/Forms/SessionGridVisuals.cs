@@ -154,11 +154,11 @@ internal class SessionGridVisuals
                 : (Application.IsDarkModeEnabled ? Color.FromArgb(100, 180, 255) : Color.FromArgb(0, 102, 204));
             var linkFont = new Font(e.CellStyle!.Font ?? this._grid.Font, FontStyle.Underline);
             var padding = e.CellStyle.Padding;
-            const int lineSpacing = 2;
+            const int LineSpacing = 2;
 
             // Calculate total content height for vertical centering
             var lineHeight = TextRenderer.MeasureText(e.Graphics!, "X", linkFont).Height;
-            int totalHeight = (lines.Length * lineHeight) + ((lines.Length - 1) * lineSpacing);
+            int totalHeight = (lines.Length * lineHeight) + ((lines.Length - 1) * LineSpacing);
             int ly = e.CellBounds.Y + ((e.CellBounds.Height - totalHeight) / 2);
 
             foreach (var line in lines)
@@ -166,7 +166,7 @@ internal class SessionGridVisuals
                 var size = TextRenderer.MeasureText(e.Graphics!, line, linkFont);
                 int lx = e.CellBounds.X + ((e.CellBounds.Width - size.Width) / 2);
                 TextRenderer.DrawText(e.Graphics!, line, linkFont, new Point(lx, ly), linkColor);
-                ly += size.Height + lineSpacing;
+                ly += size.Height + LineSpacing;
             }
 
             linkFont.Dispose();
@@ -190,10 +190,10 @@ internal class SessionGridVisuals
         var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
         var linkFont = new Font(font, FontStyle.Underline);
         var cellBounds = this._grid.GetCellDisplayRectangle(4, row.Index, false);
-        const int lineSpacing = 2;
+        const int LineSpacing = 2;
 
         var lineHeight = TextRenderer.MeasureText("X", linkFont).Height;
-        int totalHeight = (lines.Length * lineHeight) + ((lines.Length - 1) * lineSpacing);
+        int totalHeight = (lines.Length * lineHeight) + ((lines.Length - 1) * LineSpacing);
         int ly = (cellBounds.Height - totalHeight) / 2;
 
         for (int i = 0; i < lines.Length; i++)
@@ -207,7 +207,7 @@ internal class SessionGridVisuals
                 return i;
             }
 
-            ly += sz.Height + lineSpacing;
+            ly += sz.Height + LineSpacing;
         }
 
         linkFont.Dispose();
