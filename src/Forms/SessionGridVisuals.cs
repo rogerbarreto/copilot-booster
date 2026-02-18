@@ -26,6 +26,10 @@ internal class SessionGridVisuals
     private static Color BellRowColor => Application.IsDarkModeEnabled
         ? Color.FromArgb(90, 30, 30)
         : Color.FromArgb(255, 238, 238);
+
+    private static Color BellRowSelectedColor => Application.IsDarkModeEnabled
+        ? Color.FromArgb(120, 40, 40)
+        : Color.FromArgb(255, 210, 210);
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
     private readonly Image[] _spinnerFrames;
@@ -300,6 +304,7 @@ internal class SessionGridVisuals
             if (statusIcon == "bell")
             {
                 row.DefaultCellStyle.BackColor = BellRowColor;
+                row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
             }
             else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
             {
@@ -368,6 +373,7 @@ internal class SessionGridVisuals
             if (statusIcon == "bell")
             {
                 row.DefaultCellStyle.BackColor = BellRowColor;
+                row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
                 row.DefaultCellStyle.ForeColor = Color.Empty;
             }
             else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
@@ -378,6 +384,7 @@ internal class SessionGridVisuals
             else
             {
                 row.DefaultCellStyle.BackColor = Color.Empty;
+                row.DefaultCellStyle.SelectionBackColor = Color.Empty;
                 row.DefaultCellStyle.ForeColor = Color.Empty;
             }
         }
@@ -430,6 +437,7 @@ internal class SessionGridVisuals
             if (newStatusIcon == "bell")
             {
                 newRow.DefaultCellStyle.BackColor = BellRowColor;
+                newRow.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
             }
             else if (newStatusIcon == "working" || !string.IsNullOrEmpty(newActiveText))
             {
@@ -535,6 +543,7 @@ internal class SessionGridVisuals
                 if (statusIcon == "bell")
                 {
                     row.DefaultCellStyle.BackColor = BellRowColor;
+                    row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
                     row.DefaultCellStyle.ForeColor = Color.Empty;
                 }
                 else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
@@ -545,6 +554,7 @@ internal class SessionGridVisuals
                 else
                 {
                     row.DefaultCellStyle.BackColor = Color.Empty;
+                    row.DefaultCellStyle.SelectionBackColor = Color.Empty;
                     row.DefaultCellStyle.ForeColor = Color.Empty;
                 }
 
