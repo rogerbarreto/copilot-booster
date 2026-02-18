@@ -72,6 +72,12 @@ internal class ExistingSessionsVisuals
     internal event Action<string, IdeEntry, bool>? OnOpenInIde;
 
     /// <summary>
+    /// Fired when user selects a specific file to open in an IDE.
+    /// Args: sessionId, IDE entry, file full path.
+    /// </summary>
+    internal event Action<string, IdeEntry, string>? OnOpenInIdeFile;
+
+    /// <summary>
     /// Callback to determine git-root visibility for context menu.
     /// Returns (hasGitRoot, isSubfolder).
     /// </summary>
@@ -96,6 +102,12 @@ internal class ExistingSessionsVisuals
     /// Callback to determine if a session has an open Edge workspace.
     /// </summary>
     internal Func<string, bool>? IsEdgeOpen;
+
+    /// <summary>
+    /// Callback to get a session's CWD and optional git root path.
+    /// Returns (cwd, gitRoot) where gitRoot may be null.
+    /// </summary>
+    internal Func<string, (string? cwd, string? gitRoot)>? GetSessionPaths;
 
     internal ExistingSessionsVisuals(Control parentControl, ActiveStatusTracker activeTracker)
     {
@@ -554,29 +566,50 @@ internal class ExistingSessionsVisuals
             {
                 var capturedIde = ide;
                 var ideIcon = TryGetExeIcon(ide.Path);
+                var hasPattern = !string.IsNullOrWhiteSpace(ide.FilePattern);
 
-                var menuIdeCwd = new ToolStripMenuItem($"Open in {ide.Description} (CWD)") { Image = ideIcon };
-                menuIdeCwd.Click += (s, e) =>
+                if (hasPattern)
                 {
-                    var sid = this.GridVisuals.GetSelectedSessionId();
-                    if (sid != null)
-                    {
-                        this.OnOpenInIde?.Invoke(sid, capturedIde, false);
-                    }
-                };
-                gridContextMenu.Items.Add(menuIdeCwd);
+                    // Sub-menu: populated dynamically on Opening
+                    var menuIdeCwd = new ToolStripMenuItem($"Open in {ide.Description} (CWD)") { Image = ideIcon };
+                    gridContextMenu.Items.Add(menuIdeCwd);
 
-                var menuIdeRepo = new ToolStripMenuItem($"Open in {ide.Description} (Repo Root)") { Image = ideIcon?.Clone() as Image };
-                menuIdeRepo.Click += (s, e) =>
-                {
-                    var sid = this.GridVisuals.GetSelectedSessionId();
-                    if (sid != null)
+                    var menuIdeRepo = new ToolStripMenuItem($"Open in {ide.Description} (Repo Root)") { Image = ideIcon?.Clone() as Image };
+                    gridContextMenu.Items.Add(menuIdeRepo);
+                    ideRepoMenuItems.Add(menuIdeRepo);
+
+                    // Populate sub-menus on Opening
+                    gridContextMenu.Opening += (s, e) =>
                     {
-                        this.OnOpenInIde?.Invoke(sid, capturedIde, true);
-                    }
-                };
-                gridContextMenu.Items.Add(menuIdeRepo);
-                ideRepoMenuItems.Add(menuIdeRepo);
+                        this.PopulateIdeSubMenu(menuIdeCwd, capturedIde, false, ideIcon);
+                        this.PopulateIdeSubMenu(menuIdeRepo, capturedIde, true, ideIcon?.Clone() as Image);
+                    };
+                }
+                else
+                {
+                    var menuIdeCwd = new ToolStripMenuItem($"Open in {ide.Description} (CWD)") { Image = ideIcon };
+                    menuIdeCwd.Click += (s, e) =>
+                    {
+                        var sid = this.GridVisuals.GetSelectedSessionId();
+                        if (sid != null)
+                        {
+                            this.OnOpenInIde?.Invoke(sid, capturedIde, false);
+                        }
+                    };
+                    gridContextMenu.Items.Add(menuIdeCwd);
+
+                    var menuIdeRepo = new ToolStripMenuItem($"Open in {ide.Description} (Repo Root)") { Image = ideIcon?.Clone() as Image };
+                    menuIdeRepo.Click += (s, e) =>
+                    {
+                        var sid = this.GridVisuals.GetSelectedSessionId();
+                        if (sid != null)
+                        {
+                            this.OnOpenInIde?.Invoke(sid, capturedIde, true);
+                        }
+                    };
+                    gridContextMenu.Items.Add(menuIdeRepo);
+                    ideRepoMenuItems.Add(menuIdeRepo);
+                }
             }
         }
 
@@ -722,6 +755,47 @@ internal class ExistingSessionsVisuals
                 }
             }
         };
+    }
+
+    /// <summary>
+    /// Populates an IDE sub-menu with folder entry + matched files.
+    /// </summary>
+    private void PopulateIdeSubMenu(ToolStripMenuItem parentItem, IdeEntry ide, bool useRepoRoot, Image? icon)
+    {
+        parentItem.DropDownItems.Clear();
+
+        var sid = this.GridVisuals.GetSelectedSessionId();
+        if (sid == null || this.GetSessionPaths == null)
+        {
+            return;
+        }
+
+        var (cwd, gitRoot) = this.GetSessionPaths(sid);
+        var targetDir = useRepoRoot ? gitRoot : cwd;
+        if (string.IsNullOrEmpty(targetDir))
+        {
+            return;
+        }
+
+        // First item: open folder
+        var folderLabel = useRepoRoot ? "(Repo Root)" : "(CWD)";
+        var folderItem = new ToolStripMenuItem($"📁 {folderLabel}") { Image = icon?.Clone() as Image };
+        folderItem.Click += (s, e) => this.OnOpenInIde?.Invoke(sid, ide, useRepoRoot);
+        parentItem.DropDownItems.Add(folderItem);
+
+        // Search for matching files
+        var files = IdeFileSearchService.Search(targetDir, ide.FilePattern, Program._settings.IdeSearchIgnoredDirs);
+        if (files.Count > 0)
+        {
+            parentItem.DropDownItems.Add(new ToolStripSeparator());
+            foreach (var file in files)
+            {
+                var capturedFile = Path.Combine(targetDir, file);
+                var fileItem = new ToolStripMenuItem(file);
+                fileItem.Click += (s, e) => this.OnOpenInIdeFile?.Invoke(sid, ide, capturedFile);
+                parentItem.DropDownItems.Add(fileItem);
+            }
+        }
     }
 
     /// <summary>

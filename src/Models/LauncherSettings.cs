@@ -80,6 +80,21 @@ internal class LauncherSettings
     public string PinnedOrder { get; set; } = "created";
 
     /// <summary>
+    /// Gets or sets the list of directory names to skip during IDE file pattern search (non-git fallback).
+    /// </summary>
+    [JsonPropertyName("ideSearchIgnoredDirs")]
+    public List<string> IdeSearchIgnoredDirs { get; set; } =
+    [
+        ".git", ".vs", ".vscode", ".idea",
+        "node_modules", "bower_components",
+        "bin", "obj", "out", "build", "dist", "target",
+        "__pycache__", ".mypy_cache", ".pytest_cache", ".tox", ".venv", "venv", "env",
+        "vendor", "pkg",
+        "packages", "TestResults", "artifacts",
+        ".next", ".nuget", ".gradle", ".cargo"
+    ];
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).
@@ -200,8 +215,14 @@ internal class IdeEntry
     public string Description { get; set; } = "";
 
     /// <summary>
+    /// Gets or sets an optional file pattern for the IDE (e.g., "*.sln;*.slnx").
+    /// When set, the context menu shows matching files as a sub-menu.
+    /// </summary>
+    [JsonPropertyName("filePattern")]
+    public string FilePattern { get; set; } = "";
+
+    /// <summary>
     /// Returns a display string combining the description and path.
     /// </summary>
-    /// <returns>A formatted string representation of the IDE entry.</returns>
     public override string ToString() => string.IsNullOrEmpty(this.Description) ? this.Path : $"{this.Description}  —  {this.Path}";
 }

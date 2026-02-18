@@ -373,6 +373,28 @@ internal class MainForm : Form
             }
         };
 
+        this._sessionsVisuals.OnOpenInIdeFile += (sid, capturedIde, filePath) =>
+        {
+            var proc = SessionInteractionManager.OpenInIde(capturedIde.Path, filePath);
+            if (proc != null)
+            {
+                var dir = Path.GetDirectoryName(filePath) ?? filePath;
+                this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, dir));
+                this.RefreshActiveStatusAsync();
+            }
+        };
+
+        this._sessionsVisuals.GetSessionPaths = (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            if (session == null || string.IsNullOrEmpty(session.Cwd))
+            {
+                return (null, null);
+            }
+
+            return (session.Cwd, SessionService.FindGitRoot(session.Cwd));
+        };
+
         this._sessionsVisuals.OnOpenEdge += async (sid) =>
         {
             if (this._activeTracker.TryGetEdge(sid, out var existing) && existing.IsOpen)
@@ -639,12 +661,14 @@ internal class MainForm : Form
             MultiSelect = false,
             GridLines = !Application.IsDarkModeEnabled
         };
-        idesList.Columns.Add("Description", 200);
-        idesList.Columns.Add("Path", 400);
+        idesList.Columns.Add("Description", 150);
+        idesList.Columns.Add("Path", 300);
+        idesList.Columns.Add("File Pattern", 120);
         foreach (var ide in Program._settings.Ides)
         {
             var item = new ListViewItem(ide.Description);
             item.SubItems.Add(ide.Path);
+            item.SubItems.Add(ide.FilePattern);
             idesList.Items.Add(item);
         }
         SettingsVisuals.ApplyThemedSelection(idesList);
@@ -818,7 +842,12 @@ internal class MainForm : Form
             Program._settings.Ides = [];
             foreach (ListViewItem item in idesList.Items)
             {
-                Program._settings.Ides.Add(new IdeEntry { Description = item.Text, Path = item.SubItems[1].Text });
+                Program._settings.Ides.Add(new IdeEntry
+                {
+                    Description = item.Text,
+                    Path = item.SubItems[1].Text,
+                    FilePattern = item.SubItems.Count > 2 ? item.SubItems[2].Text : ""
+                });
             }
 
             Program._settings.NotifyOnBell = notifyOnBellCheck.Checked;

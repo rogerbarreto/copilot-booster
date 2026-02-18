@@ -179,6 +179,7 @@ internal static class SettingsVisuals
             {
                 var item = new ListViewItem(result.Value.desc);
                 item.SubItems.Add(result.Value.path);
+                item.SubItems.Add(result.Value.filePattern);
                 idesList.Items.Add(item);
                 item.Selected = true;
                 idesList.Focus();
@@ -194,11 +195,20 @@ internal static class SettingsVisuals
             }
 
             var sel = idesList.SelectedItems[0];
-            var result = PromptIdeEntry("Edit IDE", sel.SubItems[1].Text, sel.Text);
+            var currentPattern = sel.SubItems.Count > 2 ? sel.SubItems[2].Text : "";
+            var result = PromptIdeEntry("Edit IDE", sel.SubItems[1].Text, sel.Text, currentPattern);
             if (result != null)
             {
                 sel.Text = result.Value.desc;
                 sel.SubItems[1].Text = result.Value.path;
+                if (sel.SubItems.Count > 2)
+                {
+                    sel.SubItems[2].Text = result.Value.filePattern;
+                }
+                else
+                {
+                    sel.SubItems.Add(result.Value.filePattern);
+                }
             }
             idesList.Focus();
         };
@@ -230,13 +240,13 @@ internal static class SettingsVisuals
     /// <param name="defaultPath">The default executable path.</param>
     /// <param name="defaultDesc">The default description.</param>
     /// <returns>A tuple of (path, desc), or <c>null</c> if the user cancelled.</returns>
-    internal static (string path, string desc)? PromptIdeEntry(string title, string defaultPath, string defaultDesc)
+    internal static (string path, string desc, string filePattern)? PromptIdeEntry(string title, string defaultPath, string defaultDesc, string defaultPattern = "")
     {
         var form = new Form
         {
             Text = title,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            Size = new Size(500, 190),
+            Size = new Size(500, 240),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
@@ -263,16 +273,19 @@ internal static class SettingsVisuals
             }
         };
 
-        var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(310, 118), Width = 75 };
-        var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(392, 118), Width = 75 };
+        var lblPattern = new Label { Text = "File pattern (e.g., *.sln;*.slnx):", Location = new Point(12, 115), AutoSize = true };
+        var txtPattern = new TextBox { Text = defaultPattern, Location = new Point(12, 135), Width = 455 };
 
-        form.Controls.AddRange([lblDesc, WrapWithBorder(txtDesc), lblPath, WrapWithBorder(txtPath), btnBrowse, btnOk, btnCancel]);
+        var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(310, 168), Width = 75 };
+        var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(392, 168), Width = 75 };
+
+        form.Controls.AddRange([lblDesc, WrapWithBorder(txtDesc), lblPath, WrapWithBorder(txtPath), btnBrowse, lblPattern, WrapWithBorder(txtPattern), btnOk, btnCancel]);
         form.AcceptButton = btnOk;
         form.CancelButton = btnCancel;
 
         if (form.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(txtPath.Text))
         {
-            return (txtPath.Text, txtDesc.Text);
+            return (txtPath.Text, txtDesc.Text, txtPattern.Text.Trim());
         }
 
         return null;
