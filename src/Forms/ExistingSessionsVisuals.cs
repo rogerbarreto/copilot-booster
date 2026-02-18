@@ -509,7 +509,7 @@ internal class ExistingSessionsVisuals
 
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var menuOpenFilesFolder = new ToolStripMenuItem("Open Artifacts");
+        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files");
         menuOpenFilesFolder.ToolTipText = "Open artifacts folder dedicated to this session";
         menuOpenFilesFolder.Click += (s, e) =>
         {
