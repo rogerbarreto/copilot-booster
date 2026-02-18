@@ -241,6 +241,12 @@ internal class EventsJournalService : IDisposable
     /// </summary>
     private static SessionStatus DetermineStatusFromFile(string path, DateTime lastWriteUtc)
     {
+        // Stale files — session hasn't been active recently, skip entirely
+        if (DateTime.UtcNow - lastWriteUtc > s_stalenessThreshold)
+        {
+            return SessionStatus.Unknown;
+        }
+
         string? lastLine = ReadLastLine(path);
         if (lastLine == null)
         {
@@ -375,11 +381,16 @@ internal class EventsJournalService : IDisposable
             var entries = JsonSerializer.Deserialize<Dictionary<string, CachedState>>(File.ReadAllText(s_cacheFile));
             if (entries != null)
             {
+                var now = DateTime.UtcNow;
                 lock (this._cacheLock)
                 {
                     foreach (var kvp in entries)
                     {
-                        this._cache[kvp.Key] = kvp.Value;
+                        // Discard stale cached entries — prevents false bells on restart
+                        if (now - kvp.Value.LastModifiedUtc <= s_stalenessThreshold)
+                        {
+                            this._cache[kvp.Key] = kvp.Value;
+                        }
                     }
                 }
             }
