@@ -306,7 +306,7 @@ internal partial class EdgeWorkspaceService
     /// Resolves the Edge executable path from the Windows registry App Paths,
     /// falling back to common install locations.
     /// </summary>
-    private static string? FindEdgePath()
+    internal static string? FindEdgePath()
     {
         try
         {
