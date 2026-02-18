@@ -1192,11 +1192,12 @@ internal class MainForm : Form
 
         var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
-        // Seed startup sessions — suppress bell until they transition to working first
-        var bellOrWorkingIds = snapshot.StatusIconBySessionId
-            .Where(kvp => kvp.Value is "bell" or "working")
+        // Seed startup sessions — suppress bell for working sessions only
+        // Bell sessions should remain visible so user sees them after app restart
+        var workingIds = snapshot.StatusIconBySessionId
+            .Where(kvp => kvp.Value is "working")
             .Select(kvp => kvp.Key);
-        this._activeTracker.InitStartedSessions(bellOrWorkingIds);
+        this._activeTracker.InitStartedSessions(workingIds);
         this._bellService?.SeedStartupSessions(
             snapshot.StatusIconBySessionId
                 .Where(kvp => kvp.Value == "bell")
