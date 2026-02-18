@@ -30,6 +30,7 @@ internal class ActiveStatusTracker
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<(string Label, IntPtr Hwnd)>> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
+    internal readonly EventsJournalService EventsJournal = new();
     private bool _handleCacheInitialLoadDone;
 
     private static readonly HashSet<string> s_ignoredSummaries = new(StringComparer.OrdinalIgnoreCase)
@@ -45,11 +46,27 @@ internal class ActiveStatusTracker
     /// <summary>
     /// Seeds sessions present at startup. These will output "" instead of "bell"
     /// until they transition to working first, preventing false bell notifications on app launch.
-    /// Only Copilot CLI sessions should be passed here.
     /// </summary>
     internal void InitStartedSessions(IEnumerable<string> copilotCliSessionIds)
     {
         this._startedSessionIds.UnionWith(copilotCliSessionIds);
+    }
+
+    /// <summary>
+    /// Marks a session as having transitioned to working (clears startup suppression).
+    /// </summary>
+    internal void MarkSessionWorking(string sessionId)
+    {
+        this._startedSessionIds.Remove(sessionId);
+    }
+
+    /// <summary>
+    /// Returns true if this session is still in startup-suppression (hasn't worked yet).
+    /// If true, idle status should show "" instead of "bell".
+    /// </summary>
+    internal bool IsStartupSuppressed(string sessionId)
+    {
+        return this._startedSessionIds.Contains(sessionId);
     }
 
     internal HashSet<string> LoadActiveSessionIds()
@@ -584,35 +601,25 @@ internal class ActiveStatusTracker
             }
         }
 
-        // Detect working/bell status from Copilot CLI window title prefix.
-        // When Copilot CLI is working, it prefixes the title with an emoji (e.g. 🤖).
-        // When it's idle/waiting for input, the title is just the session name (no emoji).
-        // Sessions present at startup are suppressed (empty status) until they transition
-        // to working first, preventing false bell notifications on app launch.
+        // Status icons from events.jsonl — read from cache only (watcher updates async).
+        // Fallback poll runs only on watcher errors, rate-limited to 1/30s.
+        this.EventsJournal.ProcessFallbackPoll(sessions.Select(s => s.Id).ToList());
         var statusIconBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in this._activeTrackedWindows)
+        foreach (var session in sessions)
         {
-            foreach (var (label, title, _) in kvp.Value)
+            var status = this.EventsJournal.GetCachedStatus(session.Id);
+            switch (status)
             {
-                if (!label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                var stripped = WindowFocusService.StripLeadingEmoji(title);
-                if (stripped != title)
-                {
-                    // Has emoji prefix — session is working
-                    this._startedSessionIds.Remove(kvp.Key);
-                    statusIconBySessionId[kvp.Key] = "working";
-                }
-                else
-                {
-                    // No emoji prefix — session is idle/waiting for input
-                    statusIconBySessionId[kvp.Key] = this._startedSessionIds.Contains(kvp.Key) ? "" : "bell";
-                }
-
-                break;
+                case EventsJournalService.SessionStatus.Working:
+                    statusIconBySessionId[session.Id] = "working";
+                    break;
+                case EventsJournalService.SessionStatus.Idle:
+                    statusIconBySessionId[session.Id] = this._startedSessionIds.Contains(session.Id) ? "" : "bell";
+                    break;
+                case EventsJournalService.SessionStatus.IdleSilent:
+                    // Silent idle — no bell, just clear the working state
+                    statusIconBySessionId[session.Id] = "";
+                    break;
             }
         }
 

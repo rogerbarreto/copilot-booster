@@ -40,7 +40,7 @@ internal class MainForm : Form
 
     // Update banner
     private LinkLabel _updateLabel = null!;
-    private ToastPanel _toast = null!;
+    private readonly ToastPanel _toast = null!;
 
     // System tray
     private NotifyIcon? _trayIcon;
@@ -60,6 +60,9 @@ internal class MainForm : Form
         this.InitializeFormProperties();
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
+        this._activeTracker.EventsJournal.LoadCache();
+        this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
+        this._activeTracker.EventsJournal.StartWatching();
 
         this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
@@ -185,6 +188,9 @@ internal class MainForm : Form
             this._trayIcon.Dispose();
             this._trayIcon = null;
         }
+
+        this._activeTracker.EventsJournal.SaveCache();
+        this._activeTracker.EventsJournal.Dispose();
 
         base.OnFormClosing(e);
     }
@@ -1130,22 +1136,73 @@ internal class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// Called from the FileSystemWatcher thread when events.jsonl changes.
+    /// Marshals to UI thread and updates just the affected session's row.
+    /// </summary>
+    private void OnEventsStatusChanged(string sessionId, EventsJournalService.SessionStatus status)
+    {
+        string statusIcon;
+        switch (status)
+        {
+            case EventsJournalService.SessionStatus.Working:
+                this._activeTracker.MarkSessionWorking(sessionId);
+                statusIcon = "working";
+                break;
+            case EventsJournalService.SessionStatus.Idle:
+                statusIcon = this._activeTracker.IsStartupSuppressed(sessionId) ? "" : "bell";
+                break;
+            case EventsJournalService.SessionStatus.IdleSilent:
+                statusIcon = "";
+                break;
+            default:
+                return;
+        }
+
+        if (this.IsHandleCreated)
+        {
+            this.BeginInvoke(() =>
+            {
+                this._sessionsVisuals.GridVisuals.UpdateSessionStatus(sessionId, statusIcon);
+
+                if (statusIcon == "bell" && this._bellService != null)
+                {
+                    var sessionName = this._cachedSessions?
+                        .FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase))?.Summary
+                        ?? "Copilot CLI";
+                    this._bellService.NotifySingle(sessionId, sessionName);
+                }
+            });
+        }
+    }
+
     private async Task LoadInitialDataAsync()
     {
         var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
         this._cachedSessions = sessions;
         this.ApplySessionStates(this._cachedSessions);
+
+        // Prime events.jsonl cache for all sessions (initial disk read)
+        await Task.Run(() => this._activeTracker.EventsJournal.PrimeCache(
+            sessions.Select(s => s.Id).ToList())).ConfigureAwait(true);
+
         var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
-        // Seed startup Copilot CLI sessions — suppress bell until they transition to working
-        var copilotCliSessionIds = snapshot.StatusIconBySessionId
-            .Where(kvp => kvp.Value == "bell")
+        // Seed startup sessions — suppress bell until they transition to working first
+        var bellOrWorkingIds = snapshot.StatusIconBySessionId
+            .Where(kvp => kvp.Value is "bell" or "working")
             .Select(kvp => kvp.Key);
-        this._activeTracker.InitStartedSessions(copilotCliSessionIds);
-        this._bellService?.SeedStartupSessions(copilotCliSessionIds);
+        this._activeTracker.InitStartedSessions(bellOrWorkingIds);
+        this._bellService?.SeedStartupSessions(
+            snapshot.StatusIconBySessionId
+                .Where(kvp => kvp.Value == "bell")
+                .Select(kvp => kvp.Key));
 
         // Re-run refresh with started sessions seeded (bells now suppressed)
         snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+
+        // Now enable watcher events — startup seeding is complete
+        this._activeTracker.EventsJournal.SuppressEvents = false;
 
         // Sort active sessions to the top on initial load, pinned first
         var activeIds = new HashSet<string>(snapshot.ActiveTextBySessionId.Keys, StringComparer.OrdinalIgnoreCase);

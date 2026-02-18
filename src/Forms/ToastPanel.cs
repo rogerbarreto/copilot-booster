@@ -1,5 +1,4 @@
-﻿using System;
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -13,7 +12,7 @@ namespace CopilotBooster.Forms;
 internal sealed class ToastPanel : Panel
 {
     private readonly Label _label;
-    private readonly System.Windows.Forms.Timer _dismissTimer;
+    private readonly Timer _dismissTimer;
 
     private ToastPanel()
     {
@@ -25,19 +24,19 @@ internal sealed class ToastPanel : Panel
             ? Color.FromArgb(40, 80, 40)
             : Color.FromArgb(220, 245, 220);
 
-        _label = new Label
+        this._label = new Label
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Application.IsDarkModeEnabled ? Color.White : Color.Black,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 9.5f)
         };
-        this.Controls.Add(_label);
+        this.Controls.Add(this._label);
 
-        _dismissTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        _dismissTimer.Tick += (s, e) =>
+        this._dismissTimer = new Timer { Interval = 3000 };
+        this._dismissTimer.Tick += (s, e) =>
         {
-            _dismissTimer.Stop();
+            this._dismissTimer.Stop();
             this.Visible = false;
         };
     }
@@ -47,12 +46,12 @@ internal sealed class ToastPanel : Panel
     /// </summary>
     internal void Show(string message, int durationMs = 3000)
     {
-        _dismissTimer.Stop();
-        _label.Text = message;
-        _dismissTimer.Interval = durationMs;
+        this._dismissTimer.Stop();
+        this._label.Text = message;
+        this._dismissTimer.Interval = durationMs;
         this.Visible = true;
         this.BringToFront();
-        _dismissTimer.Start();
+        this._dismissTimer.Start();
     }
 
     /// <summary>

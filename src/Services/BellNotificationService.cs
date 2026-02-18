@@ -75,4 +75,33 @@ internal sealed class BellNotificationService
             }
         }
     }
+
+    /// <summary>
+    /// Notifies for a single session entering bell state (called from watcher event handler).
+    /// </summary>
+    internal void NotifySingle(string sessionId, string sessionName)
+    {
+        if (!this._isEnabled())
+        {
+            return;
+        }
+
+        if (this._notifiedBellSessionIds.Add(sessionId))
+        {
+            this.LastNotifiedSessionId = sessionId;
+            this._trayIcon.ShowBalloonTip(
+                5000,
+                "Session Ready",
+                $"\U0001F514 {sessionName}",
+                ToolTipIcon.Info);
+        }
+    }
+
+    /// <summary>
+    /// Clears the bell-notified state for a session that transitioned back to working.
+    /// </summary>
+    internal void ClearNotified(string sessionId)
+    {
+        this._notifiedBellSessionIds.Remove(sessionId);
+    }
 }

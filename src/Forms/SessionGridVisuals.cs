@@ -518,4 +518,38 @@ internal class SessionGridVisuals
         this._spinnerFrameIndex = (this._spinnerFrameIndex + 1) % 8;
         this._grid.InvalidateColumn(0);
     }
+
+    /// <summary>
+    /// Updates the status icon for a single session row by session ID.
+    /// Called from the FileSystemWatcher event handler (must be on UI thread).
+    /// </summary>
+    internal void UpdateSessionStatus(string sessionId, string statusIcon)
+    {
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is string id && string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                row.Cells[0].Value = statusIcon;
+                var activeText = row.Cells[4].Value?.ToString() ?? "";
+
+                if (statusIcon == "bell")
+                {
+                    row.DefaultCellStyle.BackColor = BellRowColor;
+                    row.DefaultCellStyle.ForeColor = Color.Empty;
+                }
+                else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
+                {
+                    row.DefaultCellStyle.BackColor = ActiveRowColor;
+                    row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
+                }
+                else
+                {
+                    row.DefaultCellStyle.BackColor = Color.Empty;
+                    row.DefaultCellStyle.ForeColor = Color.Empty;
+                }
+
+                break;
+            }
+        }
+    }
 }
