@@ -69,9 +69,9 @@ internal sealed class BellNotificationService
                 this.LastNotifiedSessionId = bellId;
                 this._trayIcon.ShowBalloonTip(
                     5000,
-                    "Session Ready",
-                    $"\U0001F514 {sessionName}",
-                    ToolTipIcon.Info);
+                    $"🔔 Session Ready",
+                    sessionName,
+                    ToolTipIcon.None);
             }
         }
     }
@@ -91,9 +91,9 @@ internal sealed class BellNotificationService
             this.LastNotifiedSessionId = sessionId;
             this._trayIcon.ShowBalloonTip(
                 5000,
-                "Session Ready",
-                $"\U0001F514 {sessionName}",
-                ToolTipIcon.Info);
+                $"🔔 Session Ready",
+                sessionName,
+                ToolTipIcon.None);
         }
     }
 
