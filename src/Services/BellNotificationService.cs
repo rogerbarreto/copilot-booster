@@ -89,10 +89,11 @@ internal sealed class BellNotificationService
         if (this._notifiedBellSessionIds.Add(sessionId))
         {
             this.LastNotifiedSessionId = sessionId;
+            var tipText = string.IsNullOrWhiteSpace(sessionName) ? sessionId : sessionName;
             this._trayIcon.ShowBalloonTip(
                 5000,
                 $"🔔 Session Ready",
-                sessionName,
+                tipText,
                 ToolTipIcon.None);
         }
     }
