@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
@@ -174,7 +173,7 @@ internal class ExistingSessionsVisuals
             BorderStyle = BorderStyle.None,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
             CellBorderStyle = DataGridViewCellBorderStyle.Single,
-            GridColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlLight,
+            GridColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark,
             DefaultCellStyle = new DataGridViewCellStyle
             {
                 WrapMode = DataGridViewTriState.True,
@@ -545,7 +544,6 @@ internal class ExistingSessionsVisuals
         gridContextMenu.Items.Add(menuOpenTerminal);
 
         // --- Explorer & IDEs ---
-        var ideRepoMenuItems = new List<ToolStripMenuItem>();
 
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
@@ -566,50 +564,11 @@ internal class ExistingSessionsVisuals
             {
                 var capturedIde = ide;
                 var ideIcon = TryGetExeIcon(ide.Path);
-                var hasPattern = !string.IsNullOrWhiteSpace(ide.FilePattern);
 
-                if (hasPattern)
-                {
-                    // Sub-menu: populated dynamically on Opening
-                    var menuIdeCwd = new ToolStripMenuItem($"Open in {ide.Description} (CWD)") { Image = ideIcon };
-                    gridContextMenu.Items.Add(menuIdeCwd);
-
-                    var menuIdeRepo = new ToolStripMenuItem($"Open in {ide.Description} (Repo Root)") { Image = ideIcon?.Clone() as Image };
-                    gridContextMenu.Items.Add(menuIdeRepo);
-                    ideRepoMenuItems.Add(menuIdeRepo);
-
-                    // Populate sub-menus on Opening
-                    gridContextMenu.Opening += (s, e) =>
-                    {
-                        this.PopulateIdeSubMenu(menuIdeCwd, capturedIde, false, ideIcon);
-                        this.PopulateIdeSubMenu(menuIdeRepo, capturedIde, true, ideIcon?.Clone() as Image);
-                    };
-                }
-                else
-                {
-                    var menuIdeCwd = new ToolStripMenuItem($"Open in {ide.Description} (CWD)") { Image = ideIcon };
-                    menuIdeCwd.Click += (s, e) =>
-                    {
-                        var sid = this.GridVisuals.GetSelectedSessionId();
-                        if (sid != null)
-                        {
-                            this.OnOpenInIde?.Invoke(sid, capturedIde, false);
-                        }
-                    };
-                    gridContextMenu.Items.Add(menuIdeCwd);
-
-                    var menuIdeRepo = new ToolStripMenuItem($"Open in {ide.Description} (Repo Root)") { Image = ideIcon?.Clone() as Image };
-                    menuIdeRepo.Click += (s, e) =>
-                    {
-                        var sid = this.GridVisuals.GetSelectedSessionId();
-                        if (sid != null)
-                        {
-                            this.OnOpenInIde?.Invoke(sid, capturedIde, true);
-                        }
-                    };
-                    gridContextMenu.Items.Add(menuIdeRepo);
-                    ideRepoMenuItems.Add(menuIdeRepo);
-                }
+                var menuIde = new ToolStripMenuItem($"Open in {ide.Description}") { Image = ideIcon };
+                menuIde.DropDownItems.Add(new ToolStripMenuItem("Loading...") { Enabled = false });
+                menuIde.DropDownOpening += (s, e) => this.PopulateIdeUnifiedSubMenu(menuIde, capturedIde, ideIcon);
+                gridContextMenu.Items.Add(menuIde);
             }
         }
 
@@ -684,15 +643,11 @@ internal class ExistingSessionsVisuals
             menuOpenFilesFolder.Enabled = !isMultiSelect;
             menuOpenPlan.Enabled = !isMultiSelect;
             menuDeleteSession.Enabled = !isMultiSelect;
-            foreach (var item in ideRepoMenuItems)
-            {
-                item.Enabled = !isMultiSelect;
-            }
 
-            // IDE CWD items — disable in multi-select
+            // IDE items — disable in multi-select
             foreach (ToolStripItem item in gridContextMenu.Items)
             {
-                if (item is ToolStripMenuItem mi && mi.Text is string text && text.StartsWith("Open in ") && text.EndsWith("(CWD)") && mi != menuOpenCwdExplorer)
+                if (item is ToolStripMenuItem mi && mi.Text is string text && text.StartsWith("Open in ") && mi != menuOpenCwdExplorer)
                 {
                     mi.Enabled = !isMultiSelect;
                 }
@@ -707,10 +662,6 @@ internal class ExistingSessionsVisuals
                 (hasGitRoot, isSubfolder) = this.GetGitRootInfo(sessionId);
             }
             menuOpenNewSessionWorkspace.Visible = !isMultiSelect && hasGitRoot;
-            foreach (var item in ideRepoMenuItems)
-            {
-                item.Visible = !isMultiSelect || isSubfolder;
-            }
 
             // Plan visibility
             bool hasPlan = !isMultiSelect && sessionId != null && this.HasPlanFile != null && this.HasPlanFile(sessionId);
@@ -758,9 +709,10 @@ internal class ExistingSessionsVisuals
     }
 
     /// <summary>
-    /// Populates an IDE sub-menu with folder entry + matched files.
+    /// Populates a unified IDE sub-menu with CWD/Repo Root folders and matched files.
+    /// When CWD and Repo Root are the same, shows a single "(CWD / Repo Root)" entry.
     /// </summary>
-    private void PopulateIdeSubMenu(ToolStripMenuItem parentItem, IdeEntry ide, bool useRepoRoot, Image? icon)
+    private void PopulateIdeUnifiedSubMenu(ToolStripMenuItem parentItem, IdeEntry ide, Image? icon)
     {
         parentItem.DropDownItems.Clear();
 
@@ -771,27 +723,51 @@ internal class ExistingSessionsVisuals
         }
 
         var (cwd, gitRoot) = this.GetSessionPaths(sid);
-        var targetDir = useRepoRoot ? gitRoot : cwd;
-        if (string.IsNullOrEmpty(targetDir))
+        if (string.IsNullOrEmpty(cwd))
         {
             return;
         }
 
-        // First item: open folder
-        var folderLabel = useRepoRoot ? "(Repo Root)" : "(CWD)";
-        var folderItem = new ToolStripMenuItem($"📁 {folderLabel}") { Image = icon?.Clone() as Image };
-        folderItem.Click += (s, e) => this.OnOpenInIde?.Invoke(sid, ide, useRepoRoot);
-        parentItem.DropDownItems.Add(folderItem);
+        bool sameRoot = !string.IsNullOrEmpty(gitRoot) &&
+            string.Equals(Path.GetFullPath(cwd!), Path.GetFullPath(gitRoot!), StringComparison.OrdinalIgnoreCase);
 
-        // Search for matching files
-        var files = IdeFileSearchService.Search(targetDir, ide.FilePattern, Program._settings.IdeSearchIgnoredDirs);
+        if (sameRoot || string.IsNullOrEmpty(gitRoot))
+        {
+            var label = sameRoot ? "📁 (CWD / Repo Root)" : "📁 (CWD)";
+            var folderItem = new ToolStripMenuItem(label) { Image = icon?.Clone() as Image };
+            folderItem.Click += (s, e) => this.OnOpenInIde?.Invoke(sid, ide, false);
+            parentItem.DropDownItems.Add(folderItem);
+
+            this.AddFileSearchResults(parentItem, ide, cwd!, sid, icon);
+        }
+        else
+        {
+            var cwdItem = new ToolStripMenuItem("📁 (CWD)") { Image = icon?.Clone() as Image };
+            cwdItem.Click += (s, e) => this.OnOpenInIde?.Invoke(sid, ide, false);
+            parentItem.DropDownItems.Add(cwdItem);
+
+            this.AddFileSearchResults(parentItem, ide, cwd!, sid, icon);
+
+            parentItem.DropDownItems.Add(new ToolStripSeparator());
+
+            var repoItem = new ToolStripMenuItem("📁 (Repo Root)") { Image = icon?.Clone() as Image };
+            repoItem.Click += (s, e) => this.OnOpenInIde?.Invoke(sid, ide, true);
+            parentItem.DropDownItems.Add(repoItem);
+
+            this.AddFileSearchResults(parentItem, ide, gitRoot!, sid, icon);
+        }
+    }
+
+    private void AddFileSearchResults(ToolStripMenuItem parentItem, IdeEntry ide, string directory, string sid, Image? icon)
+    {
+        var files = IdeFileSearchService.Search(directory, ide.FilePattern, Program._settings.IdeSearchIgnoredDirs);
         if (files.Count > 0)
         {
             parentItem.DropDownItems.Add(new ToolStripSeparator());
             foreach (var file in files)
             {
-                var capturedFile = Path.Combine(targetDir, file);
-                var fileItem = new ToolStripMenuItem(file);
+                var capturedFile = Path.Combine(directory, file);
+                var fileItem = new ToolStripMenuItem(file) { Image = icon?.Clone() as Image };
                 fileItem.Click += (s, e) => this.OnOpenInIdeFile?.Invoke(sid, ide, capturedFile);
                 parentItem.DropDownItems.Add(fileItem);
             }

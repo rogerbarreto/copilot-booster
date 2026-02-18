@@ -38,6 +38,23 @@ internal static class SettingsVisuals
     }
 
     /// <summary>
+    /// Applies an info label and tooltip to a settings tab page.
+    /// </summary>
+    internal static void ApplyTabInfo(TabPage tab, string infoText, string tooltip)
+    {
+        tab.ToolTipText = tooltip;
+        var label = new Label
+        {
+            Text = $"ℹ️ {infoText}",
+            Dock = DockStyle.Top,
+            Height = 24,
+            Padding = new Padding(4, 4, 0, 0),
+            ForeColor = Application.IsDarkModeEnabled ? Color.FromArgb(100, 149, 237) : SystemColors.GrayText
+        };
+        tab.Controls.Add(label);
+    }
+
+    /// <summary>
     /// Creates a panel with Add, Edit, and Remove buttons for a <see cref="ListBox"/>.
     /// </summary>
     /// <param name="listBox">The list box to manage.</param>
@@ -367,12 +384,44 @@ internal static class SettingsVisuals
     internal static void ApplyThemedSelection(ListView listView)
     {
         listView.OwnerDraw = true;
+
+        // Track hot (hovered) item index for hover highlight
+        int hotIndex = -1;
+        listView.MouseMove += (s, e) =>
+        {
+            var hit = listView.HitTest(e.Location);
+            var newHot = hit.Item?.Index ?? -1;
+            if (newHot != hotIndex)
+            {
+                var oldHot = hotIndex;
+                hotIndex = newHot;
+                if (oldHot >= 0 && oldHot < listView.Items.Count)
+                {
+                    listView.Invalidate(listView.Items[oldHot].Bounds);
+                }
+
+                if (hotIndex >= 0)
+                {
+                    listView.Invalidate(listView.Items[hotIndex].Bounds);
+                }
+            }
+        };
+        listView.MouseLeave += (s, e) =>
+        {
+            if (hotIndex >= 0 && hotIndex < listView.Items.Count)
+            {
+                var old = hotIndex;
+                hotIndex = -1;
+                listView.Invalidate(listView.Items[old].Bounds);
+            }
+        };
+
         listView.DrawColumnHeader += (s, e) =>
         {
             var headerBack = Application.IsDarkModeEnabled ? Color.FromArgb(0x22, 0x22, 0x22) : Color.FromArgb(210, 210, 210);
             using var backBrush = new SolidBrush(headerBack);
             e.Graphics!.FillRectangle(backBrush, e.Bounds);
-            var fore = listView.ForeColor;
+            var fore = Application.IsDarkModeEnabled ? Color.White : SystemColors.ControlText;
             TextRenderer.DrawText(e.Graphics, e.Header?.Text ?? "", e.Font, e.Bounds, fore, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
 
             // Draw bottom border
@@ -384,21 +433,27 @@ internal static class SettingsVisuals
         };
         listView.DrawItem += (s, e) =>
         {
-            // Fill the entire row background including area beyond columns
-            using var brush = new SolidBrush(e.Item!.Selected
+            bool isHot = e.ItemIndex == hotIndex && !e.Item!.Selected;
+            Color back = e.Item!.Selected
                 ? (Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245))
-                : listView.BackColor);
+                : isHot
+                    ? (Application.IsDarkModeEnabled ? Color.FromArgb(0x1A, 0x1A, 0x1A) : Color.FromArgb(230, 240, 250))
+                    : listView.BackColor;
+            using var brush = new SolidBrush(back);
             e.Graphics!.FillRectangle(brush, e.Bounds);
         };
         listView.DrawSubItem += (s, e) =>
         {
             bool selected = e.Item!.Selected;
+            bool isHot = e.Item.Index == hotIndex && !selected;
             Color back = selected
                 ? (Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245))
-                : listView.BackColor;
-            Color fore = selected
-                ? (Application.IsDarkModeEnabled ? Color.White : Color.Black)
-                : listView.ForeColor;
+                : isHot
+                    ? (Application.IsDarkModeEnabled ? Color.FromArgb(0x1A, 0x1A, 0x1A) : Color.FromArgb(230, 240, 250))
+                    : listView.BackColor;
+            Color fore = Application.IsDarkModeEnabled
+                ? (selected ? Color.White : Color.LightGray)
+                : (selected ? Color.Black : SystemColors.ControlText);
 
             using var backBrush = new SolidBrush(back);
             e.Graphics!.FillRectangle(backBrush, e.Bounds);

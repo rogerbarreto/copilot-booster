@@ -611,7 +611,7 @@ internal class MainForm : Form
         };
 
         var settingsContainer = new Panel { Dock = DockStyle.Fill };
-        var settingsTabs = new TabControl { Dock = DockStyle.Fill };
+        var settingsTabs = new TabControl { Dock = DockStyle.Fill, ShowToolTips = true };
         if (!Application.IsDarkModeEnabled)
         {
             settingsTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
@@ -638,6 +638,7 @@ internal class MainForm : Form
         var toolsButtons = SettingsVisuals.CreateListButtons(toolsList, "Tool name:", "Add Tool", addBrowse: false);
         toolsTab.Controls.Add(toolsList);
         toolsTab.Controls.Add(toolsButtons);
+        SettingsVisuals.ApplyTabInfo(toolsTab, "CLI tools the Copilot session is allowed to use.", "CLI tools the Copilot session is allowed to use (e.g., git, npm, dotnet).");
 
         // Allowed Directories
         var dirsTab = new TabPage("Allowed Directories");
@@ -650,6 +651,7 @@ internal class MainForm : Form
         var dirsButtons = SettingsVisuals.CreateListButtons(dirsList, "Directory path:", "Add Directory", addBrowse: true);
         dirsTab.Controls.Add(dirsList);
         dirsTab.Controls.Add(dirsButtons);
+        SettingsVisuals.ApplyTabInfo(dirsTab, "Directories the Copilot session is allowed to access.", "Directories the Copilot session is allowed to access for file operations.");
 
         // IDEs
         var idesTab = new TabPage("IDEs");
@@ -675,10 +677,24 @@ internal class MainForm : Form
         var ideButtons = SettingsVisuals.CreateIdeButtons(idesList);
         idesTab.Controls.Add(idesList);
         idesTab.Controls.Add(ideButtons);
+        SettingsVisuals.ApplyTabInfo(idesTab, "IDEs for context menu. File pattern enables project file search (e.g., *.sln;*.slnx).", "IDEs available in the context menu. Set a file pattern to search for project files.");
 
         settingsTabs.TabPages.Add(toolsTab);
         settingsTabs.TabPages.Add(dirsTab);
         settingsTabs.TabPages.Add(idesTab);
+
+        // IDE Search Ignored Dirs tab
+        var ideSearchTab = new TabPage("IDE Search");
+        var ignoredDirsList = new ListBox { Dock = DockStyle.Fill, SelectionMode = SelectionMode.One };
+        foreach (var dir in Program._settings.IdeSearchIgnoredDirs)
+        {
+            ignoredDirsList.Items.Add(dir);
+        }
+        var ignoredDirsButtons = SettingsVisuals.CreateListButtons(ignoredDirsList, "Directory name to ignore:", "Add Ignored Directory", false);
+        ideSearchTab.Controls.Add(ignoredDirsList);
+        ideSearchTab.Controls.Add(ignoredDirsButtons);
+        SettingsVisuals.ApplyTabInfo(ideSearchTab, "Directory names excluded from IDE file pattern search.", "Directory names to skip when searching for project files (e.g., node_modules, bin, obj).");
+        settingsTabs.TabPages.Add(ideSearchTab);
 
         // Default Work Dir
         var workDirPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
@@ -853,6 +869,7 @@ internal class MainForm : Form
             Program._settings.NotifyOnBell = notifyOnBellCheck.Checked;
             Program._settings.AutoHideOnFocus = autoHideOnFocusCheck.Checked;
             Program._settings.AlwaysOnTop = alwaysOnTopCheck.Checked;
+            Program._settings.IdeSearchIgnoredDirs = ignoredDirsList.Items.Cast<string>().ToList();
             Program._settings.MaxActiveSessions = (int)maxSessionsBox.Value;
             Program._settings.PinnedOrder = pinnedOrderCombo.SelectedIndex == 1 ? "alias" : "created";
             this.TopMost = Program._settings.AlwaysOnTop;

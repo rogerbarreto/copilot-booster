@@ -25,11 +25,11 @@ internal class SessionGridVisuals
 
     private static Color BellRowColor => Application.IsDarkModeEnabled
         ? Color.FromArgb(90, 30, 30)
-        : Color.FromArgb(255, 238, 238);
+        : Color.FromArgb(255, 200, 200);
 
     private static Color BellRowSelectedColor => Application.IsDarkModeEnabled
         ? Color.FromArgb(120, 40, 40)
-        : Color.FromArgb(255, 210, 210);
+        : Color.FromArgb(240, 160, 160);
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
     private readonly Image[] _spinnerFrames;
