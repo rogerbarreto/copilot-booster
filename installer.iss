@@ -25,8 +25,8 @@ Source: "publish\session.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "publish\copilot.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Copilot Booster"; Filename: "{app}\CopilotBooster.exe"; IconFilename: "{app}\CopilotBooster.exe"
-Name: "{userdesktop}\Copilot Booster"; Filename: "{app}\CopilotBooster.exe"; IconFilename: "{app}\CopilotBooster.exe"; Tasks: desktopicon
+Name: "{group}\Copilot Booster"; Filename: "{app}\CopilotBooster.exe"; IconFilename: "{app}\CopilotBooster.exe"; AppUserModelID: "CopilotBooster"
+Name: "{userdesktop}\Copilot Booster"; Filename: "{app}\CopilotBooster.exe"; IconFilename: "{app}\CopilotBooster.exe"; Tasks: desktopicon; AppUserModelID: "CopilotBooster"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
