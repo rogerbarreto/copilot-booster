@@ -431,16 +431,24 @@ internal class Program
             ? $"Copilot CLI - {resumeSessionId}"
             : "Copilot CLI";
 
-        var psi = new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            Arguments = $"/c \"title {titlePrefix} && \"{CopilotExePath}\" {settingsArgs}\"",
-            WorkingDirectory = workDir,
-            UseShellExecute = true
-        };
+        var terminal = TerminalLauncherService.DetectTerminal();
+        var psi = terminal == "wt"
+            ? new ProcessStartInfo
+            {
+                FileName = "wt.exe",
+                Arguments = $"--title \"{titlePrefix}\" --suppressApplicationTitle -d \"{workDir}\" \"{CopilotExePath}\" {settingsArgs}",
+                UseShellExecute = true
+            }
+            : new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c \"title {titlePrefix} && \"{CopilotExePath}\" {settingsArgs}\"",
+                WorkingDirectory = workDir,
+                UseShellExecute = true
+            };
 
         s_copilotProcess = Process.Start(psi);
-        Logger.LogInformation("Started copilot with PID: {Pid}", s_copilotProcess?.Id);
+        Logger.LogInformation("Started copilot via {Terminal} with PID: {Pid}", terminal, s_copilotProcess?.Id);
 
         // Update jump list after session creation delay
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };

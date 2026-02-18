@@ -217,9 +217,14 @@ internal class EventsJournalService : IDisposable
             var lastWrite = File.GetLastWriteTimeUtc(eventsPath);
             var status = DetermineStatusFromFile(eventsPath, lastWrite);
 
-            lock (this._cacheLock)
+            // Only cache definitive statuses — Unknown means the last event
+            // was ambiguous (turn_end, tool.execution_complete), keep previous.
+            if (status != SessionStatus.Unknown)
             {
-                this._cache[sessionId] = new CachedState(lastWrite, status);
+                lock (this._cacheLock)
+                {
+                    this._cache[sessionId] = new CachedState(lastWrite, status);
+                }
             }
 
             return status;
