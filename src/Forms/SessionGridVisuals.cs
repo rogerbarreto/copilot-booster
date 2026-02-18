@@ -379,6 +379,7 @@ internal class SessionGridVisuals
             else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
             {
                 row.DefaultCellStyle.BackColor = ActiveRowColor;
+                row.DefaultCellStyle.SelectionBackColor = Color.Empty;
                 row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
             }
             else
@@ -549,6 +550,7 @@ internal class SessionGridVisuals
                 else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
                 {
                     row.DefaultCellStyle.BackColor = ActiveRowColor;
+                    row.DefaultCellStyle.SelectionBackColor = Color.Empty;
                     row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
                 }
                 else
