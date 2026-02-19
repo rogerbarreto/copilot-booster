@@ -80,6 +80,12 @@ internal class LauncherSettings
     public string PinnedOrder { get; set; } = "created";
 
     /// <summary>
+    /// Gets or sets whether renaming a session also updates the Edge anchor tab title.
+    /// </summary>
+    [JsonPropertyName("updateEdgeTabOnRename")]
+    public bool UpdateEdgeTabOnRename { get; set; }
+
+    /// <summary>
     /// Gets or sets the list of directory names to skip during IDE file pattern search (non-git fallback).
     /// </summary>
     [JsonPropertyName("ideSearchIgnoredDirs")]
@@ -180,12 +186,14 @@ internal class LauncherSettings
         var parts = new List<string>();
         foreach (var tool in this.AllowedTools)
         {
-            parts.Add($"\"--allow-tool={tool}\"");
+            parts.Add("--allow-tool");
+            parts.Add($"\"{tool}\"");
         }
 
         foreach (var dir in this.AllowedDirs)
         {
-            parts.Add($"\"--add-dir={dir}\"");
+            parts.Add("--add-dir");
+            parts.Add($"\"{dir}\"");
         }
 
         foreach (var arg in extraArgs)

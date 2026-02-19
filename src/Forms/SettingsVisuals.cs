@@ -263,7 +263,7 @@ internal static class SettingsVisuals
         {
             Text = title,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            Size = new Size(500, 240),
+            Size = new Size(500, 255),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
@@ -290,13 +290,23 @@ internal static class SettingsVisuals
             }
         };
 
-        var lblPattern = new Label { Text = "File pattern (e.g., *.sln;*.slnx):", Location = new Point(12, 115), AutoSize = true };
+        var lblPattern = new Label { Text = "File pattern (optional)", Location = new Point(12, 115), AutoSize = true };
+        var lblPatternInfo = new Label
+        {
+            Text = "ℹ️",
+            Location = new Point(lblPattern.PreferredWidth + 34, 113),
+            AutoSize = true,
+            Cursor = Cursors.Help,
+            Font = new Font("Segoe UI Emoji", lblPattern.Font.Size + 2)
+        };
+        var patternTooltip = new ToolTip { AutoPopDelay = 10000 };
+        patternTooltip.SetToolTip(lblPatternInfo, "Semicolon-separated file patterns (e.g., *.sln;*.slnx).\nWhen set, the IDE context menu will search for matching\nproject files in the session directory and let you open them directly.");
         var txtPattern = new TextBox { Text = defaultPattern, Location = new Point(12, 135), Width = 455 };
 
         var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(310, 168), Width = 75 };
         var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(392, 168), Width = 75 };
 
-        form.Controls.AddRange([lblDesc, WrapWithBorder(txtDesc), lblPath, WrapWithBorder(txtPath), btnBrowse, lblPattern, WrapWithBorder(txtPattern), btnOk, btnCancel]);
+        form.Controls.AddRange([lblDesc, WrapWithBorder(txtDesc), lblPath, WrapWithBorder(txtPath), btnBrowse, lblPattern, lblPatternInfo, WrapWithBorder(txtPattern), btnOk, btnCancel]);
         form.AcceptButton = btnOk;
         form.CancelButton = btnCancel;
 

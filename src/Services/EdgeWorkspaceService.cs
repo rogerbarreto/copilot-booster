@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
 using Microsoft.Extensions.Logging;
@@ -83,7 +84,7 @@ internal partial class EdgeWorkspaceService
     /// Waits up to <paramref name="timeoutMs"/> milliseconds for the tab to appear.
     /// </summary>
     /// <returns>True if the tab was detected; false on timeout.</returns>
-    internal async Task<bool> OpenAsync(string? sessionName = null, int timeoutMs = 10000)
+    internal async Task<bool> OpenAsync(string? sessionName = null, bool hasSavedTabs = false, int timeoutMs = 10000)
     {
         var sessionHtml = GetSessionHtmlPath();
         if (sessionHtml == null)
@@ -127,8 +128,9 @@ internal partial class EdgeWorkspaceService
         {
             if (this.IsOpen)
             {
-                // Open a new tab so the session anchor tab is not navigated away
-                if (this.CachedHwnd != IntPtr.Zero)
+                // Open a new tab so the session anchor tab is not navigated away,
+                // unless saved tabs will be restored (they serve the same purpose).
+                if (!hasSavedTabs && this.CachedHwnd != IntPtr.Zero)
                 {
                     WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
                     WindowFocusService.WaitForForeground(this.CachedHwnd);
@@ -145,41 +147,103 @@ internal partial class EdgeWorkspaceService
     }
 
     /// <summary>
-    /// Updates the session name displayed in the Edge tab by navigating to the updated hash URL.
-    /// The session.html hashchange listener updates the title and content live.
+    /// Updates the session name displayed in the Edge anchor tab by selecting it,
+    /// navigating to the updated hash URL (triggers the hashchange listener in session.html),
+    /// and then restoring the previously active tab.
     /// </summary>
     internal void UpdateSessionName(string? sessionName)
     {
         var sessionHtml = GetSessionHtmlPath();
-        if (sessionHtml == null || !this.IsOpen)
+        if (sessionHtml == null || !this.IsOpen || this.CachedHwnd == IntPtr.Zero)
         {
             return;
         }
 
-        var url = BuildSessionUrl(sessionHtml, this.WorkspaceId, sessionName);
-
         try
         {
-            var edgePath = FindEdgePath();
-            if (edgePath != null)
+            var window = AutomationElement.FromHandle(this.CachedHwnd);
+
+            // Find browser tabs using the anchor tab's SelectionContainer (same as GetTabUrls)
+            var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var allTabItems = window.FindAll(TreeScope.Descendants, tabCondition);
+
+            // Locate the anchor tab and its container
+            AutomationElement? anchorTab = null;
+            AutomationElement? browserContainer = null;
+            foreach (AutomationElement tab in allTabItems)
             {
-                Process.Start(new ProcessStartInfo
+                if (tab.Current.Name.Contains(TitlePrefix, StringComparison.OrdinalIgnoreCase)
+                    && tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                    && obj is SelectionItemPattern sp)
                 {
-                    FileName = edgePath,
-                    Arguments = $"\"{url}\"",
-                    UseShellExecute = false
-                });
+                    anchorTab = tab;
+                    browserContainer = sp.Current.SelectionContainer;
+                    break;
+                }
             }
-            else
+
+            if (anchorTab == null || browserContainer == null)
             {
-                Process.Start(new ProcessStartInfo
+                Program.Logger.LogDebug("Anchor tab not found for session name update");
+                return;
+            }
+
+            // Find the currently active browser tab
+            AutomationElement? activeTab = null;
+            foreach (AutomationElement tab in allTabItems)
+            {
+                if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                    && obj is SelectionItemPattern sp
+                    && Equals(sp.Current.SelectionContainer, browserContainer)
+                    && sp.Current.IsSelected)
                 {
-                    FileName = $"microsoft-edge:{url}",
-                    UseShellExecute = true
-                });
+                    activeTab = tab;
+                    break;
+                }
+            }
+
+            // Select the anchor tab
+            if (anchorTab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var anchorPatObj)
+                && anchorPatObj is SelectionItemPattern anchorPat)
+            {
+                anchorPat.Select();
+                WaitForTabSelected(anchorTab);
+            }
+
+            // Navigate to the updated hash URL via the address bar
+            var editCondition = new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                new PropertyCondition(AutomationElement.NameProperty, "Address and search bar"));
+            var addressBar = window.FindFirst(TreeScope.Descendants, editCondition);
+
+            if (addressBar != null
+                && addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var valObj)
+                && valObj is ValuePattern vp)
+            {
+                var url = BuildSessionUrl(sessionHtml, this.WorkspaceId, sessionName);
+                vp.SetValue(url);
+
+                // Press Enter to navigate
+                WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
+                System.Windows.Forms.SendKeys.SendWait("{ENTER}");
+            }
+
+            // Restore the previously active tab
+            if (activeTab != null && !Automation.Compare(activeTab, anchorTab))
+            {
+                Thread.Sleep(300); // Let the navigation complete
+                if (activeTab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var restoreObj)
+                    && restoreObj is SelectionItemPattern restorePat)
+                {
+                    restorePat.Select();
+                    WaitForTabSelected(activeTab);
+                }
             }
         }
-        catch (Exception ex) { Program.Logger.LogDebug("Failed to update Edge session name: {Error}", ex.Message); }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to update Edge session name via UIA: {Error}", ex.Message);
+        }
     }
 
     /// <summary>
@@ -425,6 +489,7 @@ internal partial class EdgeWorkspaceService
     internal List<string> GetTabUrls()
     {
         var urls = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (this.CachedHwnd == IntPtr.Zero || !IsWindow(this.CachedHwnd))
         {
             return urls;
@@ -433,8 +498,43 @@ internal partial class EdgeWorkspaceService
         try
         {
             var window = AutomationElement.FromHandle(this.CachedHwnd);
+
+            // Find browser tabs by using the CB Session anchor tab as a reference.
+            // All browser tabs share the same SelectionContainer, while HTML page tabs
+            // (e.g. GitHub PR "Conversation"/"Commits") belong to a different container.
             var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
-            var tabs = window.FindAll(TreeScope.Descendants, tabCondition);
+            var allTabItems = window.FindAll(TreeScope.Descendants, tabCondition);
+
+            // Identify the browser tab container via the anchor tab
+            AutomationElement? browserContainer = null;
+            foreach (AutomationElement tab in allTabItems)
+            {
+                if (tab.Current.Name.Contains(TitlePrefix, StringComparison.OrdinalIgnoreCase)
+                    && tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                    && obj is SelectionItemPattern anchorPat)
+                {
+                    browserContainer = anchorPat.Current.SelectionContainer;
+                    break;
+                }
+            }
+
+            if (browserContainer == null)
+            {
+                Program.Logger.LogDebug("Could not identify Edge browser tab container via anchor tab");
+                return urls;
+            }
+
+            // Collect only the TabItems that belong to the browser tab container
+            var tabs = new List<AutomationElement>();
+            foreach (AutomationElement tab in allTabItems)
+            {
+                if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                    && obj is SelectionItemPattern sp
+                    && Equals(sp.Current.SelectionContainer, browserContainer))
+                {
+                    tabs.Add(tab);
+                }
+            }
 
             // Find the address bar (Edit control with "Address and search bar" name)
             var editCondition = new AndCondition(
@@ -447,12 +547,17 @@ internal partial class EdgeWorkspaceService
                 return urls;
             }
 
-            // Remember the original tab's address bar URL to restore later
-            string? originalUrl = null;
-            if (addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var initVal)
-                && initVal is ValuePattern initVp)
+            // Remember the currently active tab to restore later
+            AutomationElement? originalTab = null;
+            foreach (AutomationElement tab in tabs)
             {
-                originalUrl = initVp.Current.Value;
+                if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selObj)
+                    && selObj is SelectionItemPattern selPat
+                    && selPat.Current.IsSelected)
+                {
+                    originalTab = tab;
+                    break;
+                }
             }
 
             foreach (AutomationElement tab in tabs)
@@ -479,6 +584,7 @@ internal partial class EdgeWorkspaceService
                     try
                     {
                         selPattern.Select();
+                        WaitForTabSelected(tab);
 
                         if (addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var valObj)
                             && valObj is ValuePattern vp)
@@ -491,7 +597,10 @@ internal partial class EdgeWorkspaceService
                                     url = "https://" + url;
                                 }
 
-                                urls.Add(url);
+                                if (seen.Add(url))
+                                {
+                                    urls.Add(url);
+                                }
                             }
                         }
                     }
@@ -502,26 +611,16 @@ internal partial class EdgeWorkspaceService
                 }
             }
 
-            // Restore the originally selected tab by finding the one whose address bar matches
-            if (originalUrl != null)
+            // Restore the originally selected tab
+            if (originalTab != null)
             {
                 try
                 {
-                    var freshTabs = window.FindAll(TreeScope.Descendants, tabCondition);
-                    foreach (AutomationElement tab in freshTabs)
+                    if (originalTab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var restoreObj)
+                        && restoreObj is SelectionItemPattern restorePattern)
                     {
-                        if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var restoreObj)
-                            && restoreObj is SelectionItemPattern restorePattern)
-                        {
-                            restorePattern.Select();
-
-                            if (addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out var valObj)
-                                && valObj is ValuePattern vp
-                                && string.Equals(vp.Current.Value, originalUrl, StringComparison.OrdinalIgnoreCase))
-                            {
-                                break;
-                            }
-                        }
+                        restorePattern.Select();
+                        WaitForTabSelected(originalTab);
                     }
                 }
                 catch (Exception ex)
@@ -537,6 +636,25 @@ internal partial class EdgeWorkspaceService
 
         Program.Logger.LogDebug("Read {Count} Edge tab URLs for workspace {Id}", urls.Count, this.WorkspaceId);
         return urls;
+    }
+
+    /// <summary>
+    /// Polls until the given tab reports IsSelected = true, or a timeout is reached.
+    /// </summary>
+    private static void WaitForTabSelected(AutomationElement tab, int timeoutMs = 1000)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                && obj is SelectionItemPattern pat
+                && pat.Current.IsSelected)
+            {
+                return;
+            }
+
+            Thread.Sleep(30);
+        }
     }
 
     /// <summary>

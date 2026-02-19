@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.1] - 2026-02-19
+
+### Fixed
+
+- **Edge tab traversal** — fixed tab save selecting in-page HTML elements (e.g., GitHub PR tabs) instead of browser tabs. Uses the anchor tab's `SelectionContainer` to identify real browser tabs.
+- **Tab switch waiting** — replaced fixed delays with polling `IsSelected` state for reliable tab switching.
+- **`--allow-tool` / `--add-dir` flags** — fixed argument format from `--allow-tool=X` to `--allow-tool X` so the Copilot CLI actually receives them.
+- **IDE settings live reload** — changing IDEs or file patterns in Settings now takes effect immediately without restarting.
+- **Session rename grid refresh** — renaming a session alias now always refreshes the grid, preventing archived items from appearing in the active list.
+- **Duplicate URL deduplication** — saving Edge tabs now deduplicates URLs (case-insensitive).
+
+### Added
+
+- **Edge tab restore without empty tab** — when saved tabs exist, skips opening a blank new tab on Edge workspace launch.
+- **Session rename via UIA** — renaming a session updates the Edge anchor tab title in-place without spawning a new tab or process.
+- **"Update Edge tab on rename" setting** — optional setting (default: off) to control whether renaming a session updates the Edge anchor tab.
+- **"Start New Session" context menu** — added to the existing sessions grid context menu.
+- **New Session dialog improvements** — play (▶) column for quick launch, "Add Directory" button replaces "Create", icons on all context menu items.
+- **IDE file pattern info** — ℹ️ tooltip in Add/Edit IDE dialog explaining the optional file pattern feature.
+- **Settings save toast** — "✅ Settings saved successfully" notification on save.
+
 ## [0.13.0] - 2026-02-18
 
 ### Added

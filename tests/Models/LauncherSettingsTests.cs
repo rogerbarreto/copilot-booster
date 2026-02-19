@@ -141,10 +141,10 @@ public sealed class LauncherSettingsTests : IDisposable
 
         var result = settings.BuildCopilotArgs([]);
 
-        Assert.Contains("\"--allow-tool=bash\"", result);
-        Assert.Contains("\"--allow-tool=python\"", result);
-        Assert.Contains("\"--add-dir=C:\\code\"", result);
-        Assert.Contains("\"--add-dir=D:\\work\"", result);
+        Assert.Contains("--allow-tool \"bash\"", result);
+        Assert.Contains("--allow-tool \"python\"", result);
+        Assert.Contains("--add-dir \"C:\\code\"", result);
+        Assert.Contains("--add-dir \"D:\\work\"", result);
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class LauncherSettingsTests : IDisposable
 
         var result = settings.BuildCopilotArgs(["--resume session1"]);
 
-        Assert.StartsWith("\"--allow-tool=tool1\"", result);
+        Assert.StartsWith("--allow-tool \"tool1\"", result);
         Assert.EndsWith("--resume session1", result);
     }
 
@@ -172,7 +172,7 @@ public sealed class LauncherSettingsTests : IDisposable
 
         var result = settings.BuildCopilotArgs([]);
 
-        Assert.Equal("\"--allow-tool=tool1\" \"--add-dir=C:\\dir\"", result);
+        Assert.Equal("--allow-tool \"tool1\" --add-dir \"C:\\dir\"", result);
     }
 
     [Fact]

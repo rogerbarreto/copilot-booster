@@ -250,20 +250,21 @@ internal class MainForm : Form
             {
                 SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
 
-                // Update Edge tab title if workspace is open
-                if (this._activeTracker.TryGetEdge(sid, out var edgeWs) && edgeWs.IsOpen)
+                // Update Edge tab title if workspace is open and setting is enabled
+                if (Program._settings.UpdateEdgeTabOnRename
+                    && this._activeTracker.TryGetEdge(sid, out var edgeWs) && edgeWs.IsOpen)
                 {
                     var displayName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
                     edgeWs.UpdateSessionName(displayName);
                 }
 
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
-                if (SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd))
-                {
-                    this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-                    var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
-                    this.PopulateGridWithFilter(snapshot);
-                }
+                SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd);
+
+                // Always reload and refresh after edit
+                this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+                var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+                this.PopulateGridWithFilter(snapshot);
             }
         };
 
@@ -425,10 +426,10 @@ internal class MainForm : Form
             };
             this._activeTracker.TrackEdge(sid, workspace);
 
-            await workspace.OpenAsync(sessionName).ConfigureAwait(true);
+            var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
+            await workspace.OpenAsync(sessionName, savedTabs.Count > 0).ConfigureAwait(true);
 
             // Restore previously saved tabs
-            var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
             if (savedTabs.Count > 0)
             {
                 workspace.RestoreTabs(savedTabs);
@@ -677,7 +678,7 @@ internal class MainForm : Form
         var ideButtons = SettingsVisuals.CreateIdeButtons(idesList);
         idesTab.Controls.Add(idesList);
         idesTab.Controls.Add(ideButtons);
-        SettingsVisuals.ApplyTabInfo(idesTab, "IDEs for context menu. File pattern enables project file search (e.g., *.sln;*.slnx).", "IDEs available in the context menu. Set a file pattern to search for project files.");
+        SettingsVisuals.ApplyTabInfo(idesTab, "IDEs available in the session context menu.", "IDEs available in the context menu.");
 
         settingsTabs.TabPages.Add(toolsTab);
         settingsTabs.TabPages.Add(dirsTab);
@@ -755,6 +756,26 @@ internal class MainForm : Form
             Location = new Point(8, 5)
         };
         alwaysOnTopPanel.Controls.Add(alwaysOnTopCheck);
+
+        // Update Edge tab on rename
+        var edgeRenamePanel = new Panel { Dock = DockStyle.Top, Height = 45, Padding = new Padding(8, 4, 8, 4) };
+        var edgeRenameCheck = new CheckBox
+        {
+            Text = "Update Edge tab on session rename",
+            Checked = Program._settings.UpdateEdgeTabOnRename,
+            AutoSize = true,
+            Location = new Point(8, 5)
+        };
+        var edgeRenameInfo = new Label
+        {
+            Text = "When enabled, renaming a session will navigate to the Edge anchor tab to update its title.",
+            AutoSize = true,
+            Location = new Point(28, 25),
+            ForeColor = SystemColors.GrayText,
+            Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
+        };
+        edgeRenamePanel.Controls.Add(edgeRenameCheck);
+        edgeRenamePanel.Controls.Add(edgeRenameInfo);
 
         // Theme
         var themePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
@@ -869,12 +890,15 @@ internal class MainForm : Form
             Program._settings.NotifyOnBell = notifyOnBellCheck.Checked;
             Program._settings.AutoHideOnFocus = autoHideOnFocusCheck.Checked;
             Program._settings.AlwaysOnTop = alwaysOnTopCheck.Checked;
+            Program._settings.UpdateEdgeTabOnRename = edgeRenameCheck.Checked;
             Program._settings.IdeSearchIgnoredDirs = ignoredDirsList.Items.Cast<string>().ToList();
             Program._settings.MaxActiveSessions = (int)maxSessionsBox.Value;
             Program._settings.PinnedOrder = pinnedOrderCombo.SelectedIndex == 1 ? "alias" : "created";
             this.TopMost = Program._settings.AlwaysOnTop;
             Program._settings.Save();
+            this._sessionsVisuals.BuildGridContextMenu();
             dialog.Close();
+            this._toast.Show("✅ Settings saved successfully");
         };
 
         var btnAbout = new Button { Text = "About", Width = 90 };
@@ -893,6 +917,7 @@ internal class MainForm : Form
         settingsContainer.Controls.Add(themePanel);
         settingsContainer.Controls.Add(autoHidePanel);
         settingsContainer.Controls.Add(alwaysOnTopPanel);
+        settingsContainer.Controls.Add(edgeRenamePanel);
         settingsContainer.Controls.Add(notifyPanel);
         settingsContainer.Controls.Add(workDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
@@ -1313,24 +1338,17 @@ internal class MainForm : Form
         var btnCancel = new Button { Text = "Cancel", Width = 90 };
         btnCancel.Click += (s, e) => dialog.Close();
 
-        var btnCreate = new Button { Text = "Create", Width = 90 };
+        var btnAddDir = new Button { Text = "Add Directory", Width = 110 };
         bottomPanel.Controls.Add(btnCancel);
-        bottomPanel.Controls.Add(btnCreate);
+        bottomPanel.Controls.Add(btnAddDir);
 
         dialog.Controls.Add(dialogPanel);
         dialog.Controls.Add(bottomPanel);
 
         var dialogVisuals = new NewSessionVisuals(dialogPanel);
 
-        // Wire Create button to trigger the same flow as context menu "New Session"
-        btnCreate.Click += (s, e) =>
-        {
-            if (dialogVisuals.CwdListView.SelectedItems.Count > 0)
-            {
-                var selectedCwd = dialogVisuals.CwdListView.SelectedItems[0].Tag as string ?? "";
-                dialogVisuals.TriggerNewSessionAsync(selectedCwd);
-            }
-        };
+        // Wire Add Directory button
+        btnAddDir.Click += (s, e) => dialogVisuals.TriggerAddDirectoryAsync();
 
         // Wire events identically to the old tab-based visuals
         dialogVisuals.OnNewSession += async (selectedCwd) =>

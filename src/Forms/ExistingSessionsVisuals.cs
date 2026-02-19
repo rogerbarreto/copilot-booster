@@ -422,7 +422,7 @@ internal class ExistingSessionsVisuals
         return null;
     }
 
-    private void BuildGridContextMenu()
+    internal void BuildGridContextMenu()
     {
         var gridContextMenu = new ContextMenuStrip();
         var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
@@ -528,6 +528,10 @@ internal class ExistingSessionsVisuals
             }
         };
         gridContextMenu.Items.Add(menuOpenNewSessionWorkspace);
+
+        var menuStartNewSession = new ToolStripMenuItem("Start New Session") { Image = appIcon?.Clone() as Image };
+        menuStartNewSession.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
+        gridContextMenu.Items.Add(menuStartNewSession);
 
         // --- Terminal ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
