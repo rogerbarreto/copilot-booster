@@ -155,7 +155,19 @@ internal static class AboutDialog
                         MessageBoxIcon.Information);
                     if (result == DialogResult.Yes && update.InstallerUrl != null)
                     {
-                        OpenUrl(update.InstallerUrl);
+                        updateButton.Text = "⬇ Downloading update...";
+                        try
+                        {
+                            await UpdateService.DownloadAndLaunchInstallerAsync(update.InstallerUrl).ConfigureAwait(true);
+                            dialog.Close();
+                            Application.Exit();
+                            return;
+                        }
+                        catch (Exception dlEx)
+                        {
+                            updateButton.Text = $"✘ Download failed: {dlEx.Message}";
+                            await Task.Delay(5000).ConfigureAwait(true);
+                        }
                     }
 
                     updateButton.Enabled = true;
