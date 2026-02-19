@@ -132,8 +132,32 @@ internal static class AboutDialog
             Location = new Point(65, 275)
         };
         bool isShowingResult = false;
+        string? pendingInstallerUrl = null;
         updateButton.Click += async (s, e) =>
         {
+            // Second click: download and install
+            if (pendingInstallerUrl != null)
+            {
+                updateButton.Enabled = false;
+                updateButton.Text = "⬇ Downloading update...";
+                try
+                {
+                    await UpdateService.DownloadAndLaunchInstallerAsync(pendingInstallerUrl).ConfigureAwait(true);
+                    dialog.Close();
+                    Application.Exit();
+                    return;
+                }
+                catch (Exception dlEx)
+                {
+                    updateButton.Text = $"✘ Download failed: {dlEx.Message}";
+                    updateButton.Enabled = true;
+                    await Task.Delay(5000).ConfigureAwait(true);
+                    updateButton.Text = $"⬆ Update to {pendingInstallerUrl}";
+                }
+
+                return;
+            }
+
             if (isShowingResult)
             {
                 return;
@@ -146,32 +170,14 @@ internal static class AboutDialog
                 var updateTask = UpdateService.CheckForUpdateAsync();
                 await Task.WhenAll(updateTask, Task.Delay(2000)).ConfigureAwait(true);
                 var update = await updateTask.ConfigureAwait(true);
-                if (update?.TagName != null)
+                if (update?.TagName != null && update.InstallerUrl != null)
                 {
-                    var result = MessageBox.Show(
-                        $"New version available: {update.TagName}\n\nWould you like to download it?",
-                        "Update Available",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-                    if (result == DialogResult.Yes && update.InstallerUrl != null)
-                    {
-                        updateButton.Text = "⬇ Downloading update...";
-                        try
-                        {
-                            await UpdateService.DownloadAndLaunchInstallerAsync(update.InstallerUrl).ConfigureAwait(true);
-                            dialog.Close();
-                            Application.Exit();
-                            return;
-                        }
-                        catch (Exception dlEx)
-                        {
-                            updateButton.Text = $"✘ Download failed: {dlEx.Message}";
-                            await Task.Delay(5000).ConfigureAwait(true);
-                        }
-                    }
-
+                    pendingInstallerUrl = update.InstallerUrl;
+                    updateButton.BackColor = Color.FromArgb(0, 100, 180);
+                    updateButton.ForeColor = Color.White;
+                    updateButton.FlatStyle = FlatStyle.Flat;
+                    updateButton.Text = $"⬆ Update to {update.TagName}";
                     updateButton.Enabled = true;
-                    updateButton.Text = "Check for Updates";
                 }
                 else
                 {
