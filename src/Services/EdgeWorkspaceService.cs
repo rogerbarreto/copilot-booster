@@ -43,6 +43,11 @@ internal partial class EdgeWorkspaceService
     internal IntPtr CachedHwnd { get; set; }
 
     /// <summary>
+    /// Set during the polling pass by <see cref="CheckForTabChanges"/>.
+    /// </summary>
+    internal bool HasUnsavedChanges { get; set; }
+
+    /// <summary>
     /// Fires when the anchor tab is no longer found.
     /// </summary>
     internal event Action? WindowClosed;
@@ -364,6 +369,25 @@ internal partial class EdgeWorkspaceService
         var exeDir = AppContext.BaseDirectory;
         var path = Path.Combine(exeDir, "session.html");
         return File.Exists(path) ? path : null;
+    }
+
+    /// <summary>
+    /// Writes the list of session IDs with unsaved changes to a JS file
+    /// next to session.html for the page to poll.
+    /// </summary>
+    internal static void WriteSessionSignals(Dictionary<string, string> sessionStatuses)
+    {
+        try
+        {
+            var exeDir = AppContext.BaseDirectory;
+            var path = Path.Combine(exeDir, "session-signals.js");
+            var json = System.Text.Json.JsonSerializer.Serialize(sessionStatuses);
+            File.WriteAllText(path, $"window.__sessionSignals = {json};");
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to write session-signals.js: {Error}", ex.Message);
+        }
     }
 
     /// <summary>
@@ -691,5 +715,177 @@ internal partial class EdgeWorkspaceService
         }
 
         Program.Logger.LogInformation("Restored {Count} Edge tabs for workspace {Id}", urls.Count, this.WorkspaceId);
+    }
+
+    /// <summary>
+    /// Computes a SHA256 hash of all non-anchor tab titles in this workspace.
+    /// Tabs are sorted, joined, and hashed for stable comparison.
+    /// </summary>
+    internal string? GetTabNameHash()
+    {
+        if (this.CachedHwnd == IntPtr.Zero || !IsWindow(this.CachedHwnd))
+        {
+            return null;
+        }
+
+        try
+        {
+            var window = AutomationElement.FromHandle(this.CachedHwnd);
+            var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var allTabItems = window.FindAll(TreeScope.Descendants, tabCondition);
+
+            // Find the anchor tab's container
+            AutomationElement? browserContainer = null;
+            foreach (AutomationElement tab in allTabItems)
+            {
+                if (tab.Current.Name.Contains(TitlePrefix, StringComparison.OrdinalIgnoreCase)
+                    && tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                    && obj is SelectionItemPattern sp)
+                {
+                    browserContainer = sp.Current.SelectionContainer;
+                    break;
+                }
+            }
+
+            if (browserContainer == null)
+            {
+                return null;
+            }
+
+            var names = new List<string>();
+            foreach (AutomationElement tab in allTabItems)
+            {
+                var tabName = tab.Current.Name;
+
+                // Strip Edge's dynamic " - Memory usage - X MB" suffix
+                var memIdx = tabName.IndexOf(" - Memory usage", StringComparison.OrdinalIgnoreCase);
+                if (memIdx > 0)
+                {
+                    tabName = tabName[..memIdx];
+                }
+
+                // Skip anchor tab
+                if (tabName.Contains(TitlePrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                // Skip "New Tab"
+                if (string.Equals(tabName, "New Tab", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(tabName, "New tab", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var obj)
+                    && obj is SelectionItemPattern sp
+                    && Equals(sp.Current.SelectionContainer, browserContainer))
+                {
+                    names.Add(tabName);
+                }
+            }
+
+            names.Sort(StringComparer.OrdinalIgnoreCase);
+            var combined = string.Join("|", names);
+            var bytes = System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(combined));
+            var hash = Convert.ToHexStringLower(bytes)[..16];
+
+            Program.Logger.LogInformation("[TabHash] {Sid}: {Count} tabs, hash={Hash}",
+                this.WorkspaceId, names.Count, hash);
+
+            return hash;
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to compute tab name hash: {Error}", ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Compares current tab names against saved state and updates <see cref="HasUnsavedChanges"/>.
+    /// </summary>
+    internal void CheckForTabChanges()
+    {
+        if (!this.IsOpen)
+        {
+            this.HasUnsavedChanges = false;
+            return;
+        }
+
+        var savedHash = EdgeTabPersistenceService.LoadTabTitleHash(this.WorkspaceId);
+
+        // No baseline yet or stale format — create one now (valid hash is 16 hex chars)
+        if (savedHash == null || savedHash.Length != 16)
+        {
+            var baseline = this.GetTabNameHash();
+            if (baseline != null)
+            {
+                EdgeTabPersistenceService.SaveTabTitleHash(this.WorkspaceId, baseline);
+                Program.Logger.LogInformation("[TabChange] {Sid}: created baseline: {Hash}", this.WorkspaceId, baseline);
+            }
+
+            this.HasUnsavedChanges = false;
+            return;
+        }
+
+        var currentHash = this.GetTabNameHash();
+        if (currentHash == null)
+        {
+            return;
+        }
+
+        var changed = !string.Equals(currentHash, savedHash, StringComparison.OrdinalIgnoreCase);
+        if (changed)
+        {
+            Program.Logger.LogInformation("[TabChange] {Sid}: CHANGED — saved=[{Saved}] current=[{Current}]",
+                this.WorkspaceId, savedHash, currentHash);
+        }
+
+        this.HasUnsavedChanges = changed;
+    }
+
+    private const string SaveSignalSuffix = "::Save";
+
+    /// <summary>
+    /// Checks if the anchor tab title ends with <c>::Save</c> signal set by session.html.
+    /// Returns true if detected (caller should trigger save and reset the title).
+    /// </summary>
+    internal bool DetectSaveSignal()
+    {
+        if (this.CachedHwnd == IntPtr.Zero || !IsWindow(this.CachedHwnd))
+        {
+            return false;
+        }
+
+        try
+        {
+            var window = AutomationElement.FromHandle(this.CachedHwnd);
+            var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
+            var allTabItems = window.FindAll(TreeScope.Descendants, tabCondition);
+
+            foreach (AutomationElement tab in allTabItems)
+            {
+                var name = tab.Current.Name;
+                if (name.Contains("Save", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("CB Session", StringComparison.OrdinalIgnoreCase))
+                {
+                    Program.Logger.LogInformation("[DetectSave] Tab: '{Name}'", name);
+                }
+
+                if (name.Contains(SaveSignalSuffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    Program.Logger.LogInformation("[DetectSave] MATCH found: '{Name}'", name);
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to detect save signal: {Error}", ex.Message);
+        }
+
+        return false;
     }
 }

@@ -435,6 +435,18 @@ internal class MainForm : Form
                 workspace.RestoreTabs(savedTabs);
             }
 
+            // Save initial title hash baseline after tabs have loaded
+            _ = Task.Factory.StartNew(() =>
+            {
+                Thread.Sleep(3000); // Let tabs load their titles
+                var hash = workspace.GetTabNameHash();
+                if (hash != null)
+                {
+                    EdgeTabPersistenceService.SaveTabTitleHash(sid, hash);
+                    Program.Logger.LogInformation("[Baseline] Saved initial title hash for {Sid}: {Hash}", sid, hash);
+                }
+            }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
+
             this.RefreshActiveStatusAsync();
         };
 
@@ -451,6 +463,11 @@ internal class MainForm : Form
                 if (urls.Count > 0)
                 {
                     EdgeTabPersistenceService.SaveTabs(sid, urls);
+                    var titleHash = ws.GetTabNameHash();
+                    if (titleHash != null)
+                    {
+                        EdgeTabPersistenceService.SaveTabTitleHash(sid, titleHash);
+                    }
                     this.BeginInvoke(() => this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored"));
                 }
                 else
@@ -1076,6 +1093,76 @@ internal class MainForm : Form
         this.Activate();
     }
 
+    private readonly Dictionary<string, string> _signalStatuses = new(StringComparer.OrdinalIgnoreCase);
+
+    private void CheckEdgeTabChanges()
+    {
+        foreach (var ws in this._activeTracker.GetTrackedEdgeWorkspaces())
+        {
+            if (!ws.IsOpen)
+            {
+                this._signalStatuses.Remove(ws.WorkspaceId);
+                continue;
+            }
+
+            // If currently processing a save, check if done
+            if (this._signalStatuses.TryGetValue(ws.WorkspaceId, out var status) && status == "processing")
+            {
+                // Still processing — wait for save to finish (handled async below)
+                continue;
+            }
+
+            // Check for save signal from session.html button click
+            var saveDetected = ws.DetectSaveSignal();
+            Program.Logger.LogInformation("[SaveSignal] {Sid}: DetectSaveSignal={Detected}", ws.WorkspaceId, saveDetected);
+            if (saveDetected)
+            {
+                this._signalStatuses[ws.WorkspaceId] = "processing";
+                Program.Logger.LogInformation("[SaveSignal] {Sid}: Save signal detected, saving...", ws.WorkspaceId);
+
+                var wsId = ws.WorkspaceId;
+                var urls = ws.GetTabUrls();
+                Program.Logger.LogInformation("[SaveSignal] {Sid}: Got {Count} URLs", wsId, urls.Count);
+                if (urls.Count > 0)
+                {
+                    EdgeTabPersistenceService.SaveTabs(wsId, urls);
+                    var titleHash = ws.GetTabNameHash();
+                    Program.Logger.LogInformation("[SaveSignal] {Sid}: New title hash={Hash}", wsId, titleHash);
+                    if (titleHash != null)
+                    {
+                        EdgeTabPersistenceService.SaveTabTitleHash(wsId, titleHash);
+                    }
+
+                    this.BeginInvoke(() => this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored"));
+                }
+
+                ws.HasUnsavedChanges = false;
+                this._signalStatuses.Remove(wsId);
+                continue;
+            }
+
+            // Lightweight change detection — just reads tab names, no navigation
+            ws.CheckForTabChanges();
+            if (ws.HasUnsavedChanges)
+            {
+                this._signalStatuses[ws.WorkspaceId] = "unsaved";
+            }
+            else
+            {
+                this._signalStatuses.Remove(ws.WorkspaceId);
+            }
+        }
+
+        // Write signal file for session.html to poll
+        if (this._signalStatuses.Count > 0)
+        {
+            Program.Logger.LogInformation("[Signals] Writing statuses: [{Statuses}]",
+                string.Join(", ", this._signalStatuses.Select(kv => $"{kv.Key}={kv.Value}")));
+        }
+
+        EdgeWorkspaceService.WriteSessionSignals(this._signalStatuses);
+    }
+
     private bool _refreshInProgress;
 
     /// <summary>
@@ -1197,6 +1284,13 @@ internal class MainForm : Form
                 // Re-build snapshot to include newly discovered Edge workspaces
                 snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
             }
+
+            // Check Edge tab changes on STA thread
+            await Task.Factory.StartNew(
+                () => this.CheckEdgeTabChanges(),
+                CancellationToken.None,
+                TaskCreationOptions.None,
+                StaTaskScheduler.Instance).ConfigureAwait(true);
 
             var filtered = this.GetFilteredSessions();
             this._sessionsVisuals.GridVisuals.ApplySnapshot(filtered, snapshot, this._sessionsVisuals.SearchBox.Text);

@@ -3,6 +3,8 @@
 <head>
     <meta charset="utf-8">
     <script>
+        let savePending = false;
+
         function parseHash() {
             const raw = location.hash.slice(1);
             const sep = raw.indexOf('/');
@@ -11,21 +13,89 @@
             return { id, name };
         }
 
+        function setTitle(id, name) {
+            if (savePending) return;
+            document.title = name
+                ? `CB Session [${name}] - [${id}]`
+                : `CB Session [${id}]`;
+        }
+
         function update() {
             const { id, name } = parseHash();
-            if (name) {
-                document.title = `CB Session [${name}] - [${id}]`;
+            setTitle(id, name);
+            document.getElementById('session-name').textContent = name || 'Unnamed Session';
+            document.getElementById('session-id').textContent = id;
+        }
+
+        function handleBeforeUnload(e) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+
+        function toggleCard(status) {
+            const card = document.getElementById('unsaved-card');
+            const saveBtn = document.getElementById('save-link');
+            if (status === 'unsaved') {
+                card.style.display = 'block';
+                saveBtn.textContent = '💾 Save Tabs';
+                saveBtn.style.pointerEvents = 'auto';
+                saveBtn.style.opacity = '1';
+                window.addEventListener('beforeunload', handleBeforeUnload);
+            } else if (status === 'processing') {
+                card.style.display = 'block';
+                saveBtn.textContent = '⏳ Saving...';
+                saveBtn.style.pointerEvents = 'none';
+                saveBtn.style.opacity = '0.6';
+                window.addEventListener('beforeunload', handleBeforeUnload);
             } else {
-                document.title = `CB Session [${id}]`;
+                card.style.display = 'none';
+                window.removeEventListener('beforeunload', handleBeforeUnload);
             }
-            const nameEl = document.getElementById('session-name');
-            const idEl = document.getElementById('session-id');
-            if (nameEl) nameEl.textContent = name || 'Unnamed Session';
-            if (idEl) idEl.textContent = id;
+        }
+
+        function onSaveClick(e) {
+            e.preventDefault();
+            const { id } = parseHash();
+            savePending = true;
+            toggleCard('processing');
+            document.title = `CB Session [${id}]::Save`;
+            // Keep re-asserting the save title until processed
+            if (window._saveInterval) clearInterval(window._saveInterval);
+            window._saveInterval = setInterval(() => {
+                if (!savePending) { clearInterval(window._saveInterval); return; }
+                document.title = `CB Session [${id}]::Save`;
+            }, 500);
+        }
+
+        function pollSignalFile() {
+            const { id } = parseHash();
+            if (!id) return;
+            const old = document.getElementById('signal-script');
+            if (old) old.remove();
+            window.__sessionSignals = undefined;
+            const s = document.createElement('script');
+            s.id = 'signal-script';
+            s.src = './session-signals.js?t=' + Date.now();
+            s.onload = () => {
+                const signals = window.__sessionSignals;
+                const status = (signals && typeof signals === 'object') ? signals[id] : undefined;
+                toggleCard(status || null);
+                if (!status && savePending) {
+                    savePending = false;
+                    if (window._saveInterval) clearInterval(window._saveInterval);
+                    setTitle(id, parseHash().name);
+                }
+            };
+            s.onerror = () => { toggleCard(null); };
+            document.head.appendChild(s);
         }
 
         window.addEventListener('hashchange', update);
-        document.addEventListener('DOMContentLoaded', update);
+        document.addEventListener('DOMContentLoaded', () => {
+            update();
+            document.getElementById('save-link').onclick = onSaveClick;
+            setInterval(pollSignalFile, 3000);
+        });
     </script>
     <style>
         :root {
@@ -80,6 +150,30 @@
             font-size: 13px;
             max-width: 400px;
         }
+        #unsaved-card {
+            display: none;
+            background: var(--banner-bg);
+            border: 1px solid var(--banner-border);
+            color: var(--banner-fg);
+            padding: 14px 24px;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-width: 400px;
+            text-align: center;
+        }
+        #unsaved-card .save-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 8px 20px;
+            background: var(--banner-border);
+            color: #1e1e1e;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #unsaved-card .save-btn:hover { opacity: 0.85; }
     </style>
 </head>
 <body>
@@ -90,6 +184,12 @@
         <p>Keep this tab open to maintain your browsing session reference.<br>
            Feel free to open other tabs in this window.</p>
         <div class="session-id" id="session-id"></div>
+        <div id="unsaved-card">
+            ⚠️ You have unsaved tab changes in this session.<br>
+            Click below to save your current tabs.
+            <br>
+            <a id="save-link" class="save-btn" href="#">💾 Save Tabs</a>
+        </div>
         <div class="banner">
             ⚠️ Please do not close this tab — it is used by Copilot Booster to track this browser window for the session.
         </div>
