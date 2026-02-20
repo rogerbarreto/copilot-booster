@@ -19,7 +19,7 @@ internal static class AboutDialog
     private const string IssuesUrl = "https://github.com/rogerbarreto/copilot-booster/issues";
     private const string ChangelogUrlTemplate = "https://github.com/rogerbarreto/copilot-booster/releases/tag/v{0}";
 
-    internal static void Show(IWin32Window owner)
+    internal static void Show(IWin32Window owner, UpdateInfo? cachedUpdate = null)
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
         var linkColor = Application.IsDarkModeEnabled ? Color.FromArgb(100, 180, 255) : Color.FromArgb(0, 102, 204);
@@ -131,11 +131,27 @@ internal static class AboutDialog
             Height = 30,
             Location = new Point(65, 275)
         };
-        bool isShowingResult = false;
         string? pendingInstallerUrl = null;
+
+        void ApplyUpdate(UpdateInfo update)
+        {
+            pendingInstallerUrl = update.InstallerUrl;
+            updateButton.BackColor = Color.FromArgb(0, 100, 180);
+            updateButton.ForeColor = Color.White;
+            updateButton.FlatStyle = FlatStyle.Flat;
+            updateButton.Text = $"⬆ Update to {update.TagName}";
+            updateButton.Enabled = true;
+        }
+
+        if (cachedUpdate != null)
+        {
+            ApplyUpdate(cachedUpdate);
+        }
+
+        bool isShowingResult = false;
         updateButton.Click += async (s, e) =>
         {
-            // Second click: download and install
+            // Download and install
             if (pendingInstallerUrl != null)
             {
                 updateButton.Enabled = false;
@@ -172,12 +188,7 @@ internal static class AboutDialog
                 var update = await updateTask.ConfigureAwait(true);
                 if (update?.TagName != null && update.InstallerUrl != null)
                 {
-                    pendingInstallerUrl = update.InstallerUrl;
-                    updateButton.BackColor = Color.FromArgb(0, 100, 180);
-                    updateButton.ForeColor = Color.White;
-                    updateButton.FlatStyle = FlatStyle.Flat;
-                    updateButton.Text = $"⬆ Update to {update.TagName}";
-                    updateButton.Enabled = true;
+                    ApplyUpdate(update);
                 }
                 else
                 {

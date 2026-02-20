@@ -41,6 +41,8 @@ internal class MainForm : Form
     // Update banner
     private LinkLabel _updateLabel = null!;
     private readonly ToastPanel _toast = null!;
+    private UpdateInfo? _latestUpdate;
+    private System.Windows.Forms.Timer? _updateCheckTimer;
 
     // System tray
     private NotifyIcon? _trayIcon;
@@ -921,7 +923,7 @@ internal class MainForm : Form
         var btnAbout = new Button { Text = "About", Width = 90 };
         btnAbout.Click += (s, e) =>
         {
-            AboutDialog.Show(dialog);
+            AboutDialog.Show(dialog, this._latestUpdate);
         };
 
         settingsBottomPanel.Controls.Add(btnCancel);
@@ -993,10 +995,17 @@ internal class MainForm : Form
             await this.LoadInitialDataAsync().ConfigureAwait(true);
             _ = this.CheckForUpdateInBackgroundAsync();
         };
+
+        // Periodic update check (1h)
+        this._updateCheckTimer = new System.Windows.Forms.Timer { Interval = 3600000 };
+        this._updateCheckTimer.Tick += (s, e) => _ = this.CheckForUpdateInBackgroundAsync();
+        this._updateCheckTimer.Start();
+
         this.FormClosed += (s, e) =>
         {
             this._activeStatusTimer?.Stop();
             this._spinnerTimer?.Stop();
+            this._updateCheckTimer?.Stop();
         };
     }
 
@@ -1005,6 +1014,7 @@ internal class MainForm : Form
         var update = await UpdateService.CheckForUpdateAsync().ConfigureAwait(false);
         if (update?.InstallerUrl != null)
         {
+            this._latestUpdate = update;
             this.Invoke(() =>
             {
                 this._updateLabel.Text = $"\u2B06 Update available: {update.TagName} \u2014 Click to install";

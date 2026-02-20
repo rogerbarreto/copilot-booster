@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.3] - 2026-02-20
+
+### Added
+
+- **Per-session metadata file** — session.html now reads name/alias and version from `sessions/{id}/metadata.js` instead of relying on UIA title updates.
+- **Server-driven poll intervals** — signal and metadata poll intervals are dictated by the app via the script files, not hardcoded in HTML.
+- **1-hour background update check** — periodically checks GitHub Releases for new versions without manual interaction.
+- **About dialog instant update button** — if an update is already detected, the About button shows "⬆ Update to vX.Y.Z" immediately on open.
+
+### Fixed
+
+- **Bell notification alias** — tray balloon now shows the session alias (if set) instead of always using the session summary, including the watcher-based notification path.
+- **Signal/metadata split** — separated fast-changing signals (3s) from slow-changing metadata (60s) into distinct files to reduce I/O.
+- **Polling resilience** — script load errors now reschedule the next poll instead of silently stopping.
+- **beforeunload guard** — explicit flag-based add/remove prevents redundant listener stacking.
+
 ## [0.13.2] - 2026-02-20
 
 ### Added
