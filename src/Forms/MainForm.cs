@@ -1093,6 +1093,16 @@ internal class MainForm : Form
         this.Activate();
     }
 
+    private void WriteSessionMetadata()
+    {
+        var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        foreach (var s in this._cachedSessions)
+        {
+            var displayName = !string.IsNullOrEmpty(s.Alias) ? s.Alias : s.Summary;
+            EdgeWorkspaceService.WriteSessionMetadata(s.Id, displayName, version);
+        }
+    }
+
     private readonly Dictionary<string, string> _signalStatuses = new(StringComparer.OrdinalIgnoreCase);
 
     private void CheckEdgeTabChanges()
@@ -1108,7 +1118,6 @@ internal class MainForm : Form
             // If currently processing a save, check if done
             if (this._signalStatuses.TryGetValue(ws.WorkspaceId, out var status) && status == "processing")
             {
-                // Still processing — wait for save to finish (handled async below)
                 continue;
             }
 
@@ -1271,6 +1280,7 @@ internal class MainForm : Form
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
             this._cachedSessions = sessions;
             this.ApplySessionStates(this._cachedSessions);
+            this.WriteSessionMetadata();
             var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
             // Edge scan uses UI Automation (COM/STA) — run on a dedicated STA thread
@@ -1336,9 +1346,9 @@ internal class MainForm : Form
 
                 if (statusIcon == "bell" && this._bellService != null)
                 {
-                    var sessionName = this._cachedSessions?
-                        .FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase))?.Summary
-                        ?? "Copilot CLI";
+                    var session = this._cachedSessions?
+                        .FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+                    var sessionName = !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary ?? "Copilot CLI";
                     this._bellService.NotifySingle(sessionId, sessionName);
                 }
             });

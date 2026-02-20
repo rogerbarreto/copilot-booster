@@ -375,18 +375,40 @@ internal partial class EdgeWorkspaceService
     /// Writes the list of session IDs with unsaved changes to a JS file
     /// next to session.html for the page to poll.
     /// </summary>
-    internal static void WriteSessionSignals(Dictionary<string, string> sessionStatuses)
+    internal static void WriteSessionSignals(Dictionary<string, string> sessionStatuses, int signalIntervalMs = 3000)
     {
         try
         {
             var exeDir = AppContext.BaseDirectory;
             var path = Path.Combine(exeDir, "session-signals.js");
             var json = System.Text.Json.JsonSerializer.Serialize(sessionStatuses);
-            File.WriteAllText(path, $"window.__sessionSignals = {json};");
+            File.WriteAllText(path, $"window.__sessionSignals = {json};\nwindow.__signalInterval = {signalIntervalMs};");
         }
         catch (Exception ex)
         {
             Program.Logger.LogDebug("Failed to write session-signals.js: {Error}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Writes per-session metadata (name, version, poll interval) to the session's state directory.
+    /// </summary>
+    internal static void WriteSessionMetadata(string sessionId, string? displayName, string version, int metadataIntervalMs = 60000)
+    {
+        try
+        {
+            var dir = SessionStateService.EnsureSessionDir(sessionId);
+            var path = Path.Combine(dir, "metadata.js");
+            var name = displayName ?? "";
+            var escaped = name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            File.WriteAllText(path,
+                $"window.__sessionName = \"{escaped}\";\n" +
+                $"window.__boosterVersion = \"{version}\";\n" +
+                $"window.__metadataInterval = {metadataIntervalMs};");
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to write metadata.js for {Sid}: {Error}", sessionId, ex.Message);
         }
     }
 

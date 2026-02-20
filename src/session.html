@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <script>
         let savePending = false;
+        let metadataTimer = null;
+        let signalTimer = null;
 
         function parseHash() {
             const raw = location.hash.slice(1);
@@ -20,17 +22,12 @@
                 : `CB Session [${id}]`;
         }
 
-        function update() {
-            const { id, name } = parseHash();
-            setTitle(id, name);
-            document.getElementById('session-name').textContent = name || 'Unnamed Session';
-            document.getElementById('session-id').textContent = id;
-        }
-
         function handleBeforeUnload(e) {
             e.preventDefault();
             e.returnValue = '';
         }
+
+        let beforeUnloadActive = false;
 
         function toggleCard(status) {
             const card = document.getElementById('unsaved-card');
@@ -40,16 +37,21 @@
                 saveBtn.textContent = '💾 Save Tabs';
                 saveBtn.style.pointerEvents = 'auto';
                 saveBtn.style.opacity = '1';
-                window.addEventListener('beforeunload', handleBeforeUnload);
             } else if (status === 'processing') {
                 card.style.display = 'block';
                 saveBtn.textContent = '⏳ Saving...';
                 saveBtn.style.pointerEvents = 'none';
                 saveBtn.style.opacity = '0.6';
-                window.addEventListener('beforeunload', handleBeforeUnload);
             } else {
                 card.style.display = 'none';
+            }
+            const needGuard = status === 'unsaved' || status === 'processing';
+            if (needGuard && !beforeUnloadActive) {
+                window.addEventListener('beforeunload', handleBeforeUnload);
+                beforeUnloadActive = true;
+            } else if (!needGuard && beforeUnloadActive) {
                 window.removeEventListener('beforeunload', handleBeforeUnload);
+                beforeUnloadActive = false;
             }
         }
 
@@ -59,7 +61,6 @@
             savePending = true;
             toggleCard('processing');
             document.title = `CB Session [${id}]::Save`;
-            // Keep re-asserting the save title until processed
             if (window._saveInterval) clearInterval(window._saveInterval);
             window._saveInterval = setInterval(() => {
                 if (!savePending) { clearInterval(window._saveInterval); return; }
@@ -67,34 +68,76 @@
             }, 500);
         }
 
-        function pollSignalFile() {
+        function loadScript(id, src, onSuccess, fallbackMs) {
+            const old = document.getElementById(id);
+            if (old) old.remove();
+            const s = document.createElement('script');
+            s.id = id;
+            s.src = src + '?t=' + Date.now();
+            s.onload = () => { s.onload = s.onerror = null; onSuccess(); };
+            s.onerror = () => { s.onload = s.onerror = null; if (fallbackMs) fallbackMs(); };
+            document.head.appendChild(s);
+        }
+
+        function pollMetadata() {
             const { id } = parseHash();
             if (!id) return;
-            const old = document.getElementById('signal-script');
-            if (old) old.remove();
+            window.__sessionName = undefined;
+            window.__boosterVersion = undefined;
+            window.__metadataInterval = undefined;
+            loadScript('meta-script', `./sessions/${id}/metadata.js`, () => {
+                const name = window.__sessionName || parseHash().name;
+                setTitle(id, name);
+                document.getElementById('session-name').textContent = name || 'Unnamed Session';
+                if (window.__boosterVersion) {
+                    document.getElementById('version').textContent = 'v' + window.__boosterVersion;
+                }
+                scheduleMetadata(window.__metadataInterval || 60000);
+            }, () => scheduleMetadata(60000));
+        }
+
+        function pollSignals() {
+            const { id } = parseHash();
+            if (!id) return;
             window.__sessionSignals = undefined;
-            const s = document.createElement('script');
-            s.id = 'signal-script';
-            s.src = './session-signals.js?t=' + Date.now();
-            s.onload = () => {
+            window.__signalInterval = undefined;
+            loadScript('signal-script', './session-signals.js', () => {
                 const signals = window.__sessionSignals;
                 const status = (signals && typeof signals === 'object') ? signals[id] : undefined;
                 toggleCard(status || null);
                 if (!status && savePending) {
                     savePending = false;
                     if (window._saveInterval) clearInterval(window._saveInterval);
-                    setTitle(id, parseHash().name);
+                    const name = window.__sessionName || parseHash().name;
+                    setTitle(id, name);
                 }
-            };
-            s.onerror = () => { toggleCard(null); };
-            document.head.appendChild(s);
+                scheduleSignals(window.__signalInterval || 3000);
+            }, () => scheduleSignals(3000));
         }
 
-        window.addEventListener('hashchange', update);
+        function scheduleMetadata(ms) {
+            if (metadataTimer) clearTimeout(metadataTimer);
+            metadataTimer = setTimeout(pollMetadata, ms);
+        }
+        function scheduleSignals(ms) {
+            if (signalTimer) clearTimeout(signalTimer);
+            signalTimer = setTimeout(pollSignals, ms);
+        }
+
+        window.addEventListener('hashchange', () => {
+            const { id, name } = parseHash();
+            setTitle(id, name);
+            document.getElementById('session-name').textContent = name || 'Unnamed Session';
+            document.getElementById('session-id').textContent = id;
+        });
         document.addEventListener('DOMContentLoaded', () => {
-            update();
+            const { id, name } = parseHash();
+            setTitle(id, name);
+            document.getElementById('session-name').textContent = name || 'Unnamed Session';
+            document.getElementById('session-id').textContent = id;
             document.getElementById('save-link').onclick = onSaveClick;
-            setInterval(pollSignalFile, 3000);
+            pollMetadata();
+            pollSignals();
         });
     </script>
     <style>
@@ -184,6 +227,7 @@
         <p>Keep this tab open to maintain your browsing session reference.<br>
            Feel free to open other tabs in this window.</p>
         <div class="session-id" id="session-id"></div>
+        <div class="session-id" id="version"></div>
         <div id="unsaved-card">
             ⚠️ You have unsaved tab changes in this session.<br>
             Click below to save your current tabs.
