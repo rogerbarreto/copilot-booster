@@ -637,9 +637,10 @@ internal class ActiveStatusTracker
                 activeTextBySessionId[session.Id] = activeText;
             }
 
-            if (!string.IsNullOrEmpty(session.Summary))
+            var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+            if (!string.IsNullOrEmpty(displayName))
             {
-                sessionNamesById[session.Id] = session.Summary;
+                sessionNamesById[session.Id] = displayName;
             }
         }
 
