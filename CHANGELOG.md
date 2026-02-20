@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.2] - 2026-02-20
+
+### Added
+
+- **Edge unsaved tab detection** — detects tab changes via SHA256 hash of tab titles and shows an "unsaved changes" card in the session anchor page with a save button.
+- **Save signal via title suffix** — clicking "Save Tabs" in the anchor page sets a `::Save` title suffix detected by UIA to trigger automatic save.
+- **Signal file polling** — session.html polls a `session-signals.js` file written by the app to show/hide the unsaved card and spinner.
+- **Before-unload guard** — warns before closing an anchor tab with unsaved changes.
+- **Auto-baseline on Edge open** — creates a title hash baseline when an Edge workspace is first opened.
+
+### Fixed
+
+- **Bell notification name** — tray balloon now shows the session alias (if set) instead of always using the session summary.
+
 ## [0.13.1] - 2026-02-19
 
 ### Fixed
