@@ -108,6 +108,20 @@ internal class LauncherSettings
     ];
 
     /// <summary>
+    /// Gets or sets the list of session tab names. The first tab is the default and cannot be deleted.
+    /// Default: ["Active", "Archived"]. Max length per name: 20 characters.
+    /// </summary>
+    [JsonPropertyName("sessionTabs")]
+    public List<string> SessionTabs { get; set; } = ["Active", "Archived"];
+
+    /// <summary>
+    /// Gets or sets the maximum number of session tabs allowed.
+    /// Default is 5. Not exposed in the settings UI; edit the JSON file to change.
+    /// </summary>
+    [JsonPropertyName("maxSessionTabs")]
+    public int MaxSessionTabs { get; set; } = 5;
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).

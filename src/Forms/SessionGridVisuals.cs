@@ -247,6 +247,8 @@ internal class SessionGridVisuals
             }
         }
 
+        var currentId = this._grid.CurrentRow?.Tag as string;
+
         this._grid.Rows.Clear();
 
         foreach (var session in displayed)
@@ -287,16 +289,31 @@ internal class SessionGridVisuals
             }
         }
 
-        // Restore selection
+        // Restore selection and CurrentCell
         if (selectedIds.Count > 0)
         {
             this._grid.ClearSelection();
+            DataGridViewRow? currentRow = null;
             foreach (DataGridViewRow row in this._grid.Rows)
             {
                 if (row.Tag is string id && selectedIds.Contains(id))
                 {
                     row.Selected = true;
+                    if (string.Equals(id, currentId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentRow = row;
+                    }
                 }
+            }
+
+            // Restore CurrentCell so GetSelectedSessionId() stays in sync
+            if (currentRow != null)
+            {
+                this._grid.CurrentCell = currentRow.Cells[0];
+            }
+            else if (this._grid.SelectedRows.Count > 0)
+            {
+                this._grid.CurrentCell = this._grid.SelectedRows[0].Cells[0];
             }
         }
 

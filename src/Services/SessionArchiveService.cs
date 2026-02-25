@@ -2,12 +2,13 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
 /// <summary>
-/// Persists session archive and pin state in a JSON file.
+/// Persists session tab and pin state in a JSON file.
 /// </summary>
 internal static class SessionArchiveService
 {
@@ -15,8 +16,32 @@ internal static class SessionArchiveService
 
     internal class SessionState
     {
-        public bool IsArchived { get; set; }
+        /// <summary>
+        /// The tab this session belongs to. Empty or null means the default (first) tab.
+        /// </summary>
+        [JsonPropertyName("Tab")]
+        public string Tab { get; set; } = "";
+
+        [JsonPropertyName("IsPinned")]
         public bool IsPinned { get; set; }
+
+        /// <summary>
+        /// Legacy property for backward compatibility. Writing always uses <see cref="Tab"/>.
+        /// </summary>
+        [JsonPropertyName("IsArchived")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool IsArchived
+        {
+            get => false;
+            set
+            {
+                // Migrate: archived sessions go to "Archived" tab
+                if (value && string.IsNullOrEmpty(this.Tab))
+                {
+                    this.Tab = "Archived";
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -56,25 +81,37 @@ internal static class SessionArchiveService
         catch (Exception ex) { Program.Logger.LogError("Failed to save session states: {Error}", ex.Message); }
     }
 
-    /// <summary>
-    /// Sets the archive state for a session.
-    /// </summary>
-    internal static void SetArchived(string stateFile, string sessionId, bool isArchived)
+    private static string GetDefaultTab()
     {
+        return Program._settings?.SessionTabs is { Count: > 0 } tabs ? tabs[0] : "Active";
+    }
+
+    /// <summary>
+    /// Sets the tab for a session.
+    /// </summary>
+    internal static void SetTab(string stateFile, string sessionId, string tab)
+    {
+        var defaultTab = GetDefaultTab();
         var states = Load(stateFile);
         var state = GetOrCreate(states, sessionId);
-        state.IsArchived = isArchived;
-        CleanupIfDefault(states, sessionId, state);
+        state.Tab = tab;
+        CleanupIfDefault(states, sessionId, state, defaultTab);
         Save(stateFile, states);
     }
 
     /// <summary>
-    /// Returns whether a session is archived.
+    /// Returns the tab name for a session, or the default tab if not set.
     /// </summary>
-    internal static bool IsArchived(string stateFile, string sessionId)
+    internal static string GetTab(string stateFile, string sessionId)
     {
+        var defaultTab = GetDefaultTab();
         var states = Load(stateFile);
-        return states.TryGetValue(sessionId, out var state) && state.IsArchived;
+        if (states.TryGetValue(sessionId, out var state) && !string.IsNullOrEmpty(state.Tab))
+        {
+            return state.Tab;
+        }
+
+        return defaultTab;
     }
 
     /// <summary>
@@ -82,10 +119,11 @@ internal static class SessionArchiveService
     /// </summary>
     internal static void SetPinned(string stateFile, string sessionId, bool isPinned)
     {
+        var defaultTab = GetDefaultTab();
         var states = Load(stateFile);
         var state = GetOrCreate(states, sessionId);
         state.IsPinned = isPinned;
-        CleanupIfDefault(states, sessionId, state);
+        CleanupIfDefault(states, sessionId, state, defaultTab);
         Save(stateFile, states);
     }
 
@@ -110,6 +148,46 @@ internal static class SessionArchiveService
         }
     }
 
+    /// <summary>
+    /// Renames a tab across all session states.
+    /// </summary>
+    internal static void RenameTab(string stateFile, string oldName, string newName)
+    {
+        var states = Load(stateFile);
+        bool changed = false;
+        foreach (var state in states.Values)
+        {
+            if (string.Equals(state.Tab, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                state.Tab = newName;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            Save(stateFile, states);
+        }
+    }
+
+    /// <summary>
+    /// Returns the count of sessions in each tab.
+    /// </summary>
+    internal static Dictionary<string, int> CountByTab(string stateFile, IReadOnlyList<string> sessionIds, string defaultTab)
+    {
+        var states = Load(stateFile);
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sid in sessionIds)
+        {
+            var tab = states.TryGetValue(sid, out var state) && !string.IsNullOrEmpty(state.Tab)
+                ? state.Tab
+                : defaultTab;
+            counts[tab] = counts.GetValueOrDefault(tab) + 1;
+        }
+
+        return counts;
+    }
+
     private static SessionState GetOrCreate(Dictionary<string, SessionState> states, string sessionId)
     {
         if (!states.TryGetValue(sessionId, out var state))
@@ -120,9 +198,10 @@ internal static class SessionArchiveService
         return state;
     }
 
-    private static void CleanupIfDefault(Dictionary<string, SessionState> states, string sessionId, SessionState state)
+    private static void CleanupIfDefault(Dictionary<string, SessionState> states, string sessionId, SessionState state, string defaultTab)
     {
-        if (!state.IsArchived && !state.IsPinned)
+        if ((string.IsNullOrEmpty(state.Tab) || string.Equals(state.Tab, defaultTab, StringComparison.OrdinalIgnoreCase))
+            && !state.IsPinned)
         {
             states.Remove(sessionId);
         }

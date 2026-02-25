@@ -21,6 +21,33 @@
         {
             File.WriteAllText(file, """
                 {
+                    "session-1": { "Tab": "Archived", "IsPinned": false },
+                    "session-2": { "Tab": "", "IsPinned": true }
+                }
+                """);
+
+            var result = SessionArchiveService.Load(file);
+
+            Assert.Equal(2, result.Count);
+            Assert.Equal("Archived", result["session-1"].Tab);
+            Assert.False(result["session-1"].IsPinned);
+            Assert.Equal("", result["session-2"].Tab);
+            Assert.True(result["session-2"].IsPinned);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void Load_LegacyIsArchived_MigratesToTab()
+    {
+        var file = this.CreateTempFile();
+        try
+        {
+            File.WriteAllText(file, """
+                {
                     "session-1": { "IsArchived": true, "IsPinned": false },
                     "session-2": { "IsArchived": false, "IsPinned": true }
                 }
@@ -29,10 +56,8 @@
             var result = SessionArchiveService.Load(file);
 
             Assert.Equal(2, result.Count);
-            Assert.True(result["session-1"].IsArchived);
-            Assert.False(result["session-1"].IsPinned);
-            Assert.False(result["session-2"].IsArchived);
-            Assert.True(result["session-2"].IsPinned);
+            Assert.Equal("Archived", result["session-1"].Tab);
+            Assert.Equal("", result["session-2"].Tab);
         }
         finally
         {
@@ -57,15 +82,15 @@
     }
 
     [Fact]
-    public void SetArchived_CreatesFileAndSetsState()
+    public void SetTab_CreatesFileAndSetsState()
     {
         var file = this.CreateTempFile();
         try
         {
-            SessionArchiveService.SetArchived(file, "session-1", true);
+            SessionArchiveService.SetTab(file, "session-1", "Archived");
 
             Assert.True(File.Exists(file));
-            Assert.True(SessionArchiveService.IsArchived(file, "session-1"));
+            Assert.Equal("Archived", SessionArchiveService.GetTab(file, "session-1"));
         }
         finally
         {
@@ -74,13 +99,13 @@
     }
 
     [Fact]
-    public void SetArchived_ToFalse_CleansUpDefaultState()
+    public void SetTab_ToDefault_CleansUpState()
     {
         var file = this.CreateTempFile();
         try
         {
-            SessionArchiveService.SetArchived(file, "session-1", true);
-            SessionArchiveService.SetArchived(file, "session-1", false);
+            SessionArchiveService.SetTab(file, "session-1", "Archived");
+            SessionArchiveService.SetTab(file, "session-1", "Active");
 
             var states = SessionArchiveService.Load(file);
             Assert.DoesNotContain("session-1", states.Keys);
@@ -92,27 +117,13 @@
     }
 
     [Fact]
-    public void IsArchived_WithArchivedSession_ReturnsTrue()
+    public void GetTab_WithNonExistent_ReturnsDefaultTab()
     {
         var file = this.CreateTempFile();
         try
         {
-            SessionArchiveService.SetArchived(file, "session-1", true);
-            Assert.True(SessionArchiveService.IsArchived(file, "session-1"));
-        }
-        finally
-        {
-            File.Delete(file);
-        }
-    }
-
-    [Fact]
-    public void IsArchived_WithNonExistent_ReturnsFalse()
-    {
-        var file = this.CreateTempFile();
-        try
-        {
-            Assert.False(SessionArchiveService.IsArchived(file, "nonexistent"));
+            var tab = SessionArchiveService.GetTab(file, "nonexistent");
+            Assert.Equal("Active", tab);
         }
         finally
         {
@@ -191,15 +202,15 @@
     }
 
     [Fact]
-    public void SetArchived_PreservesPinState()
+    public void SetTab_PreservesPinState()
     {
         var file = this.CreateTempFile();
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
-            SessionArchiveService.SetArchived(file, "session-1", true);
+            SessionArchiveService.SetTab(file, "session-1", "Archived");
 
-            Assert.True(SessionArchiveService.IsArchived(file, "session-1"));
+            Assert.Equal("Archived", SessionArchiveService.GetTab(file, "session-1"));
             Assert.True(SessionArchiveService.IsPinned(file, "session-1"));
         }
         finally
@@ -214,10 +225,10 @@
         var file = this.CreateTempFile();
         try
         {
-            SessionArchiveService.SetArchived(file, "session-1", true);
+            SessionArchiveService.SetTab(file, "session-1", "Archived");
             SessionArchiveService.Remove(file, "session-1");
 
-            Assert.False(SessionArchiveService.IsArchived(file, "session-1"));
+            Assert.Equal("Active", SessionArchiveService.GetTab(file, "session-1"));
             var states = SessionArchiveService.Load(file);
             Assert.DoesNotContain("session-1", states.Keys);
         }
@@ -233,10 +244,10 @@
         var file = this.CreateTempFile();
         try
         {
-            SessionArchiveService.SetArchived(file, "session-1", true);
+            SessionArchiveService.SetTab(file, "session-1", "Archived");
             SessionArchiveService.Remove(file, "nonexistent");
 
-            Assert.True(SessionArchiveService.IsArchived(file, "session-1"));
+            Assert.Equal("Archived", SessionArchiveService.GetTab(file, "session-1"));
         }
         finally
         {
@@ -251,15 +262,37 @@
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
-            SessionArchiveService.SetArchived(file, "session-1", true);
+            SessionArchiveService.SetTab(file, "session-1", "Archived");
 
-            // Unarchive — entry should remain because it's still pinned
-            SessionArchiveService.SetArchived(file, "session-1", false);
+            // Move back to default — entry should remain because it's still pinned
+            SessionArchiveService.SetTab(file, "session-1", "Active");
 
             var states = SessionArchiveService.Load(file);
             Assert.Contains("session-1", states.Keys);
             Assert.True(states["session-1"].IsPinned);
-            Assert.False(states["session-1"].IsArchived);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void RenameTab_UpdatesAllSessionStates()
+    {
+        var file = this.CreateTempFile();
+        try
+        {
+            SessionArchiveService.SetTab(file, "session-1", "Work");
+            SessionArchiveService.SetTab(file, "session-2", "Work");
+            SessionArchiveService.SetTab(file, "session-3", "Personal");
+
+            SessionArchiveService.RenameTab(file, "Work", "Projects");
+
+            var states = SessionArchiveService.Load(file);
+            Assert.Equal("Projects", states["session-1"].Tab);
+            Assert.Equal("Projects", states["session-2"].Tab);
+            Assert.Equal("Personal", states["session-3"].Tab);
         }
         finally
         {

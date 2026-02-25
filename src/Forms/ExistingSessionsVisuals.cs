@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
@@ -20,14 +21,12 @@ internal class ExistingSessionsVisuals
     internal SessionGridVisuals GridVisuals = null!;
     internal Label LoadingOverlay = null!;
     internal TabControl SessionTabs = null!;
-    internal TabPage ActiveTab = null!;
-    internal TabPage ArchivedTab = null!;
     internal Button NewSessionButton = null!;
 
     /// <summary>
-    /// Gets whether the archived tab is currently selected.
+    /// Gets the name of the currently selected session tab.
     /// </summary>
-    internal bool IsArchivedTabSelected => this.SessionTabs.SelectedTab == this.ArchivedTab;
+    internal string SelectedTabName => this.SessionTabs.SelectedTab?.Tag as string ?? Program._settings.SessionTabs[0];
 
     /// <summary>Fired when the user clicks Refresh.</summary>
     internal event Action? OnRefreshRequested;
@@ -59,8 +58,7 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenFilesFolder;
     internal event Action<string>? OnOpenPlan;
     internal event Action<string>? OnOpenCwdExplorer;
-    internal event Action<string>? OnArchiveSession;
-    internal event Action<string>? OnUnarchiveSession;
+    internal event Action<string, string>? OnMoveToTab;
     internal event Action<string>? OnPinSession;
     internal event Action<string>? OnUnpinSession;
 
@@ -88,11 +86,6 @@ internal class ExistingSessionsVisuals
     internal Func<string, bool>? HasPlanFile;
 
     /// <summary>
-    /// Callback to determine if a session is archived.
-    /// </summary>
-    internal Func<string, bool>? IsSessionArchived;
-
-    /// <summary>
     /// Callback to determine if a session is pinned.
     /// </summary>
     internal Func<string, bool>? IsSessionPinned;
@@ -115,9 +108,7 @@ internal class ExistingSessionsVisuals
         this.GridVisuals = new SessionGridVisuals(this.SessionGrid, activeTracker);
         this.BuildGridContextMenu();
 
-        // Sub-tabs: Active / Archived
-        this.ActiveTab = new TabPage("Active");
-        this.ArchivedTab = new TabPage("Archived");
+        // Dynamic session tabs from settings
         this.SessionTabs = new TabControl { Dock = DockStyle.Fill };
         if (!Application.IsDarkModeEnabled)
         {
@@ -133,9 +124,7 @@ internal class ExistingSessionsVisuals
                 TextRenderer.DrawText(e.Graphics, text, this.SessionTabs.Font, e.Bounds, fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             };
         }
-        this.SessionTabs.TabPages.Add(this.ActiveTab);
-        this.SessionTabs.TabPages.Add(this.ArchivedTab);
-        this.ActiveTab.Controls.Add(this.SessionGrid);
+        this.BuildSessionTabs();
         this.SessionTabs.SelectedIndexChanged += (s, e) =>
         {
             // Move the grid to the newly selected tab
@@ -473,25 +462,8 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuUnpinSession);
 
-        var menuArchiveSession = new ToolStripMenuItem("Archive Session") { Image = TryExtractIcon(shell32, 265) };
-        menuArchiveSession.Click += (s, e) =>
-        {
-            foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
-            {
-                this.OnArchiveSession?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuArchiveSession);
-
-        var menuUnarchiveSession = new ToolStripMenuItem("Unarchive Session") { Image = TryExtractIcon(shell32, 265) };
-        menuUnarchiveSession.Click += (s, e) =>
-        {
-            foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
-            {
-                this.OnUnarchiveSession?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuUnarchiveSession);
+        var menuMoveToTab = new ToolStripMenuItem("Move to") { Image = TryExtractIcon(shell32, 265) };
+        gridContextMenu.Items.Add(menuMoveToTab);
 
         var menuDeleteSession = new ToolStripMenuItem("Delete Session") { Image = TryExtractIcon(shell32, 131) };
         menuDeleteSession.Click += (s, e) =>
@@ -675,24 +647,39 @@ internal class ExistingSessionsVisuals
             bool edgeOpen = !isMultiSelect && sessionId != null && this.IsEdgeOpen != null && this.IsEdgeOpen(sessionId);
             menuSaveEdgeTabs.Visible = edgeOpen;
 
-            // Archive/Unarchive visibility — respect current tab context
-            if (isMultiSelect)
+            // "Move to" submenu — show all tabs except current
+            menuMoveToTab.DropDownItems.Clear();
+            var currentTab = this.SelectedTabName;
+            foreach (var tabName in Program._settings.SessionTabs)
             {
-                bool onArchivedTab = this.IsArchivedTabSelected;
-                menuArchiveSession.Visible = !onArchivedTab;
-                menuUnarchiveSession.Visible = onArchivedTab;
-                menuPinSession.Visible = true;
-                menuUnpinSession.Visible = true;
-            }
-            else
-            {
-                bool isArchived = sessionId != null && this.IsSessionArchived != null && this.IsSessionArchived(sessionId);
-                menuArchiveSession.Visible = !isArchived;
-                menuUnarchiveSession.Visible = isArchived;
+                if (string.Equals(tabName, currentTab, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
+                var capturedTab = tabName;
+                var tabItem = new ToolStripMenuItem(tabName);
+                tabItem.Click += (s2, e2) =>
+                {
+                    foreach (var sid in this.GridVisuals.GetSelectedSessionIds())
+                    {
+                        this.OnMoveToTab?.Invoke(sid, capturedTab);
+                    }
+                };
+                menuMoveToTab.DropDownItems.Add(tabItem);
+            }
+
+            // Pin/Unpin visibility
+            if (!isMultiSelect)
+            {
                 bool isPinned = sessionId != null && this.IsSessionPinned != null && this.IsSessionPinned(sessionId);
                 menuPinSession.Visible = !isPinned;
                 menuUnpinSession.Visible = isPinned;
+            }
+            else
+            {
+                menuPinSession.Visible = true;
+                menuUnpinSession.Visible = true;
             }
         };
 
@@ -781,9 +768,49 @@ internal class ExistingSessionsVisuals
     /// <summary>
     /// Updates the tab titles with session counts.
     /// </summary>
-    internal void UpdateTabCounts(int activeCount, int archivedCount)
+    internal void UpdateTabCounts(Dictionary<string, int> countsByTab)
     {
-        this.ActiveTab.Text = $"Active ({activeCount})";
-        this.ArchivedTab.Text = $"Archived ({archivedCount})";
+        foreach (TabPage tab in this.SessionTabs.TabPages)
+        {
+            if (tab.Tag is string tabName)
+            {
+                var count = countsByTab.GetValueOrDefault(tabName);
+                tab.Text = $"{tabName} ({count})";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds session tabs from current settings. Preserves selected tab if still present.
+    /// </summary>
+    internal void BuildSessionTabs()
+    {
+        var previousTab = this.SessionTabs.SelectedTab?.Tag as string;
+        this.SessionTabs.TabPages.Clear();
+
+        foreach (var tabName in Program._settings.SessionTabs)
+        {
+            var page = new TabPage(tabName) { Tag = tabName };
+            this.SessionTabs.TabPages.Add(page);
+        }
+
+        // Restore selection or default to first tab
+        if (previousTab != null)
+        {
+            foreach (TabPage page in this.SessionTabs.TabPages)
+            {
+                if (string.Equals(page.Tag as string, previousTab, StringComparison.OrdinalIgnoreCase))
+                {
+                    this.SessionTabs.SelectedTab = page;
+                    break;
+                }
+            }
+        }
+
+        // Ensure the grid is parented on the selected tab
+        if (this.SessionTabs.SelectedTab != null)
+        {
+            this.SessionTabs.SelectedTab.Controls.Add(this.SessionGrid);
+        }
     }
 }

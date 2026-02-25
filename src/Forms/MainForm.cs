@@ -579,36 +579,17 @@ internal class MainForm : Form
             return SessionInteractionManager.HasPlanFile(Program.SessionStateDir, sid);
         };
 
-        this._sessionsVisuals.OnArchiveSession += (sid) =>
+        this._sessionsVisuals.OnMoveToTab += (sid, tabName) =>
         {
-            SessionArchiveService.SetArchived(Program.SessionStateFile, sid, true);
+            SessionArchiveService.SetTab(Program.SessionStateFile, sid, tabName);
             var session = this._cachedSessions.Find(x => x.Id == sid);
             if (session != null)
             {
-                session.IsArchived = true;
+                session.Tab = tabName;
             }
 
             this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
             this.UpdateTabCounts();
-        };
-
-        this._sessionsVisuals.OnUnarchiveSession += (sid) =>
-        {
-            SessionArchiveService.SetArchived(Program.SessionStateFile, sid, false);
-            var session = this._cachedSessions.Find(x => x.Id == sid);
-            if (session != null)
-            {
-                session.IsArchived = false;
-            }
-
-            this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
-            this.UpdateTabCounts();
-        };
-
-        this._sessionsVisuals.IsSessionArchived = (sid) =>
-        {
-            var session = this._cachedSessions.Find(x => x.Id == sid);
-            return session?.IsArchived ?? false;
         };
 
         this._sessionsVisuals.OnPinSession += (sid) =>
@@ -755,6 +736,110 @@ internal class MainForm : Form
         ideSearchTab.Controls.Add(ignoredDirsButtons);
         SettingsVisuals.ApplyTabInfo(ideSearchTab, "Directory names excluded from IDE file pattern search.", "Directory names to skip when searching for project files (e.g., node_modules, bin, obj).");
         settingsTabs.TabPages.Add(ideSearchTab);
+
+        // Session Tabs
+        var sessionTabsTab = new TabPage("Session Tabs");
+        var sessionTabsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
+        SettingsVisuals.ApplyThemedSelection(sessionTabsList);
+        foreach (var tab in Program._settings.SessionTabs)
+        {
+            sessionTabsList.Items.Add(tab);
+        }
+
+        var sessionTabsButtons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 35, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4) };
+        var btnAddTab = new Button { Text = "Add", Width = 70 };
+        btnAddTab.Click += (s, e) =>
+        {
+            if (sessionTabsList.Items.Count >= Program._settings.MaxSessionTabs)
+            {
+                MessageBox.Show($"Maximum of {Program._settings.MaxSessionTabs} tabs allowed.", "Limit Reached", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var name = SettingsVisuals.PromptInput("Add Tab", "Tab name (max 20 chars):", "");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            name = name.Trim();
+            if (name.Length > 20)
+            {
+                name = name[..20];
+            }
+
+            // Check for duplicate
+            foreach (var existing in sessionTabsList.Items.Cast<string>())
+            {
+                if (string.Equals(existing, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("A tab with that name already exists.", "Duplicate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            sessionTabsList.Items.Add(name);
+        };
+
+        var btnRenameTab = new Button { Text = "Rename", Width = 70 };
+        btnRenameTab.Click += (s, e) =>
+        {
+            if (sessionTabsList.SelectedIndex < 0)
+            {
+                return;
+            }
+
+            var oldName = sessionTabsList.SelectedItem!.ToString()!;
+            var newName = SettingsVisuals.PromptInput("Rename Tab", "New tab name (max 20 chars):", oldName);
+            if (string.IsNullOrWhiteSpace(newName) || string.Equals(newName.Trim(), oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            newName = newName.Trim();
+            if (newName.Length > 20)
+            {
+                newName = newName[..20];
+            }
+
+            // Check for duplicate
+            foreach (var existing in sessionTabsList.Items.Cast<string>())
+            {
+                if (string.Equals(existing, newName, StringComparison.OrdinalIgnoreCase))
+                {
+                    MessageBox.Show("A tab with that name already exists.", "Duplicate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
+            sessionTabsList.Items[sessionTabsList.SelectedIndex] = newName;
+            SessionArchiveService.RenameTab(Program.SessionStateFile, oldName, newName);
+        };
+
+        var btnRemoveTab = new Button { Text = "Remove", Width = 70 };
+        btnRemoveTab.Click += (s, e) =>
+        {
+            if (sessionTabsList.SelectedIndex <= 0)
+            {
+                return;
+            }
+
+            var tabName = sessionTabsList.SelectedItem!.ToString()!;
+            var hasSession = this._cachedSessions.Any(x => string.Equals(x.Tab, tabName, StringComparison.OrdinalIgnoreCase));
+            if (hasSession)
+            {
+                MessageBox.Show("Cannot remove a tab that still has sessions. Move all sessions first.", "Tab Not Empty", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            sessionTabsList.Items.RemoveAt(sessionTabsList.SelectedIndex);
+        };
+
+        sessionTabsButtons.Controls.AddRange([btnAddTab, btnRenameTab, btnRemoveTab]);
+        sessionTabsTab.Controls.Add(sessionTabsList);
+        sessionTabsTab.Controls.Add(sessionTabsButtons);
+        SettingsVisuals.ApplyTabInfo(sessionTabsTab, "Organize sessions into tabs. First tab cannot be removed.", "Tabs for grouping sessions. Max 20 characters per name.");
+        settingsTabs.TabPages.Add(sessionTabsTab);
 
         // Default Work Dir
         var workDirPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
@@ -993,9 +1078,13 @@ internal class MainForm : Form
                 2 => "alias",
                 _ => "running"
             };
+            Program._settings.SessionTabs = sessionTabsList.Items.Cast<string>().ToList();
             this.TopMost = Program._settings.AlwaysOnTop;
             Program._settings.Save();
+            this._sessionsVisuals.BuildSessionTabs();
             this._sessionsVisuals.BuildGridContextMenu();
+            this.ApplySessionStates(this._cachedSessions);
+            this.PopulateGridWithFilter(this._lastSnapshot);
             dialog.Close();
             this._toast.Show("✅ Settings saved successfully");
         };
@@ -1266,34 +1355,48 @@ internal class MainForm : Form
     private bool _refreshInProgress;
 
     /// <summary>
-    /// Applies archive/pin states from the state file to loaded sessions.
+    /// Applies tab/pin states from the state file to loaded sessions.
     /// </summary>
     private void ApplySessionStates(List<NamedSession> sessions)
     {
+        var defaultTab = Program._settings.SessionTabs.Count > 0 ? Program._settings.SessionTabs[0] : "Active";
         var states = SessionArchiveService.Load(Program.SessionStateFile);
         foreach (var session in sessions)
         {
             if (states.TryGetValue(session.Id, out var state))
             {
-                session.IsArchived = state.IsArchived;
+                session.Tab = !string.IsNullOrEmpty(state.Tab) ? state.Tab : defaultTab;
                 session.IsPinned = state.IsPinned;
+            }
+            else
+            {
+                session.Tab = defaultTab;
             }
         }
     }
 
     /// <summary>
-    /// Returns sessions filtered by the current tab (Active/Archived),
+    /// Returns sessions filtered by the currently selected tab,
     /// with pinned sessions sorted to the top.
     /// </summary>
     private List<NamedSession> GetFilteredSessions(ActiveStatusSnapshot? snapshot = null)
     {
         snapshot ??= this._lastSnapshot;
-        bool showArchived = this._sessionsVisuals.IsArchivedTabSelected;
-        var filtered = this._cachedSessions.Where(s => s.IsArchived == showArchived).ToList();
+        var selectedTab = this._sessionsVisuals.SelectedTabName;
+        var filtered = this._cachedSessions.Where(s => string.Equals(s.Tab, selectedTab, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        // Sort: pinned first, then running, then by date
-        var pinnedOrder = Program._settings.PinnedOrder;
-        filtered.Sort((a, b) =>
+        SortSessions(filtered, snapshot, Program._settings.PinnedOrder);
+
+        return filtered;
+    }
+
+    /// <summary>
+    /// Sorts sessions: pinned first, then running, then by date.
+    /// Extracted for testability.
+    /// </summary>
+    internal static void SortSessions(List<NamedSession> sessions, ActiveStatusSnapshot? snapshot, string pinnedOrder)
+    {
+        sessions.Sort((a, b) =>
         {
             if (a.IsPinned != b.IsPinned)
             {
@@ -1341,8 +1444,6 @@ internal class MainForm : Form
 
             return b.LastModified.CompareTo(a.LastModified);
         });
-
-        return filtered;
     }
 
     /// <summary>
@@ -1361,17 +1462,16 @@ internal class MainForm : Form
         var searchQuery = this._sessionsVisuals.SearchBox.Text;
         var isSearching = !string.IsNullOrWhiteSpace(searchQuery);
 
-        var activeSessions = this._cachedSessions.Where(s => !s.IsArchived).ToList();
-        var archivedSessions = this._cachedSessions.Where(s => s.IsArchived).ToList();
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tabName in Program._settings.SessionTabs)
+        {
+            var tabSessions = this._cachedSessions.Where(s => string.Equals(s.Tab, tabName, StringComparison.OrdinalIgnoreCase)).ToList();
+            counts[tabName] = isSearching
+                ? SessionService.SearchSessions(tabSessions, searchQuery!).Count
+                : tabSessions.Count;
+        }
 
-        int activeCount = isSearching
-            ? SessionService.SearchSessions(activeSessions, searchQuery!).Count
-            : activeSessions.Count;
-        int archivedCount = isSearching
-            ? SessionService.SearchSessions(archivedSessions, searchQuery!).Count
-            : archivedSessions.Count;
-
-        this._sessionsVisuals.UpdateTabCounts(activeCount, archivedCount);
+        this._sessionsVisuals.UpdateTabCounts(counts);
     }
 
     private async void RefreshActiveStatusAsync()

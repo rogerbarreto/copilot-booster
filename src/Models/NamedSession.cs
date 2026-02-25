@@ -45,9 +45,9 @@ internal class NamedSession
     public DateTime LastModified { get; set; }
 
     /// <summary>
-    /// Gets or sets whether this session has been archived.
+    /// Gets or sets the tab this session belongs to. Defaults to the first configured tab.
     /// </summary>
-    public bool IsArchived { get; set; }
+    public string Tab { get; set; } = "Active";
 
     /// <summary>
     /// Gets or sets whether this session is pinned to the top of the list.
