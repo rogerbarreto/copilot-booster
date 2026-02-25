@@ -582,45 +582,7 @@ internal class MainForm : Form
 
         this._sessionsVisuals.GetSessionFiles = (sid) =>
         {
-            var files = new List<(string Name, string FullPath)>();
-            var sessionDir = Path.Combine(Program.SessionStateDir, sid);
-            if (!Directory.Exists(sessionDir))
-            {
-                return files;
-            }
-
-            // Reserved Copilot CLI files and folders to exclude
-            var reservedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "events.jsonl", "workspace.yaml", "session.db"
-            };
-            var reservedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "rewind-snapshots"
-            };
-
-            foreach (var file in Directory.EnumerateFiles(sessionDir, "*", SearchOption.AllDirectories))
-            {
-                var relativePath = Path.GetRelativePath(sessionDir, file);
-                var fileName = Path.GetFileName(file);
-
-                // Skip files in reserved directories
-                var firstSegment = relativePath.Split(Path.DirectorySeparatorChar)[0];
-                if (reservedDirs.Contains(firstSegment))
-                {
-                    continue;
-                }
-
-                // Skip reserved root-level files
-                if (!relativePath.Contains(Path.DirectorySeparatorChar) && reservedFiles.Contains(fileName))
-                {
-                    continue;
-                }
-
-                files.Add((relativePath, file));
-            }
-
-            return files;
+            return GetSessionFiles(Program.SessionStateDir, sid);
         };
 
         this._sessionsVisuals.HasPlanFile = (sid) =>
@@ -1901,4 +1863,51 @@ internal class MainForm : Form
     /// <param name="sessionStateDir">The directory containing session state data.</param>
     /// <returns>A list of named sessions.</returns>
     internal static List<NamedSession> LoadNamedSessions(string sessionStateDir) => SessionService.LoadNamedSessions(sessionStateDir);
+
+    /// <summary>
+    /// Lists user files in a session folder, excluding reserved Copilot CLI files and directories.
+    /// Returns (relativePath, fullPath) tuples.
+    /// </summary>
+    internal static List<(string Name, string FullPath)> GetSessionFiles(string sessionStateDir, string sessionId)
+    {
+        var files = new List<(string Name, string FullPath)>();
+        var sessionDir = Path.Combine(sessionStateDir, sessionId);
+        if (!Directory.Exists(sessionDir))
+        {
+            return files;
+        }
+
+        // Reserved Copilot CLI files and folders to exclude
+        var reservedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "events.jsonl", "workspace.yaml", "session.db"
+        };
+        var reservedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "rewind-snapshots"
+        };
+
+        foreach (var file in Directory.EnumerateFiles(sessionDir, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(sessionDir, file);
+            var fileName = Path.GetFileName(file);
+
+            // Skip files in reserved directories
+            var firstSegment = relativePath.Split(Path.DirectorySeparatorChar)[0];
+            if (reservedDirs.Contains(firstSegment))
+            {
+                continue;
+            }
+
+            // Skip reserved root-level files
+            if (!relativePath.Contains(Path.DirectorySeparatorChar) && reservedFiles.Contains(fileName))
+            {
+                continue;
+            }
+
+            files.Add((relativePath, file));
+        }
+
+        return files;
+    }
 }
