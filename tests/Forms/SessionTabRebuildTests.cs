@@ -132,4 +132,121 @@
             }
         });
     }
+
+    [Fact]
+    public void GridIsParentedOnSelectedTab_AfterConstruction()
+    {
+        RunOnSta(() =>
+        {
+            var grid = new DataGridView
+            {
+                AllowUserToAddRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+            grid.Columns.Add("Status", "");
+            grid.Columns.Add("Name", "Name");
+            grid.Columns.Add("CWD", "CWD");
+            grid.Columns.Add("LastModified", "LastModified");
+            grid.Columns.Add("Active", "Active");
+
+            var tracker = new ActiveStatusTracker();
+
+            using var form = new Form();
+            var panel = new Panel { Dock = DockStyle.Fill };
+            form.Controls.Add(panel);
+            panel.Controls.Add(grid);
+            form.Show();
+
+            var originalTabs = Program._settings?.SessionTabs;
+            try
+            {
+                if (Program._settings == null)
+                {
+                    Program._settings = LauncherSettings.CreateDefault();
+                }
+
+                Program._settings.SessionTabs = ["Active", "Archived"];
+
+                var visuals = new ExistingSessionsVisuals(panel, tracker);
+
+                // After construction, the grid must be a child of the selected (first) tab
+                var selectedTab = visuals.SessionTabs.SelectedTab;
+                Assert.NotNull(selectedTab);
+                Assert.Equal("Active", selectedTab.Tag);
+                Assert.True(
+                    selectedTab.Controls.Contains(visuals.SessionGrid),
+                    "Grid should be parented on the first tab after construction");
+            }
+            finally
+            {
+                form.Close();
+                if (Program._settings != null && originalTabs != null)
+                {
+                    Program._settings.SessionTabs = originalTabs;
+                }
+            }
+        });
+    }
+
+    [Fact]
+    public void GridIsParentedOnSelectedTab_AfterRebuild()
+    {
+        RunOnSta(() =>
+        {
+            var grid = new DataGridView
+            {
+                AllowUserToAddRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+            grid.Columns.Add("Status", "");
+            grid.Columns.Add("Name", "Name");
+            grid.Columns.Add("CWD", "CWD");
+            grid.Columns.Add("LastModified", "LastModified");
+            grid.Columns.Add("Active", "Active");
+
+            var tracker = new ActiveStatusTracker();
+
+            using var form = new Form();
+            var panel = new Panel { Dock = DockStyle.Fill };
+            form.Controls.Add(panel);
+            panel.Controls.Add(grid);
+            form.Show();
+
+            var originalTabs = Program._settings?.SessionTabs;
+            try
+            {
+                if (Program._settings == null)
+                {
+                    Program._settings = LauncherSettings.CreateDefault();
+                }
+
+                Program._settings.SessionTabs = ["Active", "Archived"];
+
+                var visuals = new ExistingSessionsVisuals(panel, tracker);
+
+                // Select Archived tab
+                visuals.SessionTabs.SelectedIndex = 1;
+
+                // Add a tab and rebuild
+                Program._settings.SessionTabs = ["Active", "Archived", "Work"];
+                visuals.BuildSessionTabs();
+
+                // Grid should be on the restored "Archived" tab
+                var selectedTab = visuals.SessionTabs.SelectedTab;
+                Assert.NotNull(selectedTab);
+                Assert.Equal("Archived", selectedTab.Tag);
+                Assert.True(
+                    selectedTab.Controls.Contains(visuals.SessionGrid),
+                    "Grid should be parented on the previously selected tab after rebuild");
+            }
+            finally
+            {
+                form.Close();
+                if (Program._settings != null && originalTabs != null)
+                {
+                    Program._settings.SessionTabs = originalTabs;
+                }
+            }
+        });
+    }
 }

@@ -812,10 +812,14 @@ internal class ExistingSessionsVisuals
             }
         }
 
-        // Ensure the grid is parented on the selected tab
-        if (this.SessionTabs.SelectedTab != null)
+        // Ensure the grid is parented on the selected tab.
+        // SelectedTab may be null when the handle is not yet created (e.g. during construction),
+        // so fall back to the first tab page.
+        var targetTab = this.SessionTabs.SelectedTab ??
+            (this.SessionTabs.TabPages.Count > 0 ? this.SessionTabs.TabPages[0] : null);
+        if (targetTab != null)
         {
-            this.SessionTabs.SelectedTab.Controls.Add(this.SessionGrid);
+            targetTab.Controls.Add(this.SessionGrid);
         }
     }
 }
