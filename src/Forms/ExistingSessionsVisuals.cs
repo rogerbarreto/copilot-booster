@@ -55,8 +55,6 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenEdge;
     internal event Action<string>? OnSaveEdgeTabs;
     internal event Action<string>? OnDeleteSession;
-    internal event Action<string>? OnOpenFilesFolder;
-    internal event Action<string>? OnOpenPlan;
     internal event Action<string>? OnOpenSessionFolder;
     internal event Action<string>? OnOpenFile;
     internal event Action<string>? OnOpenCwdExplorer;
