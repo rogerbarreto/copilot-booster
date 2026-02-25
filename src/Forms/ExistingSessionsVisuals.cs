@@ -457,7 +457,21 @@ internal class ExistingSessionsVisuals
                 foreach (var (name, fullPath) in files)
                 {
                     var capturedPath = fullPath;
-                    var fileItem = new ToolStripMenuItem(name);
+                    Image? fileIcon = null;
+                    try
+                    {
+                        var ico = Icon.ExtractAssociatedIcon(fullPath);
+                        if (ico != null)
+                        {
+                            fileIcon = new Bitmap(ico.ToBitmap(), 16, 16);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore icon extraction failures
+                    }
+
+                    var fileItem = new ToolStripMenuItem(name) { Image = fileIcon };
                     fileItem.Click += (_, _) => this.OnOpenFile?.Invoke(capturedPath);
                     menuOpenFiles.DropDownItems.Add(fileItem);
                 }
