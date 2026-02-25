@@ -81,10 +81,10 @@ internal class LauncherSettings
 
     /// <summary>
     /// Gets or sets the sort order for pinned sessions.
-    /// Valid values: <c>"created"</c> (default, by creation/update time), <c>"alias"</c> (alphabetical by alias/name).
+    /// Valid values: <c>"running"</c> (default, running first then by date), <c>"created"</c> (by creation/update time), <c>"alias"</c> (alphabetical by alias/name).
     /// </summary>
     [JsonPropertyName("pinnedOrder")]
-    public string PinnedOrder { get; set; } = "created";
+    public string PinnedOrder { get; set; } = "running";
 
     /// <summary>
     /// Gets or sets whether renaming a session also updates the Edge anchor tab title.

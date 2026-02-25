@@ -941,8 +941,10 @@ internal class MainForm : Form
             Location = new Point(160, 4),
             Width = 180
         };
-        pinnedOrderCombo.Items.AddRange(new object[] { "Last updated (default)", "Alias / Name" });
-        pinnedOrderCombo.SelectedIndex = string.Equals(Program._settings.PinnedOrder, "alias", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        pinnedOrderCombo.Items.AddRange(new object[] { "Running first (default)", "Last updated", "Alias / Name" });
+        pinnedOrderCombo.SelectedIndex = string.Equals(Program._settings.PinnedOrder, "alias", StringComparison.OrdinalIgnoreCase) ? 2
+            : string.Equals(Program._settings.PinnedOrder, "created", StringComparison.OrdinalIgnoreCase) ? 1
+            : 0;
         pinnedOrderPanel.Controls.AddRange([pinnedOrderLabel, pinnedOrderCombo]);
 
         // Bottom buttons
@@ -985,7 +987,12 @@ internal class MainForm : Form
             Program._settings.UpdateEdgeTabOnRename = edgeRenameCheck.Checked;
             Program._settings.IdeSearchIgnoredDirs = ignoredDirsList.Items.Cast<string>().ToList();
             Program._settings.MaxActiveSessions = (int)maxSessionsBox.Value;
-            Program._settings.PinnedOrder = pinnedOrderCombo.SelectedIndex == 1 ? "alias" : "created";
+            Program._settings.PinnedOrder = pinnedOrderCombo.SelectedIndex switch
+            {
+                1 => "created",
+                2 => "alias",
+                _ => "running"
+            };
             this.TopMost = Program._settings.AlwaysOnTop;
             Program._settings.Save();
             this._sessionsVisuals.BuildGridContextMenu();
@@ -1280,6 +1287,7 @@ internal class MainForm : Form
     /// </summary>
     private List<NamedSession> GetFilteredSessions(ActiveStatusSnapshot? snapshot = null)
     {
+        snapshot ??= this._lastSnapshot;
         bool showArchived = this._sessionsVisuals.IsArchivedTabSelected;
         var filtered = this._cachedSessions.Where(s => s.IsArchived == showArchived).ToList();
 
@@ -1301,7 +1309,22 @@ internal class MainForm : Form
                     return string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
                 }
 
-                // Default: by LastModified descending (newest first)
+                if (string.Equals(pinnedOrder, "created", StringComparison.OrdinalIgnoreCase))
+                {
+                    return b.LastModified.CompareTo(a.LastModified);
+                }
+
+                // Default ("running"): running pinned first, then by date
+                if (snapshot != null)
+                {
+                    bool aRunning = snapshot.ActiveTextBySessionId.ContainsKey(a.Id);
+                    bool bRunning = snapshot.ActiveTextBySessionId.ContainsKey(b.Id);
+                    if (aRunning != bRunning)
+                    {
+                        return aRunning ? -1 : 1;
+                    }
+                }
+
                 return b.LastModified.CompareTo(a.LastModified);
             }
 
@@ -1316,7 +1339,7 @@ internal class MainForm : Form
                 }
             }
 
-            return 0;
+            return b.LastModified.CompareTo(a.LastModified);
         });
 
         return filtered;
@@ -1386,9 +1409,7 @@ internal class MainForm : Form
                 TaskCreationOptions.None,
                 StaTaskScheduler.Instance).ConfigureAwait(true);
 
-            var filtered = this.GetFilteredSessions();
-            this._sessionsVisuals.GridVisuals.ApplySnapshot(filtered, snapshot, this._sessionsVisuals.SearchBox.Text);
-            this.UpdateTabCounts();
+            this.PopulateGridWithFilter(snapshot);
 
             // Bell notification: detect transitions and fire toast
             this._bellService?.CheckAndNotify(snapshot);
