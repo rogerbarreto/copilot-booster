@@ -248,6 +248,7 @@ internal class SessionGridVisuals
         }
 
         var currentId = this._grid.CurrentRow?.Tag as string;
+        var scrollIndex = this._grid.FirstDisplayedScrollingRowIndex;
 
         this._grid.Rows.Clear();
 
@@ -315,6 +316,12 @@ internal class SessionGridVisuals
             {
                 this._grid.CurrentCell = this._grid.SelectedRows[0].Cells[0];
             }
+        }
+
+        // Restore scroll position
+        if (scrollIndex >= 0 && scrollIndex < this._grid.RowCount)
+        {
+            this._grid.FirstDisplayedScrollingRowIndex = scrollIndex;
         }
 
         this.AutoFitCwdColumn();
