@@ -139,4 +139,115 @@
 
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData("https://github.com/owner/repo.git", "GitHub")]
+    [InlineData("git@github.com:owner/repo.git", "GitHub")]
+    [InlineData("https://gitlab.com/owner/repo.git", "GitLab")]
+    [InlineData("https://bitbucket.org/owner/repo.git", "Bitbucket")]
+    [InlineData("https://dev.azure.com/org/project/_git/repo", "AzureDevOps")]
+    [InlineData("https://owner.visualstudio.com/project/_git/repo", "AzureDevOps")]
+    [InlineData("https://self-hosted.example.com/repo.git", "Unknown")]
+    public void DetectHostingPlatform_ReturnsCorrectPlatform(string url, string expectedPlatform)
+    {
+        var result = GitService.DetectHostingPlatform(url);
+        Assert.Equal(expectedPlatform, result.ToString());
+    }
+
+    [Fact]
+    public void GetPrRefPattern_ReturnsCorrectPatternForEachPlatform()
+    {
+        Assert.Equal("refs/pull/42/head", GitService.GetPrRefPattern(GitService.HostingPlatform.GitHub, 42));
+        Assert.Equal("refs/pull/99/head", GitService.GetPrRefPattern(GitService.HostingPlatform.AzureDevOps, 99));
+        Assert.Equal("refs/merge-requests/7/head", GitService.GetPrRefPattern(GitService.HostingPlatform.GitLab, 7));
+        Assert.Equal("refs/pull-requests/15/from", GitService.GetPrRefPattern(GitService.HostingPlatform.Bitbucket, 15));
+        Assert.Null(GitService.GetPrRefPattern(GitService.HostingPlatform.Unknown, 1));
+    }
+
+    [Theory]
+    [InlineData("https://github.com/owner/repo.git", "owner", "repo")]
+    [InlineData("https://github.com/owner/repo", "owner", "repo")]
+    [InlineData("git@github.com:owner/repo.git", "owner", "repo")]
+    [InlineData("git@github.com:owner/repo", "owner", "repo")]
+    [InlineData("https://github.com/microsoft/semantic-kernel.git", "microsoft", "semantic-kernel")]
+    public void ParseGitHubOwnerRepo_ReturnsCorrectParts(string url, string expectedOwner, string expectedRepo)
+    {
+        var result = GitService.ParseGitHubOwnerRepo(url);
+        Assert.NotNull(result);
+        Assert.Equal(expectedOwner, result.Value.owner);
+        Assert.Equal(expectedRepo, result.Value.repo);
+    }
+
+    [Theory]
+    [InlineData("https://gitlab.com/owner/repo.git")]
+    [InlineData("https://bitbucket.org/owner/repo.git")]
+    public void ParseGitHubOwnerRepo_ReturnsNullForNonGitHub(string url)
+    {
+        var result = GitService.ParseGitHubOwnerRepo(url);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveUniqueBranchName_ReturnBaseNameWhenNoWorktreeConflict()
+    {
+        // Even if a branch with the same name exists, if no worktree uses it, return the base name.
+        // We test with a temp git repo where no worktrees exist beyond the main one.
+        var repoPath = this.InitBareGitRepo();
+        var result = WorkspaceCreationService.ResolveUniqueBranchName(repoPath, "feature-x");
+        Assert.Equal("feature-x", result);
+    }
+
+    [Fact]
+    public void ResolveUniqueBranchName_AppendsSuffixWhenWorktreeUsesName()
+    {
+        var repoPath = this.InitBareGitRepo();
+        // The main worktree uses "main" as its branch
+        var result = WorkspaceCreationService.ResolveUniqueBranchName(repoPath, "main");
+        Assert.Equal("main-001", result);
+    }
+
+    [Fact]
+    public void LocalBranchExists_ReturnsFalseForNonExistentBranch()
+    {
+        var repoPath = this.InitBareGitRepo();
+        Assert.False(GitService.LocalBranchExists(repoPath, "nonexistent-branch"));
+    }
+
+    [Fact]
+    public void LocalBranchExists_ReturnsTrueForExistingBranch()
+    {
+        var repoPath = this.InitBareGitRepo();
+        Assert.True(GitService.LocalBranchExists(repoPath, "main"));
+    }
+
+    private string InitBareGitRepo()
+    {
+        var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
+        Directory.CreateDirectory(repoPath);
+
+        RunGitCmd(repoPath, "init");
+        RunGitCmd(repoPath, "config user.email test@test.com");
+        RunGitCmd(repoPath, "config user.name Test");
+        File.WriteAllText(Path.Combine(repoPath, "README.md"), "# Test");
+        RunGitCmd(repoPath, "add .");
+        RunGitCmd(repoPath, "commit -m \"init\"");
+
+        return repoPath;
+    }
+
+    private static void RunGitCmd(string workDir, string args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = System.Diagnostics.Process.Start(psi)!;
+        proc.WaitForExit(10_000);
+    }
 }

@@ -276,12 +276,38 @@ internal class MainForm : Form
 
             if (!string.IsNullOrEmpty(selectedCwd))
             {
-                var sessionName = NewSessionNameVisuals.ShowNamePrompt();
-                if (sessionName == null)
+                var promptResult = NewSessionNameVisuals.ShowNamePrompt(selectedCwd);
+                if (promptResult == null)
                 {
                     return;
                 }
 
+                // Handle branch/PR checkout in the CWD before creating the session
+                if (promptResult.Action != BranchAction.None)
+                {
+                    var gitRoot = SessionService.FindGitRoot(selectedCwd);
+                    if (gitRoot != null)
+                    {
+                        (bool success, string error) checkoutResult = promptResult.Action switch
+                        {
+                            BranchAction.ExistingBranch when !string.IsNullOrEmpty(promptResult.BranchName) =>
+                                GitService.CheckoutBranch(gitRoot, promptResult.BranchName),
+                            BranchAction.NewBranch when !string.IsNullOrEmpty(promptResult.BranchName) && !string.IsNullOrEmpty(promptResult.BaseBranch) =>
+                                GitService.CheckoutNewBranch(gitRoot, promptResult.BranchName, promptResult.BaseBranch),
+                            BranchAction.FromPr when promptResult.PrNumber.HasValue && !string.IsNullOrEmpty(promptResult.Remote) && promptResult.Platform.HasValue =>
+                                GitService.FetchAndCheckoutPr(gitRoot, promptResult.Remote, promptResult.Platform.Value, promptResult.PrNumber.Value, $"pr-{promptResult.PrNumber.Value}"),
+                            _ => (true, "")
+                        };
+
+                        if (!checkoutResult.success)
+                        {
+                            MessageBox.Show($"Failed to switch branch:\n{checkoutResult.error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+                    }
+                }
+
+                var sessionName = promptResult.SessionName;
                 var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);
                 var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, sourceDir).ConfigureAwait(true);
                 if (newSessionId != null)
@@ -673,6 +699,19 @@ internal class MainForm : Form
         dirsTab.Controls.Add(dirsButtons);
         SettingsVisuals.ApplyTabInfo(dirsTab, "Directories the Copilot session is allowed to access.", "Directories the Copilot session is allowed to access for file operations.");
 
+        // Allowed URLs (global — stored in ~/.copilot/config.json)
+        var urlsTab = new TabPage("Allowed URLs");
+        var urlsList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = Application.IsDarkModeEnabled ? BorderStyle.None : BorderStyle.Fixed3D };
+        SettingsVisuals.ApplyThemedSelection(urlsList);
+        foreach (var url in CopilotConfigService.LoadAllowedUrls())
+        {
+            urlsList.Items.Add(url);
+        }
+        var urlsButtons = SettingsVisuals.CreateListButtons(urlsList, "URL or domain pattern:", "Add URL", addBrowse: false);
+        urlsTab.Controls.Add(urlsList);
+        urlsTab.Controls.Add(urlsButtons);
+        SettingsVisuals.ApplyTabInfo(urlsTab, "URLs allowed for web access (global Copilot CLI setting).", "URL patterns the Copilot CLI is allowed to access (e.g., https://github.com, https://*.example.com).");
+
         // IDEs
         var idesTab = new TabPage("IDEs");
         var idesList = new ListView
@@ -701,6 +740,7 @@ internal class MainForm : Form
 
         settingsTabs.TabPages.Add(toolsTab);
         settingsTabs.TabPages.Add(dirsTab);
+        settingsTabs.TabPages.Add(urlsTab);
         settingsTabs.TabPages.Add(idesTab);
 
         // IDE Search Ignored Dirs tab
@@ -925,6 +965,7 @@ internal class MainForm : Form
         {
             Program._settings.AllowedTools = toolsList.Items.Cast<string>().ToList();
             Program._settings.AllowedDirs = dirsList.Items.Cast<string>().ToList();
+            CopilotConfigService.SaveAllowedUrls(urlsList.Items.Cast<string>().ToList());
             Program._settings.DefaultWorkDir = workDirBox.Text.Trim();
             Program._settings.WorkspacesDir = wsDirBox.Text.Trim();
             Program._settings.Ides = [];

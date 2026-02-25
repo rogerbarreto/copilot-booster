@@ -1,6 +1,11 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Services;
 
@@ -12,6 +17,8 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal static class WorkspaceCreatorVisuals
 {
+    private static readonly HttpClient s_httpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+
     /// <summary>
     /// Displays a modal dialog for creating a git worktree workspace from the specified repository.
     /// </summary>
@@ -25,6 +32,26 @@ internal static class WorkspaceCreatorVisuals
         const int FormWidthValue = 500;
         const int CollapsedHeight = 340;
         const int ExpandedHeight = 410;
+        const int PrModeHeight = 420;
+
+        var branches = WorkspaceCreationService.GetBranches(repoPath);
+        var remotes = GitService.GetRemotes(repoPath);
+        var currentBranch = GitService.GetCurrentBranch(repoPath);
+
+        // Detect hosting platforms for each remote
+        var remotePlatforms = new Dictionary<string, GitService.HostingPlatform>();
+        foreach (var remote in remotes)
+        {
+            var url = GitService.GetRemoteUrl(repoPath, remote);
+            if (!string.IsNullOrEmpty(url))
+            {
+                var platform = GitService.DetectHostingPlatform(url);
+                if (platform != GitService.HostingPlatform.Unknown)
+                {
+                    remotePlatforms[remote] = platform;
+                }
+            }
+        }
 
         var form = new Form
         {
@@ -88,19 +115,49 @@ internal static class WorkspaceCreatorVisuals
         form.Controls.Add(lblSessionNameHelper);
         y += 22;
 
-        // Create as new branch checkbox
-        var chkNewBranch = new CheckBox
+        // Radio buttons — horizontal layout
+        var rdoExistingBranch = new RadioButton
         {
-            Text = "Create as new branch",
+            Text = "Existing branch",
             AutoSize = true,
             Location = new Point(14, y),
-            Checked = false
+            Checked = true
         };
-        form.Controls.Add(chkNewBranch);
+        form.Controls.Add(rdoExistingBranch);
+
+        var rdoNewBranch = new RadioButton
+        {
+            Text = "New branch",
+            AutoSize = true,
+            Location = new Point(160, y)
+        };
+        form.Controls.Add(rdoNewBranch);
+
+        var rdoFromPr = new RadioButton
+        {
+            Text = "From PR #",
+            AutoSize = true,
+            Location = new Point(290, y),
+            Visible = remotePlatforms.Count > 0
+        };
+        form.Controls.Add(rdoFromPr);
         y += 26;
 
-        // Workspace Name (new branch only — hidden by default)
-        var branchNameY = y;
+        // Current branch info label
+        var lblCurrentBranch = new Label
+        {
+            Text = $"Current branch: {currentBranch}",
+            ForeColor = Color.Gray,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 8f),
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = true
+        };
+        form.Controls.Add(lblCurrentBranch);
+
+        // --- New Branch controls (hidden by default) ---
+        var modeStartY = y;
+
         var lblName = new Label
         {
             Text = "New branch name *",
@@ -134,10 +191,10 @@ internal static class WorkspaceCreatorVisuals
 
         const int BranchFieldHeight = 68;
 
-        // Base Branch
+        // --- Shared branch dropdown (used in Existing Branch & New Branch modes) ---
         var lblBranch = new Label
         {
-            Text = "Base Branch",
+            Text = "Branch",
             AutoSize = true,
             Location = new Point(14, y)
         };
@@ -150,17 +207,14 @@ internal static class WorkspaceCreatorVisuals
             Width = 450
         };
 
-        var branches = WorkspaceCreationService.GetBranches(repoPath);
-        var remotes = GitService.GetRemotes(repoPath);
         foreach (var b in branches)
         {
-            cmbBranch.Items.Add(b);
+            cmbBranch.Items.Add(b == currentBranch ? $"* {b}" : b);
         }
 
-        var currentBranch = WorkspaceCreationService.GetCurrentBranch(repoPath);
-        if (!string.IsNullOrEmpty(currentBranch) && cmbBranch.Items.Contains(currentBranch))
+        if (!string.IsNullOrEmpty(currentBranch) && cmbBranch.Items.Contains($"* {currentBranch}"))
         {
-            cmbBranch.SelectedItem = currentBranch;
+            cmbBranch.SelectedItem = $"* {currentBranch}";
         }
         else if (cmbBranch.Items.Contains("main"))
         {
@@ -182,6 +236,89 @@ internal static class WorkspaceCreatorVisuals
             Location = new Point(14, y + 46)
         };
         form.Controls.Add(lblBranchHelper);
+
+        // --- PR mode controls (hidden by default) ---
+        var lblRemote = new Label
+        {
+            Text = "Remote",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblRemote);
+
+        var cmbRemote = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        foreach (var kv in remotePlatforms)
+        {
+            cmbRemote.Items.Add(kv.Key);
+        }
+        if (cmbRemote.Items.Contains("origin"))
+        {
+            cmbRemote.SelectedItem = "origin";
+        }
+        else if (cmbRemote.Items.Count > 0)
+        {
+            cmbRemote.SelectedIndex = 0;
+        }
+        form.Controls.Add(cmbRemote);
+
+        var lblPrNumber = new Label
+        {
+            Text = "PR Number *",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblPrNumber);
+
+        var txtPrNumber = new TextBox
+        {
+            PlaceholderText = "e.g., 42",
+            Location = new Point(14, y + 20),
+            Width = 360,
+            Visible = false
+        };
+        var txtPrNumberWrapper = SettingsVisuals.WrapWithBorder(txtPrNumber);
+        txtPrNumberWrapper.Visible = false;
+        form.Controls.Add(txtPrNumberWrapper);
+
+        var btnCheck = new Button
+        {
+            Text = "Check",
+            Width = 80,
+            Visible = false
+        };
+        form.Controls.Add(btnCheck);
+
+        var lblPrValidation = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            MaximumSize = new Size(450, 0),
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 8f),
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblPrValidation);
+
+        var chkUsePrTitle = new CheckBox
+        {
+            Text = "Use PR title as session name",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(chkUsePrTitle);
+
+        // Track PR validation state
+        bool prValidated = false;
+        string? fetchedPrTitle = null;
 
         // Preview label
         var lblPreview = new Label
@@ -212,47 +349,141 @@ internal static class WorkspaceCreatorVisuals
         form.Controls.Add(btnCreate);
         form.Controls.Add(btnCancel);
 
-        // Layout helper — repositions controls below the checkbox based on mode
+        // Layout helper — repositions controls based on selected mode
         void RelayoutControls()
         {
-            int cy = branchNameY;
-            bool isNewBranch = chkNewBranch.Checked;
+            int cy = modeStartY;
+            bool isNewBranch = rdoNewBranch.Checked;
+            bool isPrMode = rdoFromPr.Checked;
+            bool isExistingBranch = rdoExistingBranch.Checked;
 
+            // Current branch label — only visible in Existing Branch mode
+            lblCurrentBranch.Visible = isExistingBranch;
+            if (isExistingBranch)
+            {
+                lblCurrentBranch.Location = new Point(14, cy);
+                cy += 18;
+            }
+
+            // New branch name fields
             lblName.Visible = isNewBranch;
             txtName.Visible = isNewBranch;
             txtNameWrapper.Visible = isNewBranch;
             lblNameHelper.Visible = isNewBranch;
 
-            if (isNewBranch)
+            // Branch dropdown (visible in Existing Branch & New Branch modes)
+            lblBranch.Visible = !isPrMode;
+            cmbBranch.Visible = !isPrMode;
+            lblBranchHelper.Visible = !isPrMode;
+
+            // PR mode controls
+            lblRemote.Visible = isPrMode;
+            cmbRemote.Visible = isPrMode;
+            lblPrNumber.Visible = isPrMode;
+            txtPrNumber.Visible = isPrMode;
+            txtPrNumberWrapper.Visible = isPrMode;
+            btnCheck.Visible = isPrMode;
+            lblPrValidation.Visible = isPrMode;
+            // chkUsePrTitle visibility managed by validation logic
+
+            if (!isPrMode)
+            {
+                chkUsePrTitle.Visible = false;
+            }
+
+            if (isPrMode)
+            {
+                // Remote dropdown
+                lblRemote.Location = new Point(14, cy);
+                cmbRemote.Location = new Point(14, cy + 20);
+                cy += 50;
+
+                // PR number + Check button
+                lblPrNumber.Location = new Point(14, cy);
+                txtPrNumber.Location = new Point(14, cy + 20);
+                txtPrNumberWrapper.Location = new Point(14, cy + 20);
+                btnCheck.Location = new Point(384, cy + 19);
+                cy += 48;
+
+                // Validation label
+                lblPrValidation.Location = new Point(14, cy);
+                cy += Math.Max(20, lblPrValidation.PreferredHeight + 4);
+
+                // PR title checkbox
+                chkUsePrTitle.Location = new Point(14, cy);
+                if (chkUsePrTitle.Visible)
+                {
+                    cy += 24;
+                }
+
+                // Preview
+                lblPreview.Location = new Point(14, cy);
+                cy += 32;
+
+                // Buttons
+                btnCreate.Location = new Point(300, cy);
+                btnCancel.Location = new Point(390, cy);
+
+                btnCreate.Enabled = prValidated;
+                form.Height = cy + 70;
+            }
+            else if (isNewBranch)
             {
                 lblName.Location = new Point(14, cy);
                 txtName.Location = new Point(14, cy + 20);
                 txtNameWrapper.Location = new Point(14, cy + 20);
                 lblNameHelper.Location = new Point(14, cy + 46);
                 cy += BranchFieldHeight;
+
+                lblBranch.Text = "Base Branch";
+                lblBranchHelper.Text = "The branch to create the new branch from";
+
+                lblBranch.Location = new Point(14, cy);
+                cmbBranch.Location = new Point(14, cy + 20);
+                lblBranchHelper.Location = new Point(14, cy + 46);
+                lblPreview.Location = new Point(14, cy + 68);
+
+                int buttonY = cy + 100;
+                btnCreate.Location = new Point(300, buttonY);
+                btnCancel.Location = new Point(390, buttonY);
+
+                btnCreate.Enabled = true;
+                form.Height = ExpandedHeight;
             }
+            else
+            {
+                lblBranch.Text = "Branch";
+                lblBranchHelper.Text = "The existing branch to check out";
 
-            lblBranch.Text = isNewBranch ? "Base Branch" : "Branch";
-            lblBranchHelper.Text = isNewBranch
-                ? "The branch to create the new branch from"
-                : "The existing branch to check out";
+                lblBranch.Location = new Point(14, cy);
+                cmbBranch.Location = new Point(14, cy + 20);
+                lblBranchHelper.Location = new Point(14, cy + 46);
+                lblPreview.Location = new Point(14, cy + 68);
 
-            lblBranch.Location = new Point(14, cy);
-            cmbBranch.Location = new Point(14, cy + 20);
-            lblBranchHelper.Location = new Point(14, cy + 46);
+                int buttonY = cy + 100;
+                btnCreate.Location = new Point(300, buttonY);
+                btnCancel.Location = new Point(390, buttonY);
 
-            lblPreview.Location = new Point(14, cy + 68);
-
-            int buttonY = cy + 100;
-            btnCreate.Location = new Point(300, buttonY);
-            btnCancel.Location = new Point(390, buttonY);
-
-            form.Height = isNewBranch ? ExpandedHeight : CollapsedHeight;
+                btnCreate.Enabled = true;
+                form.Height = CollapsedHeight;
+            }
         }
 
         void UpdatePreview()
         {
-            if (chkNewBranch.Checked)
+            if (rdoFromPr.Checked)
+            {
+                var prText = txtPrNumber.Text.Trim();
+                if (int.TryParse(prText, out var prNum) && prNum > 0)
+                {
+                    lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, $"pr-{prNum}");
+                }
+                else
+                {
+                    lblPreview.Text = "";
+                }
+            }
+            else if (rdoNewBranch.Checked)
             {
                 var name = txtName.Text.Trim();
                 lblPreview.Text = string.IsNullOrEmpty(name)
@@ -261,7 +492,7 @@ internal static class WorkspaceCreatorVisuals
             }
             else
             {
-                var branch = cmbBranch.SelectedItem?.ToString();
+                var branch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ');
                 if (string.IsNullOrEmpty(branch))
                 {
                     lblPreview.Text = "";
@@ -274,21 +505,216 @@ internal static class WorkspaceCreatorVisuals
             }
         }
 
-        chkNewBranch.CheckedChanged += (s, e) => { RelayoutControls(); UpdatePreview(); };
+        void ResetPrValidation()
+        {
+            prValidated = false;
+            fetchedPrTitle = null;
+            lblPrValidation.Text = "";
+            lblPrValidation.ForeColor = Color.Black;
+            chkUsePrTitle.Visible = false;
+            chkUsePrTitle.Checked = false;
+            txtSessionName.ReadOnly = false;
+            if (rdoFromPr.Checked)
+            {
+                btnCreate.Enabled = false;
+            }
+        }
+
+        bool isValidating = false;
+
+        async Task ValidatePrAsync()
+        {
+            if (isValidating)
+            {
+                return;
+            }
+
+            var remoteName = cmbRemote.SelectedItem?.ToString();
+            var prText = txtPrNumber.Text.Trim();
+            if (string.IsNullOrEmpty(remoteName) || !int.TryParse(prText, out var prNum) || prNum <= 0)
+            {
+                lblPrValidation.Text = "Enter a valid PR number.";
+                lblPrValidation.ForeColor = Color.Red;
+                prValidated = false;
+                btnCreate.Enabled = false;
+                return;
+            }
+
+            if (!remotePlatforms.TryGetValue(remoteName, out var platform))
+            {
+                return;
+            }
+
+            isValidating = true;
+            lblPrValidation.Text = "Checking...";
+            lblPrValidation.ForeColor = Color.Gray;
+            btnCheck.Enabled = false;
+
+            bool found = false;
+            string? prTitle = null;
+            try
+            {
+                // Run git ls-remote and optional GitHub API title fetch entirely on background thread
+                (found, prTitle) = await Task.Run(async () =>
+                {
+                    var valid = GitService.ValidatePrRef(repoPath, remoteName, platform, prNum);
+                    string? title = null;
+
+                    if (valid && platform == GitService.HostingPlatform.GitHub)
+                    {
+                        try
+                        {
+                            var remoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
+                            if (!string.IsNullOrEmpty(remoteUrl))
+                            {
+                                var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
+                                if (parsed.HasValue)
+                                {
+                                    var (owner, repo) = parsed.Value;
+                                    var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/pulls/{prNum}";
+                                    var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+                                    request.Headers.Add("User-Agent", "CopilotBooster");
+                                    var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+                                    if (response.IsSuccessStatusCode)
+                                    {
+                                        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                        using var doc = JsonDocument.Parse(json);
+                                        if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                                        {
+                                            title = titleProp.GetString();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // API failure — don't affect the flow
+                        }
+                    }
+
+                    return (valid, title);
+                }).ConfigureAwait(true);
+            }
+            catch
+            {
+                found = false;
+            }
+
+            if (found)
+            {
+                lblPrValidation.Text = prTitle != null
+                    ? $"✅ PR #{prNum}: {prTitle}"
+                    : $"✅ PR #{prNum} found";
+                lblPrValidation.ForeColor = Color.Green;
+                prValidated = true;
+                btnCreate.Enabled = true;
+
+                if (prTitle != null)
+                {
+                    fetchedPrTitle = prTitle;
+                    chkUsePrTitle.Visible = true;
+                    RelayoutControls();
+                }
+            }
+            else
+            {
+                lblPrValidation.Text = $"❌ PR #{prNum} not found";
+                lblPrValidation.ForeColor = Color.Red;
+                prValidated = false;
+                btnCreate.Enabled = false;
+            }
+
+            btnCheck.Enabled = true;
+            isValidating = false;
+            UpdatePreview();
+        }
+
+        // Wire up radio button changes
+        void OnModeChanged(object? s, EventArgs e)
+        {
+            ResetPrValidation();
+            RelayoutControls();
+            UpdatePreview();
+        }
+
+        rdoExistingBranch.CheckedChanged += OnModeChanged;
+        rdoNewBranch.CheckedChanged += OnModeChanged;
+        rdoFromPr.CheckedChanged += OnModeChanged;
+
         txtName.TextChanged += (s, e) => UpdatePreview();
         cmbBranch.SelectedIndexChanged += (s, e) => UpdatePreview();
+        txtPrNumber.TextChanged += (s, e) => { ResetPrValidation(); UpdatePreview(); };
+        cmbRemote.SelectedIndexChanged += (s, e) => { ResetPrValidation(); UpdatePreview(); };
+
+        btnCheck.Click += async (s, e) => await ValidatePrAsync().ConfigureAwait(true);
+        txtPrNumber.Leave += async (s, e) =>
+        {
+            if (rdoFromPr.Checked && !string.IsNullOrWhiteSpace(txtPrNumber.Text) && !prValidated)
+            {
+                await ValidatePrAsync().ConfigureAwait(true);
+            }
+        };
+
+        chkUsePrTitle.CheckedChanged += (s, e) =>
+        {
+            if (chkUsePrTitle.Checked && fetchedPrTitle != null)
+            {
+                txtSessionName.Text = fetchedPrTitle;
+                txtSessionName.ReadOnly = true;
+            }
+            else
+            {
+                txtSessionName.ReadOnly = false;
+            }
+        };
 
         // Initial layout
         RelayoutControls();
         UpdatePreview();
 
-        btnCreate.Click += (s, e) =>
+        btnCreate.Click += async (s, e) =>
         {
-            var selectedBaseBranch = cmbBranch.SelectedItem?.ToString() ?? "main";
-
-            if (chkNewBranch.Checked)
+            if (rdoFromPr.Checked)
             {
-                // New branch mode — current behavior
+                // PR mode
+                var remoteName = cmbRemote.SelectedItem?.ToString();
+                var prText = txtPrNumber.Text.Trim();
+                if (string.IsNullOrEmpty(remoteName) || !int.TryParse(prText, out var prNum) || prNum <= 0)
+                {
+                    MessageBox.Show("Enter a valid PR number.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!prValidated)
+                {
+                    MessageBox.Show("Please validate the PR first.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var platform = remotePlatforms[remoteName];
+                btnCreate.Enabled = false;
+                btnCreate.Text = "Creating...";
+                var (worktreePath, success, error) = await Task.Run(() =>
+                    WorkspaceCreationService.CreateWorkspaceFromPr(
+                        repoPath, repoFolderName!, remoteName, prNum, platform)).ConfigureAwait(true);
+                if (success)
+                {
+                    var sessionName = txtSessionName.Text.Trim();
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                }
+                else
+                {
+                    btnCreate.Enabled = true;
+                    btnCreate.Text = "Create";
+                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else if (rdoNewBranch.Checked)
+            {
+                // New branch mode
                 var workspaceName = txtName.Text.Trim();
                 if (string.IsNullOrEmpty(workspaceName))
                 {
@@ -296,6 +722,7 @@ internal static class WorkspaceCreatorVisuals
                     return;
                 }
 
+                var selectedBaseBranch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ') ?? "main";
                 var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
                     repoPath, repoFolderName!, workspaceName, selectedBaseBranch);
                 if (success)
@@ -312,7 +739,8 @@ internal static class WorkspaceCreatorVisuals
             }
             else
             {
-                // Existing branch mode — create a local branch tracking the selected ref
+                // Existing branch mode
+                var selectedBaseBranch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ') ?? "main";
                 var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspaceFromExistingBranch(
                     repoPath, repoFolderName!, selectedBaseBranch);
                 if (success)

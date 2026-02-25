@@ -74,7 +74,37 @@ internal static class WorkspaceCreationService
 
         Directory.CreateDirectory(GitService.GetWorkspacesDir());
 
-        var (success, errorMsg) = GitService.CheckoutExistingBranchWorktree(repoPath, worktreePath, uniqueBranchName, sourceRef);
+        // If the local branch already exists, check it out directly; otherwise create it from the source ref.
+        var (success, errorMsg) = GitService.LocalBranchExists(repoPath, uniqueBranchName)
+            ? GitService.CheckoutLocalBranchWorktree(repoPath, worktreePath, uniqueBranchName)
+            : GitService.CheckoutExistingBranchWorktree(repoPath, worktreePath, uniqueBranchName, sourceRef);
+        return success
+            ? (worktreePath, true, null)
+            : (worktreePath, false, errorMsg);
+    }
+
+    /// <summary>
+    /// Creates a new workspace from a pull request number by fetching the PR ref and creating a worktree.
+    /// </summary>
+    internal static (string path, bool success, string? error) CreateWorkspaceFromPr(
+        string repoPath, string repoFolderName, string remote, int prNumber, GitService.HostingPlatform platform)
+    {
+        var baseBranchName = $"pr-{prNumber}";
+        var uniqueBranchName = ResolveUniqueBranchName(repoPath, baseBranchName);
+        var worktreePath = BuildWorkspacePath(repoFolderName, uniqueBranchName);
+
+        Directory.CreateDirectory(GitService.GetWorkspacesDir());
+
+        var (fetchSuccess, fetchError) = GitService.FetchPrRef(repoPath, remote, platform, prNumber);
+        if (!fetchSuccess)
+        {
+            return (worktreePath, false, $"Failed to fetch PR #{prNumber}: {fetchError}");
+        }
+
+        // If the local branch already exists, check it out directly; otherwise create it from FETCH_HEAD.
+        var (success, errorMsg) = GitService.LocalBranchExists(repoPath, uniqueBranchName)
+            ? GitService.CheckoutLocalBranchWorktree(repoPath, worktreePath, uniqueBranchName)
+            : GitService.CheckoutExistingBranchWorktree(repoPath, worktreePath, uniqueBranchName, "FETCH_HEAD");
         return success
             ? (worktreePath, true, null)
             : (worktreePath, false, errorMsg);
@@ -82,26 +112,20 @@ internal static class WorkspaceCreationService
 
     /// <summary>
     /// Resolves a unique local branch name by appending an incrementing suffix if needed.
-    /// Checks both existing branches and active worktrees.
+    /// Only conflicts with branches that are currently checked out in a worktree,
+    /// so the original branch name is preserved for push.default compatibility.
     /// </summary>
     internal static string ResolveUniqueBranchName(string repoPath, string baseName)
     {
-        var branches = GitService.GetBranches(repoPath);
         var worktrees = GitService.GetWorktrees(repoPath);
-        var remotes = GitService.GetRemotes(repoPath);
 
-        var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var b in branches)
-        {
-            existingNames.Add(GitService.GetLocalBranchName(b, remotes));
-        }
-
+        var worktreeBranches = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (_, branch) in worktrees)
         {
-            existingNames.Add(branch);
+            worktreeBranches.Add(branch);
         }
 
-        if (!existingNames.Contains(baseName))
+        if (!worktreeBranches.Contains(baseName))
         {
             return baseName;
         }
@@ -109,7 +133,7 @@ internal static class WorkspaceCreationService
         for (int i = 1; i <= 999; i++)
         {
             var candidate = $"{baseName}-{i:D3}";
-            if (!existingNames.Contains(candidate))
+            if (!worktreeBranches.Contains(candidate))
             {
                 return candidate;
             }
