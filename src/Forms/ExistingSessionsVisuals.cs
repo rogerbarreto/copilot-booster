@@ -425,6 +425,29 @@ internal class ExistingSessionsVisuals
         var appIcon = Program.AppIcon != null ? new Bitmap(Program.AppIcon.ToBitmap(), 16, 16) : null;
 
         // --- Session operations (top group) ---
+        var menuOpenPlan = new ToolStripMenuItem("Open Copilot Plan.md") { Image = TryExtractIcon(shell32, 70) };
+        menuOpenPlan.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenPlan?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenPlan);
+
+        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 250) };
+        menuOpenFilesFolder.ToolTipText = "Open artifacts folder dedicated to this session";
+        menuOpenFilesFolder.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenFilesFolder?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenFilesFolder);
+
         var menuOpenSession = new ToolStripMenuItem("Open Session") { Image = appIcon };
         menuOpenSession.Click += (s, e) =>
         {
@@ -569,32 +592,6 @@ internal class ExistingSessionsVisuals
             }
         };
         gridContextMenu.Items.Add(menuSaveEdgeTabs);
-
-        // --- Files ---
-        gridContextMenu.Items.Add(new ToolStripSeparator());
-
-        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 250) };
-        menuOpenFilesFolder.ToolTipText = "Open artifacts folder dedicated to this session";
-        menuOpenFilesFolder.Click += (s, e) =>
-        {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
-            {
-                this.OnOpenFilesFolder?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuOpenFilesFolder);
-
-        var menuOpenPlan = new ToolStripMenuItem("Open Copilot Plan.md") { Image = TryExtractIcon(shell32, 70) };
-        menuOpenPlan.Click += (s, e) =>
-        {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
-            {
-                this.OnOpenPlan?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuOpenPlan);
 
         // --- Delete (last) ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
