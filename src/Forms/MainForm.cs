@@ -557,21 +557,53 @@ internal class MainForm : Form
             }
         };
 
-        this._sessionsVisuals.OnOpenFilesFolder += (sid) =>
+        this._sessionsVisuals.OnOpenSessionFolder += (sid) =>
         {
-            var filesPath = SessionInteractionManager.GetSessionFilesPath(sid);
-            SessionInteractionManager.OpenSessionFilesFolder(sid);
-            _ = Task.Run(async () =>
+            var sessionDir = Path.Combine(Program.SessionStateDir, sid);
+            if (Directory.Exists(sessionDir))
             {
-                await Task.Delay(1500).ConfigureAwait(false);
-                this._activeTracker.TrackExplorerWindow(sid, filesPath, "Files");
-                this.BeginInvoke(this.RefreshActiveStatusAsync);
-            });
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", sessionDir) { UseShellExecute = true });
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(1500).ConfigureAwait(false);
+                    this._activeTracker.TrackExplorerWindow(sid, sessionDir, "Session");
+                    this.BeginInvoke(this.RefreshActiveStatusAsync);
+                });
+            }
         };
 
-        this._sessionsVisuals.OnOpenPlan += (sid) =>
+        this._sessionsVisuals.OnOpenFile += (fullPath) =>
         {
-            SessionInteractionManager.OpenPlanFile(Program.SessionStateDir, sid);
+            if (File.Exists(fullPath))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fullPath) { UseShellExecute = true });
+            }
+        };
+
+        this._sessionsVisuals.GetSessionFiles = (sid) =>
+        {
+            var files = new List<(string Name, string FullPath)>();
+            var sessionDir = Path.Combine(Program.SessionStateDir, sid);
+
+            // plan.md
+            var planPath = SessionInteractionManager.GetPlanFilePath(Program.SessionStateDir, sid);
+            if (File.Exists(planPath))
+            {
+                files.Add(("plan.md", planPath));
+            }
+
+            // All files in files/ subfolder recursively
+            var filesDir = SessionInteractionManager.GetSessionFilesPath(sid);
+            if (Directory.Exists(filesDir))
+            {
+                foreach (var file in Directory.EnumerateFiles(filesDir, "*", SearchOption.AllDirectories))
+                {
+                    var relativePath = Path.GetRelativePath(filesDir, file);
+                    files.Add((relativePath, file));
+                }
+            }
+
+            return files;
         };
 
         this._sessionsVisuals.HasPlanFile = (sid) =>

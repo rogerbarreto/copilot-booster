@@ -57,6 +57,8 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnDeleteSession;
     internal event Action<string>? OnOpenFilesFolder;
     internal event Action<string>? OnOpenPlan;
+    internal event Action<string>? OnOpenSessionFolder;
+    internal event Action<string>? OnOpenFile;
     internal event Action<string>? OnOpenCwdExplorer;
     internal event Action<string, string>? OnMoveToTab;
     internal event Action<string>? OnPinSession;
@@ -84,6 +86,12 @@ internal class ExistingSessionsVisuals
     /// Callback to determine if a session has a plan.md file.
     /// </summary>
     internal Func<string, bool>? HasPlanFile;
+
+    /// <summary>
+    /// Callback to list all files in a session's folder (plan.md + files subfolder).
+    /// Returns (relativePath, fullPath) tuples.
+    /// </summary>
+    internal Func<string, List<(string Name, string FullPath)>>? GetSessionFiles;
 
     /// <summary>
     /// Callback to determine if a session is pinned.
@@ -425,28 +433,37 @@ internal class ExistingSessionsVisuals
         var appIcon = Program.AppIcon != null ? new Bitmap(Program.AppIcon.ToBitmap(), 16, 16) : null;
 
         // --- Session operations (top group) ---
-        var menuOpenPlan = new ToolStripMenuItem("Open Copilot Plan.md") { Image = TryExtractIcon(shell32, 70) };
-        menuOpenPlan.Click += (s, e) =>
+        var menuOpenFiles = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 250) };
+        menuOpenFiles.DropDownItems.Add(new ToolStripMenuItem("Loading...") { Enabled = false });
+        menuOpenFiles.DropDownOpening += (s, e) =>
         {
+            menuOpenFiles.DropDownItems.Clear();
             var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            if (sid == null)
             {
-                this.OnOpenPlan?.Invoke(sid);
+                return;
             }
-        };
-        gridContextMenu.Items.Add(menuOpenPlan);
 
-        var menuOpenFilesFolder = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 250) };
-        menuOpenFilesFolder.ToolTipText = "Open artifacts folder dedicated to this session";
-        menuOpenFilesFolder.Click += (s, e) =>
-        {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            // Top item: open session folder in Explorer
+            var openFolder = new ToolStripMenuItem("Open Session Folder") { Image = TryExtractIcon(shell32, 3) };
+            openFolder.Click += (_, _) => this.OnOpenSessionFolder?.Invoke(sid);
+            menuOpenFiles.DropDownItems.Add(openFolder);
+
+            // List session files
+            var files = this.GetSessionFiles?.Invoke(sid);
+            if (files is { Count: > 0 })
             {
-                this.OnOpenFilesFolder?.Invoke(sid);
+                menuOpenFiles.DropDownItems.Add(new ToolStripSeparator());
+                foreach (var (name, fullPath) in files)
+                {
+                    var capturedPath = fullPath;
+                    var fileItem = new ToolStripMenuItem(name);
+                    fileItem.Click += (_, _) => this.OnOpenFile?.Invoke(capturedPath);
+                    menuOpenFiles.DropDownItems.Add(fileItem);
+                }
             }
         };
-        gridContextMenu.Items.Add(menuOpenFilesFolder);
+        gridContextMenu.Items.Add(menuOpenFiles);
 
         var menuOpenSession = new ToolStripMenuItem("Open Session") { Image = appIcon };
         menuOpenSession.Click += (s, e) =>
@@ -621,8 +638,7 @@ internal class ExistingSessionsVisuals
             menuOpenEdge.Enabled = !isMultiSelect;
             menuSaveEdgeTabs.Enabled = !isMultiSelect;
             menuOpenCwdExplorer.Enabled = !isMultiSelect;
-            menuOpenFilesFolder.Enabled = !isMultiSelect;
-            menuOpenPlan.Enabled = !isMultiSelect;
+            menuOpenFiles.Enabled = !isMultiSelect;
             menuDeleteSession.Enabled = !isMultiSelect;
 
             // IDE items — disable in multi-select
@@ -643,10 +659,6 @@ internal class ExistingSessionsVisuals
                 (hasGitRoot, isSubfolder) = this.GetGitRootInfo(sessionId);
             }
             menuOpenNewSessionWorkspace.Visible = !isMultiSelect && hasGitRoot;
-
-            // Plan visibility
-            bool hasPlan = !isMultiSelect && sessionId != null && this.HasPlanFile != null && this.HasPlanFile(sessionId);
-            menuOpenPlan.Visible = hasPlan;
 
             // Save Edge Tabs — only visible when Edge is open for this session
             bool edgeOpen = !isMultiSelect && sessionId != null && this.IsEdgeOpen != null && this.IsEdgeOpen(sessionId);
