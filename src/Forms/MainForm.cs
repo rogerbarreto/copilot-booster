@@ -584,23 +584,40 @@ internal class MainForm : Form
         {
             var files = new List<(string Name, string FullPath)>();
             var sessionDir = Path.Combine(Program.SessionStateDir, sid);
-
-            // plan.md
-            var planPath = SessionInteractionManager.GetPlanFilePath(Program.SessionStateDir, sid);
-            if (File.Exists(planPath))
+            if (!Directory.Exists(sessionDir))
             {
-                files.Add(("plan.md", planPath));
+                return files;
             }
 
-            // All files in files/ subfolder recursively
-            var filesDir = SessionInteractionManager.GetSessionFilesPath(sid);
-            if (Directory.Exists(filesDir))
+            // Reserved Copilot CLI files and folders to exclude
+            var reservedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                foreach (var file in Directory.EnumerateFiles(filesDir, "*", SearchOption.AllDirectories))
+                "events.jsonl", "workspace.yaml", "session.db"
+            };
+            var reservedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "rewind-snapshots"
+            };
+
+            foreach (var file in Directory.EnumerateFiles(sessionDir, "*", SearchOption.AllDirectories))
+            {
+                var relativePath = Path.GetRelativePath(sessionDir, file);
+                var fileName = Path.GetFileName(file);
+
+                // Skip files in reserved directories
+                var firstSegment = relativePath.Split(Path.DirectorySeparatorChar)[0];
+                if (reservedDirs.Contains(firstSegment))
                 {
-                    var relativePath = Path.GetRelativePath(filesDir, file);
-                    files.Add((relativePath, file));
+                    continue;
                 }
+
+                // Skip reserved root-level files
+                if (!relativePath.Contains(Path.DirectorySeparatorChar) && reservedFiles.Contains(fileName))
+                {
+                    continue;
+                }
+
+                files.Add((relativePath, file));
             }
 
             return files;
