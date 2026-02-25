@@ -428,6 +428,9 @@ internal class Program
         copilotArgs.Add("--add-dir");
         copilotArgs.Add($"\"{workDir}\"");
 
+        // Ensure the working directory is trusted in Copilot CLI config
+        CopilotConfigService.EnsureTrustedFolder(workDir);
+
         var settingsArgs = _settings.BuildCopilotArgs(copilotArgs.ToArray());
 
         // Set a trackable title for the console window

@@ -89,4 +89,50 @@ internal static class CopilotConfigService
             Program.Logger.LogError("Failed to save allowed_urls to config.json: {Error}", ex.Message);
         }
     }
+
+    /// <summary>
+    /// Ensures the given folder is in the Copilot CLI <c>trusted_folders</c> list.
+    /// </summary>
+    internal static void EnsureTrustedFolder(string folder)
+    {
+        try
+        {
+            JsonNode? root;
+            if (File.Exists(s_configPath))
+            {
+                var json = File.ReadAllText(s_configPath);
+                root = JsonNode.Parse(json) ?? new JsonObject();
+            }
+            else
+            {
+                var dir = Path.GetDirectoryName(s_configPath)!;
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                root = new JsonObject();
+            }
+
+            var trusted = root!["trusted_folders"]?.AsArray() ?? [];
+            foreach (var item in trusted)
+            {
+                if (string.Equals(item?.GetValue<string>(), folder, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            trusted.Add(folder);
+            root["trusted_folders"] = trusted;
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            File.WriteAllText(s_configPath, root.ToJsonString(options));
+            Program.Logger.LogInformation("Added trusted folder: {Folder}", folder);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogError("Failed to add trusted folder to config.json: {Error}", ex.Message);
+        }
+    }
 }

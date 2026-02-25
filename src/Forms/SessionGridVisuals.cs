@@ -56,6 +56,21 @@ internal class SessionGridVisuals
 
     private void WireEvents()
     {
+        // Select the row under the cursor on right-click so context menu targets it
+        this._grid.CellMouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+            {
+                var row = this._grid.Rows[e.RowIndex];
+                if (!row.Selected)
+                {
+                    this._grid.ClearSelection();
+                    row.Selected = true;
+                    this._grid.CurrentCell = row.Cells[0];
+                }
+            }
+        };
+
         this._grid.CellMouseClick += (s, e) =>
         {
             if (e.RowIndex < 0 || e.ColumnIndex != 4)
