@@ -470,17 +470,6 @@ internal class ExistingSessionsVisuals
         var menuMoveToTab = new ToolStripMenuItem("Move to") { Image = TryExtractIcon(shell32, 265) };
         gridContextMenu.Items.Add(menuMoveToTab);
 
-        var menuDeleteSession = new ToolStripMenuItem("Delete Session") { Image = TryExtractIcon(shell32, 131) };
-        menuDeleteSession.Click += (s, e) =>
-        {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
-            {
-                this.OnDeleteSession?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuDeleteSession);
-
         // --- New session operations ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
@@ -606,6 +595,20 @@ internal class ExistingSessionsVisuals
             }
         };
         gridContextMenu.Items.Add(menuOpenPlan);
+
+        // --- Delete (last) ---
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
+        var menuDeleteSession = new ToolStripMenuItem("Delete Session") { Image = TryExtractIcon(shell32, 131) };
+        menuDeleteSession.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnDeleteSession?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuDeleteSession);
 
         gridContextMenu.Opening += (s, e) =>
         {
