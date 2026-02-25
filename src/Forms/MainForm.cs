@@ -566,7 +566,7 @@ internal class MainForm : Form
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(1500).ConfigureAwait(false);
-                    this._activeTracker.TrackExplorerWindow(sid, sessionDir, "Session");
+                    this._activeTracker.TrackExplorerWindow(sid, sessionDir, "Files");
                     this.BeginInvoke(this.RefreshActiveStatusAsync);
                 });
             }
