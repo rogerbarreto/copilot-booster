@@ -835,7 +835,37 @@ internal class MainForm : Form
             sessionTabsList.Items.RemoveAt(sessionTabsList.SelectedIndex);
         };
 
-        sessionTabsButtons.Controls.AddRange([btnAddTab, btnRenameTab, btnRemoveTab]);
+        var btnMoveUp = new Button { Text = "▲ Up", Width = 70 };
+        btnMoveUp.Click += (s, e) =>
+        {
+            var idx = sessionTabsList.SelectedIndex;
+            if (idx <= 0)
+            {
+                return;
+            }
+
+            var item = sessionTabsList.Items[idx];
+            sessionTabsList.Items.RemoveAt(idx);
+            sessionTabsList.Items.Insert(idx - 1, item);
+            sessionTabsList.SelectedIndex = idx - 1;
+        };
+
+        var btnMoveDown = new Button { Text = "▼ Down", Width = 70 };
+        btnMoveDown.Click += (s, e) =>
+        {
+            var idx = sessionTabsList.SelectedIndex;
+            if (idx < 0 || idx >= sessionTabsList.Items.Count - 1)
+            {
+                return;
+            }
+
+            var item = sessionTabsList.Items[idx];
+            sessionTabsList.Items.RemoveAt(idx);
+            sessionTabsList.Items.Insert(idx + 1, item);
+            sessionTabsList.SelectedIndex = idx + 1;
+        };
+
+        sessionTabsButtons.Controls.AddRange([btnAddTab, btnRenameTab, btnRemoveTab, btnMoveUp, btnMoveDown]);
         sessionTabsTab.Controls.Add(sessionTabsList);
         sessionTabsTab.Controls.Add(sessionTabsButtons);
         SettingsVisuals.ApplyTabInfo(sessionTabsTab, "Organize sessions into tabs. First tab cannot be removed.", "Tabs for grouping sessions. Max 20 characters per name.");
