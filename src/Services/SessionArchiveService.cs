@@ -83,7 +83,7 @@ internal static class SessionArchiveService
 
     private static string GetDefaultTab()
     {
-        return Program._settings?.SessionTabs is { Count: > 0 } tabs ? tabs[0] : "Active";
+        return Program._settings?.DefaultTab ?? "Active";
     }
 
     /// <summary>

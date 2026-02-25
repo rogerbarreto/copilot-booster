@@ -115,6 +115,13 @@ internal class LauncherSettings
     public List<string> SessionTabs { get; set; } = ["Active", "Archived"];
 
     /// <summary>
+    /// Gets or sets the name of the default tab for new/untagged sessions.
+    /// Updated automatically when the default tab is renamed. Independent of tab order.
+    /// </summary>
+    [JsonPropertyName("defaultTab")]
+    public string DefaultTab { get; set; } = "Active";
+
+    /// <summary>
     /// Gets or sets the maximum number of session tabs allowed.
     /// Default is 5. Not exposed in the settings UI; edit the JSON file to change.
     /// </summary>

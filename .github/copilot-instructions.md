@@ -17,6 +17,7 @@
 - xUnit (not MSTest).
 - Validate assertions with integration tests whenever possible.
 - All tests must pass before any release.
+- **Bug fixes require a failing test first.** Before fixing a bug, write a test that reproduces the issue and confirm it fails. Only then apply the fix and verify the test passes.
 
 ## Release Process
 

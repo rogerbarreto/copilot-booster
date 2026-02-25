@@ -299,4 +299,119 @@
             File.Delete(file);
         }
     }
+
+    [Fact]
+    public void ApplySessionStates_UntaggedSessions_AssignedToActiveTab_RegardlessOfTabOrder()
+    {
+        // Scenario: user reorders tabs so "Work" is first, "Active" is second.
+        // Sessions with no stored tab state should still get "Active" (the DefaultTab),
+        // not "Work" (which is just at position 0).
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "new-session", Summary = "New" },
+            new() { Id = "existing-session", Summary = "Existing" }
+        };
+
+        // "existing-session" has an explicit "Active" tab in state
+        var states = new Dictionary<string, SessionArchiveService.SessionState>
+        {
+            ["existing-session"] = new() { Tab = "Active" }
+        };
+
+        // DefaultTab is still "Active" — tab order doesn't matter
+        MainForm.ApplySessionStates(sessions, states, "Active");
+
+        // The existing session keeps its explicit "Active" tab
+        Assert.Equal("Active", sessions[1].Tab);
+
+        // The new session (no state) gets the DefaultTab
+        Assert.Equal("Active", sessions[0].Tab);
+    }
+
+    [Fact]
+    public void ApplySessionStates_EmptyTabInState_AssignedToActiveTab_RegardlessOfTabOrder()
+    {
+        // Session has a state entry but Tab is empty (legacy or cleared)
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "legacy-session", Summary = "Legacy" }
+        };
+
+        var states = new Dictionary<string, SessionArchiveService.SessionState>
+        {
+            ["legacy-session"] = new() { Tab = "" }
+        };
+
+        // DefaultTab is "Active" regardless of tab order
+        MainForm.ApplySessionStates(sessions, states, "Active");
+
+        Assert.Equal("Active", sessions[0].Tab);
+    }
+
+    [Theory]
+    [InlineData("Main")]
+    [InlineData("Default")]
+    [InlineData("Sessions")]
+    [InlineData("My Tab")]
+    public void ApplySessionStates_RenamedFirstTab_UntaggedSessionsGetRenamedDefault(string renamedFirst)
+    {
+        // User renamed "Active" → renamedFirst. DefaultTab was updated to match.
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "new-session", Summary = "New" }
+        };
+
+        var states = new Dictionary<string, SessionArchiveService.SessionState>();
+
+        // DefaultTab tracks the rename
+        MainForm.ApplySessionStates(sessions, states, renamedFirst);
+
+        Assert.Equal(renamedFirst, sessions[0].Tab);
+    }
+
+    [Theory]
+    [InlineData("Main")]
+    [InlineData("Default")]
+    [InlineData("Sessions")]
+    [InlineData("My Tab")]
+    public void ApplySessionStates_RenamedFirstTab_EmptyStateGetsRenamedDefault(string renamedFirst)
+    {
+        // Session has state entry with empty Tab (legacy migration).
+        // DefaultTab was updated when user renamed "Active" → renamedFirst.
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "legacy", Summary = "Legacy" }
+        };
+
+        var states = new Dictionary<string, SessionArchiveService.SessionState>
+        {
+            ["legacy"] = new() { Tab = "" }
+        };
+
+        MainForm.ApplySessionStates(sessions, states, renamedFirst);
+
+        Assert.Equal(renamedFirst, sessions[0].Tab);
+    }
+
+    [Theory]
+    [InlineData("Main")]
+    [InlineData("Default")]
+    [InlineData("Sessions")]
+    public void ApplySessionStates_RenamedFirstTab_ReorderedToSecond_UntaggedStillGetsDefault(string renamedFirst)
+    {
+        // User renamed "Active" → renamedFirst, then moved it to position 1.
+        // DefaultTab is still renamedFirst (name-based, not positional).
+        // Untagged sessions should get the DefaultTab, not whatever is at index 0.
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = "new-session", Summary = "New" }
+        };
+
+        var states = new Dictionary<string, SessionArchiveService.SessionState>();
+
+        // DefaultTab is renamedFirst regardless of position
+        MainForm.ApplySessionStates(sessions, states, renamedFirst);
+
+        Assert.Equal(renamedFirst, sessions[0].Tab);
+    }
 }

@@ -814,6 +814,12 @@ internal class MainForm : Form
 
             sessionTabsList.Items[sessionTabsList.SelectedIndex] = newName;
             SessionArchiveService.RenameTab(Program.SessionStateFile, oldName, newName);
+
+            // Keep DefaultTab in sync when the default tab is renamed
+            if (string.Equals(Program._settings.DefaultTab, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                Program._settings.DefaultTab = newName;
+            }
         };
 
         var btnRemoveTab = new Button { Text = "Remove", Width = 70 };
@@ -1389,8 +1395,15 @@ internal class MainForm : Form
     /// </summary>
     private void ApplySessionStates(List<NamedSession> sessions)
     {
-        var defaultTab = Program._settings.SessionTabs.Count > 0 ? Program._settings.SessionTabs[0] : "Active";
         var states = SessionArchiveService.Load(Program.SessionStateFile);
+        ApplySessionStates(sessions, states, Program._settings.DefaultTab);
+    }
+
+    /// <summary>
+    /// Core logic for applying tab/pin states — extracted for testability.
+    /// </summary>
+    internal static void ApplySessionStates(List<NamedSession> sessions, Dictionary<string, SessionArchiveService.SessionState> states, string defaultTab)
+    {
         foreach (var session in sessions)
         {
             if (states.TryGetValue(session.Id, out var state))
