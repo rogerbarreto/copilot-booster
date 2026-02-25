@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace CopilotBooster.Services;
@@ -53,6 +54,90 @@ internal static class WorkspaceCreationService
         return success
             ? (worktreePath, true, null)
             : (worktreePath, false, errorMsg);
+    }
+
+    /// <summary>
+    /// Creates a new workspace with a local branch tracking the specified ref.
+    /// If a local branch with the same name already exists, appends an incrementing suffix (001, 002, etc.).
+    /// </summary>
+    /// <param name="repoPath">The git repository root path.</param>
+    /// <param name="repoFolderName">The repository folder name.</param>
+    /// <param name="sourceRef">The source ref to branch from (e.g., "main", "origin/feature").</param>
+    /// <returns>A tuple containing the worktree path, success flag, and optional error message.</returns>
+    internal static (string path, bool success, string? error) CreateWorkspaceFromExistingBranch(
+        string repoPath, string repoFolderName, string sourceRef)
+    {
+        var remotes = GitService.GetRemotes(repoPath);
+        var localBranchName = GitService.GetLocalBranchName(sourceRef, remotes);
+        var uniqueBranchName = ResolveUniqueBranchName(repoPath, localBranchName);
+        var worktreePath = BuildWorkspacePath(repoFolderName, uniqueBranchName);
+
+        Directory.CreateDirectory(GitService.GetWorkspacesDir());
+
+        var (success, errorMsg) = GitService.CheckoutExistingBranchWorktree(repoPath, worktreePath, uniqueBranchName, sourceRef);
+        return success
+            ? (worktreePath, true, null)
+            : (worktreePath, false, errorMsg);
+    }
+
+    /// <summary>
+    /// Resolves a unique local branch name by appending an incrementing suffix if needed.
+    /// Checks both existing branches and active worktrees.
+    /// </summary>
+    internal static string ResolveUniqueBranchName(string repoPath, string baseName)
+    {
+        var branches = GitService.GetBranches(repoPath);
+        var worktrees = GitService.GetWorktrees(repoPath);
+        var remotes = GitService.GetRemotes(repoPath);
+
+        var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var b in branches)
+        {
+            existingNames.Add(GitService.GetLocalBranchName(b, remotes));
+        }
+
+        foreach (var (_, branch) in worktrees)
+        {
+            existingNames.Add(branch);
+        }
+
+        if (!existingNames.Contains(baseName))
+        {
+            return baseName;
+        }
+
+        for (int i = 1; i <= 999; i++)
+        {
+            var candidate = $"{baseName}-{i:D3}";
+            if (!existingNames.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return $"{baseName}-{Guid.NewGuid():N}";
+    }
+
+    /// <summary>
+    /// Checks whether a branch is already checked out in an existing worktree.
+    /// </summary>
+    /// <param name="repoPath">The git repository root path.</param>
+    /// <param name="sourceRef">The ref to check (e.g., "main", "origin/feature"). Compares against local branch names.</param>
+    /// <returns>The worktree path if the branch is in use, or <c>null</c> if available.</returns>
+    internal static string? IsBranchInWorktree(string repoPath, string sourceRef)
+    {
+        var remotes = GitService.GetRemotes(repoPath);
+        var localBranchName = GitService.GetLocalBranchName(sourceRef, remotes);
+        var worktrees = GitService.GetWorktrees(repoPath);
+        foreach (var (path, branch) in worktrees)
+        {
+            if (string.Equals(branch, localBranchName, StringComparison.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

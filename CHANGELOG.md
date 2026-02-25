@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.4] - 2026-02-25
+
+### Added
+
+- **Workspace from existing branch** — create a new workspace by checking out an existing local or remote branch via `git worktree`, with automatic local tracking branch creation.
+- **Configurable workspaces directory** — new setting to choose where workspaces are created instead of using the default `_workspaces` folder next to the repo.
+- **Auto-trust workspace directories** — session working directories are now automatically passed as `--add-dir` to the Copilot CLI, preventing repeated "trust this folder" prompts.
+- **Duplicate settings guard** — adding an allowed tool or directory that already exists in the list is silently ignored.
+
+### Fixed
+
+- **Edge collection crash** — fixed `Collection was modified` exception in `CheckEdgeTabChanges` by snapshotting the tracked workspaces dictionary before enumeration.
+- **Bell notification crash** — fixed `Balloon tip text must have a non-empty value` when session name is null or empty.
+- **Installer missing files** — `session.html` and `copilot.ico` are now correctly included in the publish output for the installer.
+- **Workspace folder naming** — sanitized folder names now coalesce special characters into single dashes instead of stripping them silently.
+
 ## [0.13.3] - 2026-02-20
 
 ### Added

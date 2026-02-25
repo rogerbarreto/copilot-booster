@@ -424,6 +424,10 @@ internal class Program
             copilotArgs.Add($"--resume {resumeSessionId}");
         }
 
+        // Always add the session working directory to allowed dirs
+        copilotArgs.Add("--add-dir");
+        copilotArgs.Add($"\"{workDir}\"");
+
         var settingsArgs = _settings.BuildCopilotArgs(copilotArgs.ToArray());
 
         // Set a trackable title for the console window

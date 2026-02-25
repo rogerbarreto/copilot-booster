@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
@@ -36,7 +35,10 @@ internal static class GitService
             return new List<string>();
         }
 
-        var branches = new HashSet<string>(StringComparer.Ordinal);
+        var localBranches = new List<string>();
+        var remoteBranches = new List<string>();
+        var seenLocal = new HashSet<string>(StringComparer.Ordinal);
+        var seenRemote = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -47,18 +49,35 @@ internal static class GitService
                 continue;
             }
 
-            if (trimmed.StartsWith("remotes/origin/"))
+            if (trimmed.StartsWith("remotes/"))
             {
-                trimmed = trimmed["remotes/origin/".Length..];
+                // Keep as "origin/branch" for display
+                var remoteRef = trimmed["remotes/".Length..];
+                if (!string.IsNullOrEmpty(remoteRef) && seenRemote.Add(remoteRef))
+                {
+                    remoteBranches.Add(remoteRef);
+                }
             }
-
-            if (!string.IsNullOrEmpty(trimmed))
+            else if (!string.IsNullOrEmpty(trimmed) && seenLocal.Add(trimmed))
             {
-                branches.Add(trimmed);
+                localBranches.Add(trimmed);
             }
         }
 
-        return branches.ToList();
+        // Local branches first, then remote-only branches (skip remotes that duplicate a local)
+        var result = new List<string>(localBranches);
+        foreach (var remote in remoteBranches)
+        {
+            // Remote refs are "origin/branch" — strip remote prefix for dedup against local
+            var slashIdx = remote.IndexOf('/');
+            var localName = slashIdx >= 0 ? remote[(slashIdx + 1)..] : remote;
+            if (!seenLocal.Contains(localName))
+            {
+                result.Add(remote);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -93,6 +112,140 @@ internal static class GitService
     }
 
     /// <summary>
+    /// Creates a new Git worktree with a local branch tracking the specified ref.
+    /// </summary>
+    /// <param name="repoPath">The root directory of the Git repository.</param>
+    /// <param name="worktreePath">The file-system path for the new worktree.</param>
+    /// <param name="localBranchName">The name for the new local branch.</param>
+    /// <param name="sourceRef">The source ref to branch from (e.g., "main", "origin/feature").</param>
+    /// <returns>A tuple indicating success and, on failure, the error message.</returns>
+    internal static (bool success, string error) CheckoutExistingBranchWorktree(string repoPath, string worktreePath, string localBranchName, string sourceRef)
+    {
+        var (exitCode, _, stderr) = RunGit(repoPath, $"worktree add -b {localBranchName} \"{worktreePath}\" {sourceRef}");
+        return exitCode == 0 ? (true, "") : (false, stderr.Trim());
+    }
+
+    /// <summary>
+    /// Lists all active worktrees and their checked-out branches.
+    /// </summary>
+    /// <param name="repoPath">The root directory of the Git repository.</param>
+    /// <returns>A list of tuples containing the worktree path and branch name.</returns>
+    internal static List<(string path, string branch)> GetWorktrees(string repoPath)
+    {
+        var (exitCode, stdout, _) = RunGit(repoPath, "worktree list --porcelain");
+        if (exitCode != 0)
+        {
+            return [];
+        }
+
+        return ParseWorktreeList(stdout);
+    }
+
+    /// <summary>
+    /// Parses the porcelain output of <c>git worktree list</c> into path/branch tuples.
+    /// </summary>
+    internal static List<(string path, string branch)> ParseWorktreeList(string porcelainOutput)
+    {
+        var result = new List<(string path, string branch)>();
+        string? currentPath = null;
+
+        foreach (var line in porcelainOutput.Split('\n', StringSplitOptions.None))
+        {
+            var trimmed = line.TrimEnd('\r');
+            if (trimmed.StartsWith("worktree "))
+            {
+                currentPath = trimmed["worktree ".Length..];
+            }
+            else if (trimmed.StartsWith("branch ") && currentPath != null)
+            {
+                var branch = trimmed["branch ".Length..];
+                // Strip refs/heads/ prefix
+                if (branch.StartsWith("refs/heads/"))
+                {
+                    branch = branch["refs/heads/".Length..];
+                }
+
+                result.Add((currentPath, branch));
+            }
+            else if (trimmed.Length == 0)
+            {
+                currentPath = null;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Gets the list of configured remote names for the repository.
+    /// </summary>
+    internal static List<string> GetRemotes(string repoPath)
+    {
+        var (exitCode, stdout, _) = RunGit(repoPath, "remote");
+        if (exitCode != 0)
+        {
+            return ["origin"];
+        }
+
+        var remotes = new List<string>();
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            if (!string.IsNullOrEmpty(trimmed))
+            {
+                remotes.Add(trimmed);
+            }
+        }
+
+        return remotes.Count > 0 ? remotes : ["origin"];
+    }
+
+    /// <summary>
+    /// Extracts the local branch name from a ref, stripping any remote prefix.
+    /// For example, "origin/feature/login" becomes "feature/login"; "main" stays "main";
+    /// "feature/login" stays "feature/login" (no remote prefix).
+    /// </summary>
+    internal static string GetLocalBranchName(string refName)
+    {
+        return refName;
+    }
+
+    /// <summary>
+    /// Extracts the local branch name from a ref, stripping the remote prefix if it matches a known remote.
+    /// </summary>
+    internal static string GetLocalBranchName(string refName, List<string> remotes)
+    {
+        var slashIndex = refName.IndexOf('/');
+        if (slashIndex < 0)
+        {
+            return refName;
+        }
+
+        var prefix = refName[..slashIndex];
+        if (remotes.Contains(prefix))
+        {
+            return refName[(slashIndex + 1)..];
+        }
+
+        return refName;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if the ref looks like a remote branch (e.g., "origin/main").
+    /// </summary>
+    internal static bool IsRemoteRef(string refName, List<string> remotes)
+    {
+        var slashIndex = refName.IndexOf('/');
+        if (slashIndex < 0)
+        {
+            return false;
+        }
+
+        var prefix = refName[..slashIndex];
+        return remotes.Contains(prefix);
+    }
+
+    /// <summary>
     /// Combines a repository folder name and branch name into a safe directory name.
     /// </summary>
     /// <param name="repoName">The repository folder name.</param>
@@ -101,8 +254,9 @@ internal static class GitService
     internal static string SanitizeWorkspaceDirName(string repoName, string branchName)
     {
         var combined = $"{repoName}-{branchName}";
-        combined = combined.Replace('/', '-').Replace('\\', '-');
-        combined = Regex.Replace(combined, @"[^a-zA-Z0-9\-_.]", "");
+        combined = Regex.Replace(combined, @"[^a-zA-Z0-9\-_.]", "-");
+        combined = Regex.Replace(combined, @"-{2,}", "-");
+        combined = combined.Trim('-');
         return combined;
     }
 
@@ -111,6 +265,21 @@ internal static class GitService
     /// </summary>
     /// <returns>The full path to the workspaces directory under the user's application data folder.</returns>
     internal static string GetWorkspacesDir()
+    {
+        var configured = Program._settings?.WorkspacesDir;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        return GetDefaultWorkspacesDir();
+    }
+
+    /// <summary>
+    /// Gets the default root directory for CopilotBooster workspaces.
+    /// </summary>
+    /// <returns>The full path to the default workspaces directory under the user's application data folder.</returns>
+    internal static string GetDefaultWorkspacesDir()
     {
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CopilotBooster", "Workspaces");
     }

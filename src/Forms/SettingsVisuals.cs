@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 
@@ -80,8 +81,11 @@ internal static class SettingsVisuals
                 using var fbd = new FolderBrowserDialog();
                 if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
                 {
-                    listBox.Items.Add(fbd.SelectedPath);
-                    listBox.SelectedIndex = listBox.Items.Count - 1;
+                    if (!listBox.Items.Cast<string>().Any(x => string.Equals(x, fbd.SelectedPath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        listBox.Items.Add(fbd.SelectedPath);
+                        listBox.SelectedIndex = listBox.Items.Count - 1;
+                    }
                 }
             }
             else
@@ -89,8 +93,11 @@ internal static class SettingsVisuals
                 var value = PromptInput(addTitle, promptText, "");
                 if (!string.IsNullOrWhiteSpace(value))
                 {
-                    listBox.Items.Add(value);
-                    listBox.SelectedIndex = listBox.Items.Count - 1;
+                    if (!listBox.Items.Cast<string>().Any(x => string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        listBox.Items.Add(value);
+                        listBox.SelectedIndex = listBox.Items.Count - 1;
+                    }
                 }
             }
             listBox.Focus();

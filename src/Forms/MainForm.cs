@@ -743,6 +743,37 @@ internal class MainForm : Form
         };
         workDirPanel.Controls.AddRange([workDirLabel, SettingsVisuals.WrapWithBorder(workDirBox), workDirBrowse]);
 
+        // Workspaces Dir
+        var wsDirPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
+        var wsDirLabel = new Label { Text = "Workspaces Dir:", AutoSize = true, Location = new Point(8, 12) };
+        var wsDirBox = new TextBox
+        {
+            Text = Program._settings.WorkspacesDir,
+            PlaceholderText = GitService.GetDefaultWorkspacesDir(),
+            Location = new Point(130, 9),
+            Width = 400,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+        };
+        var wsDirBrowse = new Button
+        {
+            Text = "...",
+            Width = 30,
+            Location = new Point(535, 8),
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        wsDirBrowse.Click += (s, e) =>
+        {
+            using var fbd = new FolderBrowserDialog
+            {
+                SelectedPath = string.IsNullOrWhiteSpace(wsDirBox.Text) ? GitService.GetDefaultWorkspacesDir() : wsDirBox.Text
+            };
+            if (fbd.ShowDialog() == DialogResult.OK)
+            {
+                wsDirBox.Text = fbd.SelectedPath;
+            }
+        };
+        wsDirPanel.Controls.AddRange([wsDirLabel, SettingsVisuals.WrapWithBorder(wsDirBox), wsDirBrowse]);
+
         // Notifications
         var notifyPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
         var notifyOnBellCheck = new CheckBox
@@ -895,6 +926,7 @@ internal class MainForm : Form
             Program._settings.AllowedTools = toolsList.Items.Cast<string>().ToList();
             Program._settings.AllowedDirs = dirsList.Items.Cast<string>().ToList();
             Program._settings.DefaultWorkDir = workDirBox.Text.Trim();
+            Program._settings.WorkspacesDir = wsDirBox.Text.Trim();
             Program._settings.Ides = [];
             foreach (ListViewItem item in idesList.Items)
             {
@@ -939,6 +971,7 @@ internal class MainForm : Form
         settingsContainer.Controls.Add(edgeRenamePanel);
         settingsContainer.Controls.Add(notifyPanel);
         settingsContainer.Controls.Add(workDirPanel);
+        settingsContainer.Controls.Add(wsDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
 
         dialog.Controls.Add(settingsContainer);

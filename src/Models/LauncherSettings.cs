@@ -36,6 +36,13 @@ internal class LauncherSettings
     public string DefaultWorkDir { get; set; } = "";
 
     /// <summary>
+    /// Gets or sets the custom directory for git worktree workspaces.
+    /// When empty, uses the default location (<c>%APPDATA%\CopilotBooster\Workspaces</c>).
+    /// </summary>
+    [JsonPropertyName("workspacesDir")]
+    public string WorkspacesDir { get; set; } = "";
+
+    /// <summary>
     /// Gets or sets the list of configured IDE entries.
     /// </summary>
     [JsonPropertyName("ides")]

@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>copilot.ico</ApplicationIcon>
     <AssemblyName>CopilotBooster</AssemblyName>
-    <Version>0.13.3</Version>
+    <Version>0.13.4</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <Nullable>enable</Nullable>
@@ -20,9 +20,11 @@
   <ItemGroup>
     <Content Include="copilot.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
     <Content Include="session.html">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
   <ItemGroup>

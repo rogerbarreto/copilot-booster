@@ -22,6 +22,10 @@ internal static class WorkspaceCreatorVisuals
         (string WorktreePath, string? SessionName)? result = null;
         var repoFolderName = Path.GetFileName(repoPath);
 
+        const int formWidthValue = 500;
+        const int collapsedHeight = 340;
+        const int expandedHeight = 410;
+
         var form = new Form
         {
             Text = "Create New Workspace",
@@ -30,8 +34,8 @@ internal static class WorkspaceCreatorVisuals
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
-            Width = 500,
-            Height = 380,
+            Width = formWidthValue,
+            Height = collapsedHeight,
             TopMost = Program._settings.AlwaysOnTop
         };
 
@@ -84,24 +88,38 @@ internal static class WorkspaceCreatorVisuals
         form.Controls.Add(lblSessionNameHelper);
         y += 22;
 
-        // Workspace Name
+        // Create as new branch checkbox
+        var chkNewBranch = new CheckBox
+        {
+            Text = "Create as new branch",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Checked = false
+        };
+        form.Controls.Add(chkNewBranch);
+        y += 26;
+
+        // Workspace Name (new branch only — hidden by default)
+        var branchNameY = y;
         var lblName = new Label
         {
-            Text = "Workspace feature branch name *",
+            Text = "New branch name *",
             AutoSize = true,
-            Location = new Point(14, y)
+            Location = new Point(14, y),
+            Visible = false
         };
         form.Controls.Add(lblName);
-        y += 20;
 
         var txtName = new TextBox
         {
             PlaceholderText = "i.e: issues/123-new-issue",
-            Location = new Point(14, y),
-            Width = 450
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
         };
-        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtName));
-        y += 26;
+        var txtNameWrapper = SettingsVisuals.WrapWithBorder(txtName);
+        txtNameWrapper.Visible = false;
+        form.Controls.Add(txtNameWrapper);
 
         var lblNameHelper = new Label
         {
@@ -109,10 +127,12 @@ internal static class WorkspaceCreatorVisuals
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,
-            Location = new Point(14, y)
+            Location = new Point(14, y + 46),
+            Visible = false
         };
         form.Controls.Add(lblNameHelper);
-        y += 22;
+
+        const int branchFieldHeight = 68;
 
         // Base Branch
         var lblBranch = new Label
@@ -122,16 +142,16 @@ internal static class WorkspaceCreatorVisuals
             Location = new Point(14, y)
         };
         form.Controls.Add(lblBranch);
-        y += 20;
 
         var cmbBranch = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(14, y),
+            Location = new Point(14, y + 20),
             Width = 450
         };
 
         var branches = WorkspaceCreationService.GetBranches(repoPath);
+        var remotes = GitService.GetRemotes(repoPath);
         foreach (var b in branches)
         {
             cmbBranch.Items.Add(b);
@@ -152,7 +172,6 @@ internal static class WorkspaceCreatorVisuals
         }
 
         form.Controls.Add(cmbBranch);
-        y += 26;
 
         var lblBranchHelper = new Label
         {
@@ -160,10 +179,9 @@ internal static class WorkspaceCreatorVisuals
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,
-            Location = new Point(14, y)
+            Location = new Point(14, y + 46)
         };
         form.Controls.Add(lblBranchHelper);
-        y += 22;
 
         // Preview label
         var lblPreview = new Label
@@ -171,71 +189,146 @@ internal static class WorkspaceCreatorVisuals
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 8f, FontStyle.Italic),
             AutoSize = true,
-            Location = new Point(14, y),
+            Location = new Point(14, y + 68),
             MaximumSize = new Size(460, 0)
         };
         form.Controls.Add(lblPreview);
-
-        void UpdatePreview()
-        {
-            var name = txtName.Text.Trim();
-            if (string.IsNullOrEmpty(name))
-            {
-                lblPreview.Text = "";
-            }
-            else
-            {
-                lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, name);
-            }
-        }
-
-        txtName.TextChanged += (s, e) => UpdatePreview();
 
         // Buttons
         var btnCreate = new Button
         {
             Text = "Create",
             DialogResult = DialogResult.None,
-            Width = 80,
-            Location = new Point(300, 265)
+            Width = 80
         };
 
         var btnCancel = new Button
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
-            Width = 80,
-            Location = new Point(390, 265)
-        };
-
-        btnCreate.Click += (s, e) =>
-        {
-            var workspaceName = txtName.Text.Trim();
-            if (string.IsNullOrEmpty(workspaceName))
-            {
-                MessageBox.Show("Workspace name is required.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            var selectedBaseBranch = cmbBranch.SelectedItem?.ToString() ?? "main";
-
-            var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
-                repoPath, repoFolderName!, workspaceName, selectedBaseBranch);
-            if (success)
-            {
-                var sessionName = txtSessionName.Text.Trim();
-                result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
-                form.DialogResult = DialogResult.OK;
-                form.Close();
-            }
-            else
-            {
-                MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            Width = 80
         };
 
         form.Controls.Add(btnCreate);
         form.Controls.Add(btnCancel);
+
+        // Layout helper — repositions controls below the checkbox based on mode
+        void RelayoutControls()
+        {
+            int cy = branchNameY;
+            bool isNewBranch = chkNewBranch.Checked;
+
+            lblName.Visible = isNewBranch;
+            txtName.Visible = isNewBranch;
+            txtNameWrapper.Visible = isNewBranch;
+            lblNameHelper.Visible = isNewBranch;
+
+            if (isNewBranch)
+            {
+                lblName.Location = new Point(14, cy);
+                txtName.Location = new Point(14, cy + 20);
+                txtNameWrapper.Location = new Point(14, cy + 20);
+                lblNameHelper.Location = new Point(14, cy + 46);
+                cy += branchFieldHeight;
+            }
+
+            lblBranch.Text = isNewBranch ? "Base Branch" : "Branch";
+            lblBranchHelper.Text = isNewBranch
+                ? "The branch to create the new branch from"
+                : "The existing branch to check out";
+
+            lblBranch.Location = new Point(14, cy);
+            cmbBranch.Location = new Point(14, cy + 20);
+            lblBranchHelper.Location = new Point(14, cy + 46);
+
+            lblPreview.Location = new Point(14, cy + 68);
+
+            int buttonY = cy + 100;
+            btnCreate.Location = new Point(300, buttonY);
+            btnCancel.Location = new Point(390, buttonY);
+
+            form.Height = isNewBranch ? expandedHeight : collapsedHeight;
+        }
+
+        void UpdatePreview()
+        {
+            if (chkNewBranch.Checked)
+            {
+                var name = txtName.Text.Trim();
+                lblPreview.Text = string.IsNullOrEmpty(name)
+                    ? ""
+                    : WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, name);
+            }
+            else
+            {
+                var branch = cmbBranch.SelectedItem?.ToString();
+                if (string.IsNullOrEmpty(branch))
+                {
+                    lblPreview.Text = "";
+                }
+                else
+                {
+                    var localName = GitService.GetLocalBranchName(branch, remotes);
+                    lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, localName);
+                }
+            }
+        }
+
+        chkNewBranch.CheckedChanged += (s, e) => { RelayoutControls(); UpdatePreview(); };
+        txtName.TextChanged += (s, e) => UpdatePreview();
+        cmbBranch.SelectedIndexChanged += (s, e) => UpdatePreview();
+
+        // Initial layout
+        RelayoutControls();
+        UpdatePreview();
+
+        btnCreate.Click += (s, e) =>
+        {
+            var selectedBaseBranch = cmbBranch.SelectedItem?.ToString() ?? "main";
+
+            if (chkNewBranch.Checked)
+            {
+                // New branch mode — current behavior
+                var workspaceName = txtName.Text.Trim();
+                if (string.IsNullOrEmpty(workspaceName))
+                {
+                    MessageBox.Show("Branch name is required.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
+                    repoPath, repoFolderName!, workspaceName, selectedBaseBranch);
+                if (success)
+                {
+                    var sessionName = txtSessionName.Text.Trim();
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                }
+                else
+                {
+                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                // Existing branch mode — create a local branch tracking the selected ref
+                var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspaceFromExistingBranch(
+                    repoPath, repoFolderName!, selectedBaseBranch);
+                if (success)
+                {
+                    var sessionName = txtSessionName.Text.Trim();
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                }
+                else
+                {
+                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        };
+
         form.AcceptButton = btnCreate;
         form.CancelButton = btnCancel;
 

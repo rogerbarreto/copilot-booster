@@ -867,5 +867,5 @@ internal class ActiveStatusTracker
     /// Returns all currently tracked Edge workspace services for change detection.
     /// </summary>
     internal IEnumerable<EdgeWorkspaceService> GetTrackedEdgeWorkspaces()
-        => this._edgeWorkspaces.Values;
+        => this._edgeWorkspaces.Values.ToList();
 }
