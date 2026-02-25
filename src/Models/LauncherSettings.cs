@@ -126,7 +126,7 @@ internal class LauncherSettings
     /// Default is 5. Not exposed in the settings UI; edit the JSON file to change.
     /// </summary>
     [JsonPropertyName("maxSessionTabs")]
-    public int MaxSessionTabs { get; set; } = 5;
+    public int MaxSessionTabs { get; set; } = 10;
 
     /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
