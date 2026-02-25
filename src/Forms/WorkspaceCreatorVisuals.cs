@@ -22,9 +22,9 @@ internal static class WorkspaceCreatorVisuals
         (string WorktreePath, string? SessionName)? result = null;
         var repoFolderName = Path.GetFileName(repoPath);
 
-        const int formWidthValue = 500;
-        const int collapsedHeight = 340;
-        const int expandedHeight = 410;
+        const int FormWidthValue = 500;
+        const int CollapsedHeight = 340;
+        const int ExpandedHeight = 410;
 
         var form = new Form
         {
@@ -34,8 +34,8 @@ internal static class WorkspaceCreatorVisuals
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
-            Width = formWidthValue,
-            Height = collapsedHeight,
+            Width = FormWidthValue,
+            Height = CollapsedHeight,
             TopMost = Program._settings.AlwaysOnTop
         };
 
@@ -132,7 +132,7 @@ internal static class WorkspaceCreatorVisuals
         };
         form.Controls.Add(lblNameHelper);
 
-        const int branchFieldHeight = 68;
+        const int BranchFieldHeight = 68;
 
         // Base Branch
         var lblBranch = new Label
@@ -229,7 +229,7 @@ internal static class WorkspaceCreatorVisuals
                 txtName.Location = new Point(14, cy + 20);
                 txtNameWrapper.Location = new Point(14, cy + 20);
                 lblNameHelper.Location = new Point(14, cy + 46);
-                cy += branchFieldHeight;
+                cy += BranchFieldHeight;
             }
 
             lblBranch.Text = isNewBranch ? "Base Branch" : "Branch";
@@ -247,7 +247,7 @@ internal static class WorkspaceCreatorVisuals
             btnCreate.Location = new Point(300, buttonY);
             btnCancel.Location = new Point(390, buttonY);
 
-            form.Height = isNewBranch ? expandedHeight : collapsedHeight;
+            form.Height = isNewBranch ? ExpandedHeight : CollapsedHeight;
         }
 
         void UpdatePreview()
