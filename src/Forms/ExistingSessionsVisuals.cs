@@ -128,7 +128,12 @@ internal class ExistingSessionsVisuals
         this.SessionTabs.SelectedIndexChanged += (s, e) =>
         {
             // Move the grid to the newly selected tab
-            var selectedTab = this.SessionTabs.SelectedTab!;
+            var selectedTab = this.SessionTabs.SelectedTab;
+            if (selectedTab == null)
+            {
+                return;
+            }
+
             selectedTab.Controls.Add(this.SessionGrid);
             this.OnTabChanged?.Invoke();
         };
