@@ -294,12 +294,15 @@ internal class SessionGridVisuals
         if (selectedIds.Count > 0)
         {
             this._grid.ClearSelection();
+
+            // Find the rows to restore
             DataGridViewRow? currentRow = null;
+            var rowsToSelect = new List<DataGridViewRow>();
             foreach (DataGridViewRow row in this._grid.Rows)
             {
                 if (row.Tag is string id && selectedIds.Contains(id))
                 {
-                    row.Selected = true;
+                    rowsToSelect.Add(row);
                     if (string.Equals(id, currentId, StringComparison.OrdinalIgnoreCase))
                     {
                         currentRow = row;
@@ -307,14 +310,20 @@ internal class SessionGridVisuals
                 }
             }
 
-            // Restore CurrentCell so GetSelectedSessionId() stays in sync
+            // Set CurrentCell first (this clears selection in FullRowSelect mode),
+            // then restore all selected rows so multi-selection is preserved.
             if (currentRow != null)
             {
                 this._grid.CurrentCell = currentRow.Cells[0];
             }
-            else if (this._grid.SelectedRows.Count > 0)
+            else if (rowsToSelect.Count > 0)
             {
-                this._grid.CurrentCell = this._grid.SelectedRows[0].Cells[0];
+                this._grid.CurrentCell = rowsToSelect[0].Cells[0];
+            }
+
+            foreach (var row in rowsToSelect)
+            {
+                row.Selected = true;
             }
         }
 
