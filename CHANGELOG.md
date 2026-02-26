@@ -15,17 +15,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Running-first default sort** — sessions with active processes are automatically sorted to the top. Configurable via Settings with three modes: Running first (default), Last updated, Alias/Name.
 - **Test-first bug fix workflow** — added to copilot-instructions.md: all bug fixes require a failing test before the fix is applied.
 
-### Fixed
-
-- **Session list ordering** — new sessions now respect the current sort/filter instead of appearing at the end of the list.
-- **Context menu targeting** — right-clicking a session row now correctly selects it before showing the context menu.
-- **Grid empty on startup** — fixed grid not displaying on any tab after initial load by falling back to TabPages[0] when the TabControl handle isn't created yet.
-- **Tab rebuild crash** — fixed NullReferenceException when saving settings after adding a new tab (TabPages.Clear fires SelectedIndexChanged with null SelectedTab).
-- **Selection sync after refresh** — CurrentCell now stays in sync with the user's selection after the 3-second auto-refresh re-sorts rows.
-- **Multi-selection lost on refresh** — fixed CurrentCell assignment clearing multi-selection in FullRowSelect mode by setting it before marking additional rows.
-- **Scroll position reset on refresh** — grid scroll position is now preserved across the auto-refresh cycle.
-- **Default tab leak on reorder** — untagged sessions no longer leak to the wrong tab when tabs are reordered.
-
 ### Changed
 
 - **Context menu layout** — Open Files moved to top, Delete Session moved to last position with separator.
