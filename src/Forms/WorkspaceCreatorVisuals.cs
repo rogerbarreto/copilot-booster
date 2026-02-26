@@ -32,7 +32,6 @@ internal static class WorkspaceCreatorVisuals
         const int FormWidthValue = 500;
         const int CollapsedHeight = 340;
         const int ExpandedHeight = 410;
-        const int PrModeHeight = 420;
 
         var branches = WorkspaceCreationService.GetBranches(repoPath);
         var remotes = GitService.GetRemotes(repoPath);

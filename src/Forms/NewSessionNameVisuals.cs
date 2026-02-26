@@ -168,8 +168,6 @@ internal static class NewSessionNameVisuals
 
         const int FormWidthValue = 500;
         const int SameBranchHeight = 220;
-        const int SwitchBranchHeight = 310;
-        const int PrModeHeight = 420;
 
         var form = new Form
         {
