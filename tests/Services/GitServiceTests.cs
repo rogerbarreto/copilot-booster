@@ -225,7 +225,7 @@
         var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
         Directory.CreateDirectory(repoPath);
 
-        RunGitCmd(repoPath, "init");
+        RunGitCmd(repoPath, "init -b main");
         RunGitCmd(repoPath, "config user.email test@test.com");
         RunGitCmd(repoPath, "config user.name Test");
         File.WriteAllText(Path.Combine(repoPath, "README.md"), "# Test");
