@@ -1486,7 +1486,7 @@ internal partial class MainForm : Form
         };
         var reservedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "rewind-snapshots"
+            "rewind-snapshots", "checkpoints"
         };
 
         foreach (var file in Directory.EnumerateFiles(sessionDir, "*", SearchOption.AllDirectories))

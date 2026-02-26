@@ -63,6 +63,8 @@
 
         CreateFile(dir, Path.Combine("rewind-snapshots", "index.json"));
         CreateFile(dir, Path.Combine("rewind-snapshots", "backups", "abc123-456"));
+        CreateFile(dir, Path.Combine("checkpoints", "index.md"));
+        CreateFile(dir, Path.Combine("checkpoints", "data.json"));
         CreateFile(dir, "plan.md");
 
         var result = MainForm.GetSessionFiles(this._tempDir, sid);
@@ -116,9 +118,10 @@
         CreateFile(dir, "workspace.yaml");
         CreateFile(dir, "session.db");
 
-        // Reserved folder
+        // Reserved folders
         CreateFile(dir, Path.Combine("rewind-snapshots", "index.json"));
         CreateFile(dir, Path.Combine("rewind-snapshots", "backups", "snap1"));
+        CreateFile(dir, Path.Combine("checkpoints", "index.md"));
 
         // User files
         CreateFile(dir, "plan.md");
@@ -168,12 +171,13 @@
     }
 
     [Fact]
-    public void GetSessionFiles_RewindSnapshots_CaseInsensitive()
+    public void GetSessionFiles_ReservedDirs_CaseInsensitive()
     {
         var sid = "test-session";
         var dir = this.CreateSessionDir(sid);
 
         CreateFile(dir, Path.Combine("Rewind-Snapshots", "index.json"));
+        CreateFile(dir, Path.Combine("CHECKPOINTS", "index.md"));
 
         var result = MainForm.GetSessionFiles(this._tempDir, sid);
 
