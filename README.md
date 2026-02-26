@@ -74,10 +74,11 @@ Each active context is a **clickable link** — click to focus the corresponding
 </p>
 
 Other session browser features:
-- **Multi-select** — hold Ctrl for individual selection or Shift for range selection; batch Pin/Unpin and Archive/Unarchive via context menu
+- **Multi-select** — hold Ctrl for individual selection or Shift for range selection; batch Pin/Unpin and Move to tab via context menu
 - **Search** — filter sessions by title, folder, or metadata as you type
-- **Active/Archived tabs** — archive sessions to keep your active list clean; unarchive anytime
+- **Configurable session tabs** — organize sessions into custom tabs (up to 10). Add, rename, remove, and reorder tabs in Settings. First tab is the default for new sessions.
 - **Pinned sessions** — pin sessions to keep them at the top regardless of sorting
+- **Running-first sorting** — sessions with active processes automatically float to the top
 - **Auto-refresh** — the list updates when new sessions appear or names change externally
 - **Auto-cleanup** — empty sessions with no activity are automatically removed
 
@@ -116,11 +117,11 @@ Right-click any session row to access all actions in a single context menu with 
 
 | Action | Description |
 |--------|-------------|
+| **Open Files** | Sub-menu listing session files (plan.md, files/ contents) with shell icons; top item opens session folder |
 | **Open Session** | Resume the session in its original working directory |
 | **Edit Session** | Rename the session or change its working directory |
 | **Pin / Unpin** | Pin sessions to keep them at the top of the list |
-| **Archive / Unarchive** | Move sessions to the Archived tab |
-| **Delete Session** | Soft-delete a session (instantly removed from the list) |
+| **Move to →** | Move sessions between configurable tabs |
 | **Open as New Copilot Session** | Start a fresh Copilot CLI session in the same directory |
 | **Open as New Copilot Session Workspace** | Create a Git worktree workspace (Git repos only) |
 | **Open Terminal** | Launch a terminal via Windows Terminal (wt.exe) |
@@ -128,8 +129,7 @@ Right-click any session row to access all actions in a single context menu with 
 | **Open in {IDE}** | Sub-menu with CWD/Repo Root folders + matched project files |
 | **Open in Edge** | Launch a managed Edge browser workspace |
 | **Save Edge State** | Manually save Edge tabs (visible when Edge is open) |
-| **Open Files** | Open the session's files folder |
-| **Open Copilot Plan.md** | Open the session's plan file (if it exists) |
+| **Delete Session** | Soft-delete a session (last item, separated) |
 
 ---
 

@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0] - 2026-02-26
+
+### Added
+
+- **Configurable session tabs** — replace hardcoded Active/Archived with user-defined tabs (up to 10). Manage tabs in Settings with Add, Rename, Remove, and reorder (Up/Down) buttons. Sessions can be moved between tabs via the right-click "Move to" submenu.
+- **Stable default tab identity** — new `DefaultTab` setting tracks the default tab by name, surviving renames and reorder operations. Legacy `IsArchived` sessions auto-migrate to an "Archived" tab.
+- **Tab reordering** — Up/Down buttons in Session Tabs settings to change tab display order.
+- **Dynamic Open Files submenu** — "Open Files" is now a submenu listing all user files in the session folder (plan.md, files/ subfolder) with shell-associated icons. Top item opens the session folder in Explorer. Reserved Copilot files (events.jsonl, workspace.yaml, session.db) and folders (rewind-snapshots, checkpoints) are excluded.
+- **Running-first default sort** — sessions with active processes are automatically sorted to the top. Configurable via Settings with three modes: Running first (default), Last updated, Alias/Name.
+- **Test-first bug fix workflow** — added to copilot-instructions.md: all bug fixes require a failing test before the fix is applied.
+
+### Fixed
+
+- **Session list ordering** — new sessions now respect the current sort/filter instead of appearing at the end of the list.
+- **Context menu targeting** — right-clicking a session row now correctly selects it before showing the context menu.
+- **Grid empty on startup** — fixed grid not displaying on any tab after initial load by falling back to TabPages[0] when the TabControl handle isn't created yet.
+- **Tab rebuild crash** — fixed NullReferenceException when saving settings after adding a new tab (TabPages.Clear fires SelectedIndexChanged with null SelectedTab).
+- **Selection sync after refresh** — CurrentCell now stays in sync with the user's selection after the 3-second auto-refresh re-sorts rows.
+- **Multi-selection lost on refresh** — fixed CurrentCell assignment clearing multi-selection in FullRowSelect mode by setting it before marking additional rows.
+- **Scroll position reset on refresh** — grid scroll position is now preserved across the auto-refresh cycle.
+- **Default tab leak on reorder** — untagged sessions no longer leak to the wrong tab when tabs are reordered.
+
+### Changed
+
+- **Context menu layout** — Open Files moved to top, Delete Session moved to last position with separator.
+- **Max session tabs** — increased from 5 to 10.
+- **Code organization** — extracted context menu handlers from MainForm into MainForm.ContextMenu.cs (partial class).
+
 ## [0.13.4] - 2026-02-25
 
 ### Added
