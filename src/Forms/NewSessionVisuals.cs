@@ -190,14 +190,29 @@ internal class NewSessionVisuals
         return null;
     }
 
+    private static Bitmap? TryGetExeIcon(string exePath)
+    {
+        try
+        {
+            exePath = exePath.Trim('"');
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                return TryExtractIcon(exePath, 0);
+            }
+        }
+        catch { /* ignore icon extraction failures */ }
+        return null;
+    }
+
     private void BuildCwdContextMenu()
     {
         var cwdContextMenu = new ContextMenuStrip();
         var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
         var imageres = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "imageres.dll");
         var appIcon = Program.AppIcon != null ? new Bitmap(Program.AppIcon.ToBitmap(), 16, 16) : null;
+        var copilotIcon = TryGetExeIcon(Program.CopilotExePath) ?? appIcon;
 
-        var menuNewSession = new ToolStripMenuItem("New Copilot Session") { Image = appIcon };
+        var menuNewSession = new ToolStripMenuItem("New Copilot Session") { Image = copilotIcon };
         menuNewSession.Click += async (s, e) =>
         {
             if (this.CwdListView.SelectedItems.Count > 0
@@ -211,7 +226,7 @@ internal class NewSessionVisuals
         };
         cwdContextMenu.Items.Add(menuNewSession);
 
-        var menuNewSessionWorkspace = new ToolStripMenuItem("New Copilot Session Workspace") { Image = appIcon?.Clone() as Image };
+        var menuNewSessionWorkspace = new ToolStripMenuItem("New Copilot Session Workspace") { Image = copilotIcon?.Clone() as Image };
         menuNewSessionWorkspace.Click += async (s, e) =>
         {
             if (this.CwdListView.SelectedItems.Count > 0

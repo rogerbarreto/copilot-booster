@@ -469,6 +469,7 @@ internal class ExistingSessionsVisuals
         var imageres = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "imageres.dll");
 
         var appIcon = Program.AppIcon != null ? new Bitmap(Program.AppIcon.ToBitmap(), 16, 16) : null;
+        var copilotIcon = TryGetExeIcon(Program.CopilotExePath) ?? appIcon;
 
         // --- Session operations (top group) ---
         var menuOpenFiles = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 250) };
@@ -517,7 +518,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenFiles);
 
-        var menuOpenSession = new ToolStripMenuItem("Open Session") { Image = appIcon };
+        var menuOpenSession = new ToolStripMenuItem("Open Session") { Image = copilotIcon };
         menuOpenSession.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -565,7 +566,7 @@ internal class ExistingSessionsVisuals
         // --- New session operations ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var menuOpenNewSession = new ToolStripMenuItem("Open as New Copilot Session") { Image = appIcon?.Clone() as Image };
+        var menuOpenNewSession = new ToolStripMenuItem("Open as New Copilot Session") { Image = copilotIcon?.Clone() as Image };
         menuOpenNewSession.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -576,7 +577,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenNewSession);
 
-        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace") { Image = appIcon?.Clone() as Image };
+        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace") { Image = copilotIcon?.Clone() as Image };
         menuOpenNewSessionWorkspace.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -587,7 +588,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenNewSessionWorkspace);
 
-        var menuStartNewSession = new ToolStripMenuItem("Start New Session") { Image = appIcon?.Clone() as Image };
+        var menuStartNewSession = new ToolStripMenuItem("Start New Session") { Image = copilotIcon?.Clone() as Image };
         menuStartNewSession.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
         gridContextMenu.Items.Add(menuStartNewSession);
 
