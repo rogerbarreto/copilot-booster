@@ -129,6 +129,13 @@ internal class LauncherSettings
     public int MaxSessionTabs { get; set; } = 10;
 
     /// <summary>
+    /// Gets or sets the session grid column display order (column names in display order, excluding Status).
+    /// Empty list means default built-in order.
+    /// </summary>
+    [JsonPropertyName("sessionColumnOrder")]
+    public List<string> SessionColumnOrder { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).

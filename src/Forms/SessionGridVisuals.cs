@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
@@ -250,90 +251,93 @@ internal class SessionGridVisuals
         var currentId = this._grid.CurrentRow?.Tag as string;
         var scrollIndex = this._grid.FirstDisplayedScrollingRowIndex;
 
-        this._grid.Rows.Clear();
-
-        foreach (var session in displayed)
+        using (new SuspendDrawingScope(this._grid))
         {
-            var dateText = session.LastModified.ToString("yyyy-MM-dd HH:mm");
-            var cwdText = session.Folder;
-            if (session.IsGitRepo)
-            {
-                cwdText += " \u2387";
-            }
+            this._grid.Rows.Clear();
 
-            var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
-            var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
-            var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
-            if (session.IsPinned)
+            foreach (var session in displayed)
             {
-                displayName = "\U0001F4CC " + displayName;
-            }
-            var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, activeText);
-            var row = this._grid.Rows[rowIndex];
-            row.Tag = session.Id;
-
-            // Tooltip shows the current session name when alias is displayed
-            if (!string.IsNullOrEmpty(session.Alias) && !string.IsNullOrEmpty(session.Summary))
-            {
-                row.Cells[1].ToolTipText = session.Summary;
-            }
-
-            if (statusIcon == "bell")
-            {
-                row.DefaultCellStyle.BackColor = BellRowColor;
-                row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
-            }
-            else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
-            {
-                row.DefaultCellStyle.BackColor = ActiveRowColor;
-                row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
-            }
-        }
-
-        // Restore selection and CurrentCell
-        if (selectedIds.Count > 0)
-        {
-            this._grid.ClearSelection();
-
-            // Find the rows to restore
-            DataGridViewRow? currentRow = null;
-            var rowsToSelect = new List<DataGridViewRow>();
-            foreach (DataGridViewRow row in this._grid.Rows)
-            {
-                if (row.Tag is string id && selectedIds.Contains(id))
+                var dateText = session.LastModified.ToString("yyyy-MM-dd HH:mm");
+                var cwdText = session.Folder;
+                if (session.IsGitRepo)
                 {
-                    rowsToSelect.Add(row);
-                    if (string.Equals(id, currentId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        currentRow = row;
-                    }
+                    cwdText += " \u2387";
+                }
+
+                var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
+                var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
+                var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+                if (session.IsPinned)
+                {
+                    displayName = "\U0001F4CC " + displayName;
+                }
+                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, activeText);
+                var row = this._grid.Rows[rowIndex];
+                row.Tag = session.Id;
+
+                // Tooltip shows the current session name when alias is displayed
+                if (!string.IsNullOrEmpty(session.Alias) && !string.IsNullOrEmpty(session.Summary))
+                {
+                    row.Cells[1].ToolTipText = session.Summary;
+                }
+
+                if (statusIcon == "bell")
+                {
+                    row.DefaultCellStyle.BackColor = BellRowColor;
+                    row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
+                }
+                else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
+                {
+                    row.DefaultCellStyle.BackColor = ActiveRowColor;
+                    row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
                 }
             }
 
-            // Set CurrentCell first (this clears selection in FullRowSelect mode),
-            // then restore all selected rows so multi-selection is preserved.
-            if (currentRow != null)
+            // Restore selection and CurrentCell
+            if (selectedIds.Count > 0)
             {
-                this._grid.CurrentCell = currentRow.Cells[0];
-            }
-            else if (rowsToSelect.Count > 0)
-            {
-                this._grid.CurrentCell = rowsToSelect[0].Cells[0];
+                this._grid.ClearSelection();
+
+                // Find the rows to restore
+                DataGridViewRow? currentRow = null;
+                var rowsToSelect = new List<DataGridViewRow>();
+                foreach (DataGridViewRow row in this._grid.Rows)
+                {
+                    if (row.Tag is string id && selectedIds.Contains(id))
+                    {
+                        rowsToSelect.Add(row);
+                        if (string.Equals(id, currentId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            currentRow = row;
+                        }
+                    }
+                }
+
+                // Set CurrentCell first (this clears selection in FullRowSelect mode),
+                // then restore all selected rows so multi-selection is preserved.
+                if (currentRow != null)
+                {
+                    this._grid.CurrentCell = currentRow.Cells[0];
+                }
+                else if (rowsToSelect.Count > 0)
+                {
+                    this._grid.CurrentCell = rowsToSelect[0].Cells[0];
+                }
+
+                foreach (var row in rowsToSelect)
+                {
+                    row.Selected = true;
+                }
             }
 
-            foreach (var row in rowsToSelect)
+            // Restore scroll position
+            if (scrollIndex >= 0 && scrollIndex < this._grid.RowCount)
             {
-                row.Selected = true;
+                this._grid.FirstDisplayedScrollingRowIndex = scrollIndex;
             }
+
+            this.AutoFitCwdColumn();
         }
-
-        // Restore scroll position
-        if (scrollIndex >= 0 && scrollIndex < this._grid.RowCount)
-        {
-            this._grid.FirstDisplayedScrollingRowIndex = scrollIndex;
-        }
-
-        this.AutoFitCwdColumn();
     }
 
     internal void AutoFitCwdColumn()
@@ -450,6 +454,30 @@ internal class SessionGridVisuals
 
                 break;
             }
+        }
+    }
+
+    [ExcludeFromCodeCoverage]
+    private readonly ref struct SuspendDrawingScope
+    {
+        private const int WM_SETREDRAW = 0x000B;
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern nint SendMessage(nint hWnd, int msg, nint wParam, nint lParam);
+
+        private readonly Control _control;
+
+        public SuspendDrawingScope(Control control)
+        {
+            this._control = control;
+            SendMessage(control.Handle, WM_SETREDRAW, 0, 0);
+        }
+
+        public void Dispose()
+        {
+            SendMessage(this._control.Handle, WM_SETREDRAW, 1, 0);
+            this._control.Invalidate(true);
+            this._control.Update();
         }
     }
 }

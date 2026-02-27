@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
@@ -167,6 +168,7 @@ internal class ExistingSessionsVisuals
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             AllowUserToResizeRows = false,
+            AllowUserToOrderColumns = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = true,
             RowHeadersVisible = false,
@@ -200,6 +202,7 @@ internal class ExistingSessionsVisuals
             Width = 30,
             MinimumWidth = 30,
             Resizable = DataGridViewTriState.False,
+            Frozen = true,
             DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
         });
         this.SessionGrid.Columns.Add("Session", "Session");
@@ -222,6 +225,43 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["Date"]!.MinimumWidth = 100;
         this.SessionGrid.Columns["RunningApps"]!.Width = 110;
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
+
+        // Restore saved column display order
+        var savedOrder = Program._settings.SessionColumnOrder;
+        if (savedOrder.Count > 0)
+        {
+            int displayIndex = 1; // 0 is Status (frozen)
+            foreach (var name in savedOrder)
+            {
+                if (this.SessionGrid.Columns[name] is { } col && !col.Frozen)
+                {
+                    col.DisplayIndex = displayIndex++;
+                }
+            }
+        }
+
+        // Save column order when user drags columns
+        bool savingColumnOrder = false;
+        this.SessionGrid.ColumnDisplayIndexChanged += (s, e) =>
+        {
+            if (savingColumnOrder)
+            {
+                return;
+            }
+
+            savingColumnOrder = true;
+            this.SessionGrid.BeginInvoke(() =>
+            {
+                var order = this.SessionGrid.Columns.Cast<DataGridViewColumn>()
+                    .Where(c => !c.Frozen)
+                    .OrderBy(c => c.DisplayIndex)
+                    .Select(c => c.Name)
+                    .ToList();
+                Program._settings.SessionColumnOrder = order;
+                Program._settings.Save();
+                savingColumnOrder = false;
+            });
+        };
 
         bool adjustingSessionWidth = false;
         void AdjustSessionColumnWidth()

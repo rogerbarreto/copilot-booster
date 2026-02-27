@@ -263,4 +263,48 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.Contains("custom_dir", loaded.IdeSearchIgnoredDirs);
         Assert.Contains("another_dir", loaded.IdeSearchIgnoredDirs);
     }
+
+    [Fact]
+    public void SessionColumnOrder_DefaultsToEmptyList()
+    {
+        var settings = new LauncherSettings();
+        Assert.NotNull(settings.SessionColumnOrder);
+        Assert.Empty(settings.SessionColumnOrder);
+    }
+
+    [Fact]
+    public void SessionColumnOrder_SerializesCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings
+        {
+            SessionColumnOrder = ["CWD", "Session", "Date", "RunningApps"]
+        };
+
+        settings.Save(file);
+
+        var loaded = LauncherSettings.Load(file);
+        Assert.Equal(4, loaded.SessionColumnOrder.Count);
+        Assert.Equal("CWD", loaded.SessionColumnOrder[0]);
+        Assert.Equal("Session", loaded.SessionColumnOrder[1]);
+        Assert.Equal("Date", loaded.SessionColumnOrder[2]);
+        Assert.Equal("RunningApps", loaded.SessionColumnOrder[3]);
+    }
+
+    [Fact]
+    public void Load_WithSessionColumnOrder_DeserializesCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var json = JsonSerializer.Serialize(new
+        {
+            sessionColumnOrder = new[] { "Date", "CWD", "Session", "RunningApps" }
+        });
+        File.WriteAllText(file, json);
+
+        var settings = LauncherSettings.Load(file);
+
+        Assert.Equal(4, settings.SessionColumnOrder.Count);
+        Assert.Equal("Date", settings.SessionColumnOrder[0]);
+        Assert.Equal("CWD", settings.SessionColumnOrder[1]);
+    }
 }
