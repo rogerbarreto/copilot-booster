@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.0] - 2026-02-27
+
+### Added
+
+- **Draggable session grid columns** — column headers can now be reordered by dragging. Column order is persisted in settings and restored on startup. The Status column stays pinned at position 0. (Closes #6)
+- **Anti-flicker grid rendering** — grid updates now use `WM_SETREDRAW` to suppress painting during bulk row operations, eliminating scroll bar flickering during refreshes.
+- **Copilot CLI context menu icons** — context menu items that launch Copilot CLI sessions now display the actual `copilot.exe` shell icon instead of the CopilotBooster app icon. (Closes #7)
+
 ## [0.14.0] - 2026-02-26
 
 ### Added
