@@ -1,0 +1,22 @@
+name: ❓ Question
+description: Ask a question about Copilot Booster
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? We're happy to help!
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Any additional context that might help us answer your question (version, setup, what you've tried, etc.).
