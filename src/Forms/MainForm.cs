@@ -579,11 +579,9 @@ internal partial class MainForm : Form
 
         this._backgroundPollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
         this._backgroundPollTimer.Tick += (s, e) => this.RefreshBackgroundAsync();
-        this._backgroundPollTimer.Start();
 
         this._visualRefreshTimer = new System.Windows.Forms.Timer { Interval = 3000 };
         this._visualRefreshTimer.Tick += (s, e) => this.RefreshVisualsAsync();
-        this._visualRefreshTimer.Start();
 
         this._spinnerTimer = new System.Windows.Forms.Timer { Interval = 100 };
         this._spinnerTimer.Tick += (s, e) => this._sessionsVisuals.GridVisuals.AdvanceSpinnerFrame();
@@ -598,6 +596,12 @@ internal partial class MainForm : Form
             }
 
             await this.LoadInitialDataAsync().ConfigureAwait(true);
+
+            // Start background timers only after initial data is loaded to avoid
+            // populating the grid before session states (Active/Archived/Done) are applied.
+            this._backgroundPollTimer.Start();
+            this._visualRefreshTimer.Start();
+
             this.CheckForMissingAllowedDirs();
             _ = this.CheckForUpdateInBackgroundAsync();
         };
