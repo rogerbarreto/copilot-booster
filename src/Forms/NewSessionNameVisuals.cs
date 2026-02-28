@@ -627,6 +627,53 @@ internal static class NewSessionNameVisuals
         }
         form.Controls.Add(cmbIssueBaseBranch);
 
+        var chkOverrideBranch = new CheckBox
+        {
+            Text = "Override branch name",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(chkOverrideBranch);
+
+        var txtIssueBranchName = new TextBox
+        {
+            Location = new Point(14, y),
+            Width = 450,
+            ReadOnly = true,
+            Visible = false
+        };
+        var txtIssueBranchNameWrapper = SettingsVisuals.WrapWithBorder(txtIssueBranchName);
+        txtIssueBranchNameWrapper.Visible = false;
+        form.Controls.Add(txtIssueBranchNameWrapper);
+
+        void UpdateCalculatedBranchName()
+        {
+            if (!chkOverrideBranch.Checked)
+            {
+                var issueText = txtIssueNumber.Text.Trim();
+                if (int.TryParse(issueText, out var num) && num > 0)
+                {
+                    var alias = !string.IsNullOrWhiteSpace(txtSessionName.Text) ? txtSessionName.Text.Trim() : null;
+                    txtIssueBranchName.Text = Models.LauncherSettings.FormatBranchName(
+                        Program._settings.IssueBranchPattern, num, alias);
+                }
+                else
+                {
+                    txtIssueBranchName.Text = "";
+                }
+            }
+        }
+
+        chkOverrideBranch.CheckedChanged += (s, e) =>
+        {
+            txtIssueBranchName.ReadOnly = !chkOverrideBranch.Checked;
+            if (!chkOverrideBranch.Checked)
+            {
+                UpdateCalculatedBranchName();
+            }
+        };
+
         // Track Issue validation state
         bool issueValidated = false;
         string? fetchedIssueTitle = null;
@@ -659,6 +706,7 @@ internal static class NewSessionNameVisuals
             else if (rdoFromIssue.Checked)
             {
                 btnOk.Enabled = hasAlias && issueValidated;
+                UpdateCalculatedBranchName();
             }
             else if (rdoNewBranch.Checked)
             {
@@ -728,10 +776,14 @@ internal static class NewSessionNameVisuals
             lblIssueValidation.Visible = isIssueMode;
             lblIssueBranch.Visible = isIssueMode;
             cmbIssueBaseBranch.Visible = isIssueMode;
+            chkOverrideBranch.Visible = isIssueMode;
+            txtIssueBranchName.Visible = isIssueMode;
+            txtIssueBranchNameWrapper.Visible = isIssueMode;
 
             if (!isIssueMode)
             {
                 chkUseIssueTitle.Visible = false;
+                chkOverrideBranch.Checked = false;
             }
 
             if (isPrMode)
@@ -797,6 +849,16 @@ internal static class NewSessionNameVisuals
                 lblIssueBranch.Location = new Point(14, cy);
                 cmbIssueBaseBranch.Location = new Point(14, cy + 20);
                 cy += 50;
+
+                // Override branch name
+                chkOverrideBranch.Location = new Point(14, cy);
+                cy += 24;
+
+                txtIssueBranchName.Location = new Point(14, cy);
+                txtIssueBranchNameWrapper.Location = new Point(14, cy);
+                cy += 30;
+
+                UpdateCalculatedBranchName();
 
                 cy += 8;
 
@@ -1242,8 +1304,12 @@ internal static class NewSessionNameVisuals
                     return;
                 }
 
-                var branchName = Models.LauncherSettings.FormatBranchName(
-                    Program._settings.IssueBranchPattern, issueNum, name);
+                var branchName = txtIssueBranchName.Text.Trim();
+                if (string.IsNullOrEmpty(branchName))
+                {
+                    branchName = Models.LauncherSettings.FormatBranchName(
+                        Program._settings.IssueBranchPattern, issueNum, name);
+                }
                 var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
 
                 result = new NewSessionResult(name, BranchAction.FromIssue, branchName, baseBranch, remoteName, null, null, IssueNumber: issueNum, GitHubUrl: issueGitHubUrl);

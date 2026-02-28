@@ -403,4 +403,79 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.DoesNotContain("--add-dir", result);
         Assert.Equal("--resume abc", result);
     }
+
+    [Fact]
+    public void FormatBranchName_ReplacesNumberAndAlias()
+    {
+        var result = LauncherSettings.FormatBranchName("issues/{number}-{alias}", 42, "Fix Login Bug");
+
+        Assert.Equal("issues/42-fix-login-bug", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_NullAlias_UsesFallback()
+    {
+        var result = LauncherSettings.FormatBranchName("issues/{number}-{alias}", 7, null);
+
+        Assert.Equal("issues/7-session", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_EmptyAlias_UsesFallback()
+    {
+        var result = LauncherSettings.FormatBranchName("issues/{number}-{alias}", 7, "  ");
+
+        Assert.Equal("issues/7-session", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_CustomPattern_FormatsCorrectly()
+    {
+        var result = LauncherSettings.FormatBranchName("feat/{alias}/issue-{number}", 99, "My Feature");
+
+        Assert.Equal("feat/my-feature/issue-99", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_PatternWithoutPlaceholders_ReturnsUnchanged()
+    {
+        var result = LauncherSettings.FormatBranchName("static-branch", 1, "anything");
+
+        Assert.Equal("static-branch", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_SpecialCharactersInAlias_AreSlugged()
+    {
+        var result = LauncherSettings.FormatBranchName("{alias}", 1, "Hello, World! (test)");
+
+        Assert.Equal("hello-world-test", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_ConsecutiveSpecialChars_CollapsedToSingleHyphen()
+    {
+        var result = LauncherSettings.FormatBranchName("{alias}", 1, "foo---bar   baz");
+
+        Assert.Equal("foo-bar-baz", result);
+    }
+
+    [Fact]
+    public void FormatBranchName_TrailingSpecialChars_NoTrailingHyphen()
+    {
+        var result = LauncherSettings.FormatBranchName("{alias}", 1, "trailing!!!");
+
+        Assert.Equal("trailing", result);
+    }
+
+    [Theory]
+    [InlineData("issues/{number}-{alias}", 1, "test", "issues/1-test")]
+    [InlineData("{number}/{alias}", 42, "Add Auth", "42/add-auth")]
+    [InlineData("fix-{number}", 123, "ignored", "fix-123")]
+    public void FormatBranchName_VariousPatterns_ProducesExpected(string pattern, int number, string alias, string expected)
+    {
+        var result = LauncherSettings.FormatBranchName(pattern, number, alias);
+
+        Assert.Equal(expected, result);
+    }
 }

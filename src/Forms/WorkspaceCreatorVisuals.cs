@@ -451,7 +451,52 @@ internal static class WorkspaceCreatorVisuals
         }
         form.Controls.Add(cmbIssueBaseBranch);
 
-        // Track Issue validation state
+        var chkIssueOverrideBranch = new CheckBox
+        {
+            Text = "Override branch name",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(chkIssueOverrideBranch);
+
+        var txtIssueBranchName = new TextBox
+        {
+            Location = new Point(14, y),
+            Width = 450,
+            ReadOnly = true,
+            Visible = false
+        };
+        var txtIssueBranchNameWrapper = SettingsVisuals.WrapWithBorder(txtIssueBranchName);
+        txtIssueBranchNameWrapper.Visible = false;
+        form.Controls.Add(txtIssueBranchNameWrapper);
+
+        void UpdateCalculatedIssueBranchName()
+        {
+            if (!chkIssueOverrideBranch.Checked)
+            {
+                var issueText = txtIssueNumber.Text.Trim();
+                if (int.TryParse(issueText, out var num) && num > 0)
+                {
+                    var alias = !string.IsNullOrWhiteSpace(txtSessionName.Text) ? txtSessionName.Text.Trim() : null;
+                    txtIssueBranchName.Text = Models.LauncherSettings.FormatBranchName(
+                        Program._settings.IssueBranchPattern, num, alias);
+                }
+                else
+                {
+                    txtIssueBranchName.Text = "";
+                }
+            }
+        }
+
+        chkIssueOverrideBranch.CheckedChanged += (s, e) =>
+        {
+            txtIssueBranchName.ReadOnly = !chkIssueOverrideBranch.Checked;
+            if (!chkIssueOverrideBranch.Checked)
+            {
+                UpdateCalculatedIssueBranchName();
+            }
+        };
         bool issueValidated = false;
         string? fetchedIssueTitle = null;
         string? issueGitHubUrl = null;
@@ -537,10 +582,14 @@ internal static class WorkspaceCreatorVisuals
             lblIssueValidation.Visible = isIssueMode;
             lblIssueBaseBranch.Visible = isIssueMode;
             cmbIssueBaseBranch.Visible = isIssueMode;
+            chkIssueOverrideBranch.Visible = isIssueMode;
+            txtIssueBranchName.Visible = isIssueMode;
+            txtIssueBranchNameWrapper.Visible = isIssueMode;
 
             if (!isIssueMode)
             {
                 chkUseIssueTitle.Visible = false;
+                chkIssueOverrideBranch.Checked = false;
             }
 
             if (isPrMode)
@@ -608,6 +657,16 @@ internal static class WorkspaceCreatorVisuals
                 lblIssueBaseBranch.Location = new Point(14, cy);
                 cmbIssueBaseBranch.Location = new Point(14, cy + 20);
                 cy += 50;
+
+                // Override branch name
+                chkIssueOverrideBranch.Location = new Point(14, cy);
+                cy += 24;
+
+                txtIssueBranchName.Location = new Point(14, cy);
+                txtIssueBranchNameWrapper.Location = new Point(14, cy);
+                cy += 30;
+
+                UpdateCalculatedIssueBranchName();
 
                 // Preview
                 lblPreview.Location = new Point(14, cy);
@@ -678,17 +737,10 @@ internal static class WorkspaceCreatorVisuals
             }
             else if (rdoFromIssue.Checked)
             {
-                var issueText = txtIssueNumber.Text.Trim();
-                if (int.TryParse(issueText, out var issueNum) && issueNum > 0)
-                {
-                    var branchName = Models.LauncherSettings.FormatBranchName(
-                        Program._settings.IssueBranchPattern, issueNum, txtSessionName.Text.Trim());
-                    lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, branchName);
-                }
-                else
-                {
-                    lblPreview.Text = "";
-                }
+                var branchName = txtIssueBranchName.Text.Trim();
+                lblPreview.Text = string.IsNullOrEmpty(branchName)
+                    ? ""
+                    : WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, branchName);
             }
             else if (rdoNewBranch.Checked)
             {
@@ -1020,7 +1072,11 @@ internal static class WorkspaceCreatorVisuals
 
         txtIssueNumber.TextChanged += (s, e) => { ResetIssueValidation(); UpdatePreview(); };
         cmbIssueRemote.SelectedIndexChanged += (s, e) => { ResetIssueValidation(); UpdatePreview(); };
-        txtSessionName.TextChanged += (s, e) => UpdatePreview();
+        txtSessionName.TextChanged += (s, e) =>
+        {
+            UpdateCalculatedIssueBranchName();
+            UpdatePreview();
+        };
 
         btnCheckIssue.Click += async (s, e) => await ValidateIssueAsync().ConfigureAwait(true);
         txtIssueNumber.Leave += async (s, e) =>
@@ -1118,8 +1174,12 @@ internal static class WorkspaceCreatorVisuals
                 }
 
                 var sessionName = txtSessionName.Text.Trim();
-                var branchName = Models.LauncherSettings.FormatBranchName(
-                    Program._settings.IssueBranchPattern, issueNum, sessionName);
+                var branchName = txtIssueBranchName.Text.Trim();
+                if (string.IsNullOrEmpty(branchName))
+                {
+                    branchName = Models.LauncherSettings.FormatBranchName(
+                        Program._settings.IssueBranchPattern, issueNum, sessionName);
+                }
                 var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
 
                 btnCreate.Enabled = false;
