@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -24,9 +25,9 @@ internal static class WorkspaceCreatorVisuals
     /// </summary>
     /// <param name="repoPath">The git repository root path.</param>
     /// <returns>A tuple of worktree path and optional session name on success, or <c>null</c> if the user cancels.</returns>
-    internal static (string WorktreePath, string? SessionName)? ShowWorkspaceCreator(string repoPath)
+    internal static (string WorktreePath, string? SessionName, string? GitHubUrl)? ShowWorkspaceCreator(string repoPath)
     {
-        (string WorktreePath, string? SessionName)? result = null;
+        (string WorktreePath, string? SessionName, string? GitHubUrl)? result = null;
         var repoFolderName = Path.GetFileName(repoPath);
 
         const int FormWidthValue = 500;
@@ -141,6 +142,20 @@ internal static class WorkspaceCreatorVisuals
         };
         form.Controls.Add(rdoFromPr);
         y += 26;
+
+        // Second row of radio buttons (Issue)
+        var rdoFromIssue = new RadioButton
+        {
+            Text = "From Issue #",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = remotePlatforms.Values.Any(p => p == GitService.HostingPlatform.GitHub)
+        };
+        form.Controls.Add(rdoFromIssue);
+        if (rdoFromIssue.Visible)
+        {
+            y += 26;
+        }
 
         // Current branch info label
         var lblCurrentBranch = new Label
@@ -320,6 +335,127 @@ internal static class WorkspaceCreatorVisuals
         string? fetchedPrTitle = null;
         string? fetchedPrHeadBranch = null;
 
+        // --- Issue mode controls (hidden by default) ---
+        var lblIssueRemote = new Label
+        {
+            Text = "Remote",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueRemote);
+
+        var cmbIssueRemote = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        foreach (var kv in remotePlatforms)
+        {
+            if (kv.Value == GitService.HostingPlatform.GitHub)
+            {
+                cmbIssueRemote.Items.Add(kv.Key);
+            }
+        }
+        if (cmbIssueRemote.Items.Contains("origin"))
+        {
+            cmbIssueRemote.SelectedItem = "origin";
+        }
+        else if (cmbIssueRemote.Items.Count > 0)
+        {
+            cmbIssueRemote.SelectedIndex = 0;
+        }
+        form.Controls.Add(cmbIssueRemote);
+
+        var lblIssueNumber = new Label
+        {
+            Text = "Issue Number *",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueNumber);
+
+        var txtIssueNumber = new TextBox
+        {
+            PlaceholderText = "e.g., 42",
+            Location = new Point(14, y + 20),
+            Width = 360,
+            Visible = false
+        };
+        var txtIssueNumberWrapper = SettingsVisuals.WrapWithBorder(txtIssueNumber);
+        txtIssueNumberWrapper.Visible = false;
+        form.Controls.Add(txtIssueNumberWrapper);
+
+        var btnCheckIssue = new Button
+        {
+            Text = "Check",
+            Width = 80,
+            Visible = false
+        };
+        form.Controls.Add(btnCheckIssue);
+
+        var lblIssueValidation = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            MaximumSize = new Size(450, 0),
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 8f),
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueValidation);
+
+        var chkUseIssueTitle = new CheckBox
+        {
+            Text = "Use issue title as session name",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(chkUseIssueTitle);
+
+        var lblIssueBaseBranch = new Label
+        {
+            Text = "Base Branch",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueBaseBranch);
+
+        var cmbIssueBaseBranch = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        foreach (var b in branches)
+        {
+            cmbIssueBaseBranch.Items.Add(b);
+        }
+        if (cmbIssueBaseBranch.Items.Contains("main"))
+        {
+            cmbIssueBaseBranch.SelectedItem = "main";
+        }
+        else if (cmbIssueBaseBranch.Items.Contains("master"))
+        {
+            cmbIssueBaseBranch.SelectedItem = "master";
+        }
+        else if (cmbIssueBaseBranch.Items.Count > 0)
+        {
+            cmbIssueBaseBranch.SelectedIndex = 0;
+        }
+        form.Controls.Add(cmbIssueBaseBranch);
+
+        // Track Issue validation state
+        bool issueValidated = false;
+        string? fetchedIssueTitle = null;
+        string? issueGitHubUrl = null;
+
         // Preview label
         var lblPreview = new Label
         {
@@ -355,6 +491,7 @@ internal static class WorkspaceCreatorVisuals
             int cy = modeStartY;
             bool isNewBranch = rdoNewBranch.Checked;
             bool isPrMode = rdoFromPr.Checked;
+            bool isIssueMode = rdoFromIssue.Checked;
             bool isExistingBranch = rdoExistingBranch.Checked;
 
             // Current branch label — only visible in Existing Branch mode
@@ -372,9 +509,9 @@ internal static class WorkspaceCreatorVisuals
             lblNameHelper.Visible = isNewBranch;
 
             // Branch dropdown (visible in Existing Branch & New Branch modes)
-            lblBranch.Visible = !isPrMode;
-            cmbBranch.Visible = !isPrMode;
-            lblBranchHelper.Visible = !isPrMode;
+            lblBranch.Visible = !isPrMode && !isIssueMode;
+            cmbBranch.Visible = !isPrMode && !isIssueMode;
+            lblBranchHelper.Visible = !isPrMode && !isIssueMode;
 
             // PR mode controls
             lblRemote.Visible = isPrMode;
@@ -384,11 +521,26 @@ internal static class WorkspaceCreatorVisuals
             txtPrNumberWrapper.Visible = isPrMode;
             btnCheck.Visible = isPrMode;
             lblPrValidation.Visible = isPrMode;
-            // chkUsePrTitle visibility managed by validation logic
 
             if (!isPrMode)
             {
                 chkUsePrTitle.Visible = false;
+            }
+
+            // Issue mode controls
+            lblIssueRemote.Visible = isIssueMode;
+            cmbIssueRemote.Visible = isIssueMode;
+            lblIssueNumber.Visible = isIssueMode;
+            txtIssueNumber.Visible = isIssueMode;
+            txtIssueNumberWrapper.Visible = isIssueMode;
+            btnCheckIssue.Visible = isIssueMode;
+            lblIssueValidation.Visible = isIssueMode;
+            lblIssueBaseBranch.Visible = isIssueMode;
+            cmbIssueBaseBranch.Visible = isIssueMode;
+
+            if (!isIssueMode)
+            {
+                chkUseIssueTitle.Visible = false;
             }
 
             if (isPrMode)
@@ -425,6 +577,47 @@ internal static class WorkspaceCreatorVisuals
                 btnCancel.Location = new Point(390, cy);
 
                 btnCreate.Enabled = prValidated;
+                form.Height = cy + 70;
+            }
+            else if (isIssueMode)
+            {
+                // Remote dropdown
+                lblIssueRemote.Location = new Point(14, cy);
+                cmbIssueRemote.Location = new Point(14, cy + 20);
+                cy += 50;
+
+                // Issue number + Check button
+                lblIssueNumber.Location = new Point(14, cy);
+                txtIssueNumber.Location = new Point(14, cy + 20);
+                txtIssueNumberWrapper.Location = new Point(14, cy + 20);
+                btnCheckIssue.Location = new Point(384, cy + 19);
+                cy += 48;
+
+                // Validation label
+                lblIssueValidation.Location = new Point(14, cy);
+                cy += Math.Max(20, lblIssueValidation.PreferredHeight + 4);
+
+                // Issue title checkbox
+                chkUseIssueTitle.Location = new Point(14, cy);
+                if (chkUseIssueTitle.Visible)
+                {
+                    cy += 24;
+                }
+
+                // Base branch
+                lblIssueBaseBranch.Location = new Point(14, cy);
+                cmbIssueBaseBranch.Location = new Point(14, cy + 20);
+                cy += 50;
+
+                // Preview
+                lblPreview.Location = new Point(14, cy);
+                cy += 32;
+
+                // Buttons
+                btnCreate.Location = new Point(300, cy);
+                btnCancel.Location = new Point(390, cy);
+
+                btnCreate.Enabled = issueValidated;
                 form.Height = cy + 70;
             }
             else if (isNewBranch)
@@ -483,6 +676,20 @@ internal static class WorkspaceCreatorVisuals
                     lblPreview.Text = "";
                 }
             }
+            else if (rdoFromIssue.Checked)
+            {
+                var issueText = txtIssueNumber.Text.Trim();
+                if (int.TryParse(issueText, out var issueNum) && issueNum > 0)
+                {
+                    var branchName = Models.LauncherSettings.FormatBranchName(
+                        Program._settings.IssueBranchPattern, issueNum, txtSessionName.Text.Trim());
+                    lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, branchName);
+                }
+                else
+                {
+                    lblPreview.Text = "";
+                }
+            }
             else if (rdoNewBranch.Checked)
             {
                 var name = txtName.Text.Trim();
@@ -516,6 +723,22 @@ internal static class WorkspaceCreatorVisuals
             chkUsePrTitle.Checked = false;
             txtSessionName.ReadOnly = false;
             if (rdoFromPr.Checked)
+            {
+                btnCreate.Enabled = false;
+            }
+        }
+
+        void ResetIssueValidation()
+        {
+            issueValidated = false;
+            fetchedIssueTitle = null;
+            issueGitHubUrl = null;
+            lblIssueValidation.Text = "";
+            lblIssueValidation.ForeColor = Color.Black;
+            chkUseIssueTitle.Visible = false;
+            chkUseIssueTitle.Checked = false;
+            txtSessionName.ReadOnly = false;
+            if (rdoFromIssue.Checked)
             {
                 btnCreate.Enabled = false;
             }
@@ -641,10 +864,124 @@ internal static class WorkspaceCreatorVisuals
             UpdatePreview();
         }
 
+        bool isValidatingIssue = false;
+
+        async Task ValidateIssueAsync()
+        {
+            if (isValidatingIssue)
+            {
+                return;
+            }
+
+            var remoteName = cmbIssueRemote.SelectedItem?.ToString();
+            var issueText = txtIssueNumber.Text.Trim();
+            if (string.IsNullOrEmpty(remoteName) || !int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+            {
+                lblIssueValidation.Text = "Enter a valid issue number.";
+                lblIssueValidation.ForeColor = Color.Red;
+                issueValidated = false;
+                btnCreate.Enabled = false;
+                return;
+            }
+
+            isValidatingIssue = true;
+            lblIssueValidation.Text = "Checking...";
+            lblIssueValidation.ForeColor = Color.Gray;
+            btnCheckIssue.Enabled = false;
+
+            bool found = false;
+            string? issueTitle = null;
+            string? ghUrl = null;
+            try
+            {
+                (found, issueTitle, ghUrl) = await Task.Run(async () =>
+                {
+                    string? title = null;
+                    string? url = null;
+                    bool valid = false;
+
+                    try
+                    {
+                        var remoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
+                        if (!string.IsNullOrEmpty(remoteUrl))
+                        {
+                            var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
+                            if (parsed.HasValue)
+                            {
+                                var (owner, repo) = parsed.Value;
+                                var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/issues/{issueNum}";
+                                var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+                                request.Headers.Add("User-Agent", "CopilotBooster");
+                                var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+                                if (response.IsSuccessStatusCode)
+                                {
+                                    var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    using var doc = JsonDocument.Parse(json);
+
+                                    // Ensure it's actually an issue, not a PR
+                                    if (!doc.RootElement.TryGetProperty("pull_request", out _))
+                                    {
+                                        valid = true;
+                                        if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                                        {
+                                            title = titleProp.GetString();
+                                        }
+
+                                        url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // API failure
+                    }
+
+                    return (valid, title, url);
+                }).ConfigureAwait(true);
+            }
+            catch
+            {
+                found = false;
+            }
+
+            if (found)
+            {
+                lblIssueValidation.Text = issueTitle != null
+                    ? $"✅ Issue #{issueNum}: {issueTitle}"
+                    : $"✅ Issue #{issueNum} found";
+                lblIssueValidation.ForeColor = Color.Green;
+                issueValidated = true;
+                btnCreate.Enabled = true;
+
+                if (issueTitle != null)
+                {
+                    fetchedIssueTitle = issueTitle;
+                    chkUseIssueTitle.Visible = true;
+                    RelayoutControls();
+                }
+
+                issueGitHubUrl = ghUrl;
+            }
+            else
+            {
+                lblIssueValidation.Text = $"❌ Issue #{issueNum} not found";
+                lblIssueValidation.ForeColor = Color.Red;
+                issueValidated = false;
+                btnCreate.Enabled = false;
+            }
+
+            btnCheckIssue.Enabled = true;
+            isValidatingIssue = false;
+            UpdatePreview();
+        }
+
         // Wire up radio button changes
         void OnModeChanged(object? s, EventArgs e)
         {
             ResetPrValidation();
+            ResetIssueValidation();
             RelayoutControls();
             UpdatePreview();
         }
@@ -652,6 +989,7 @@ internal static class WorkspaceCreatorVisuals
         rdoExistingBranch.CheckedChanged += OnModeChanged;
         rdoNewBranch.CheckedChanged += OnModeChanged;
         rdoFromPr.CheckedChanged += OnModeChanged;
+        rdoFromIssue.CheckedChanged += OnModeChanged;
 
         txtName.TextChanged += (s, e) => UpdatePreview();
         cmbBranch.SelectedIndexChanged += (s, e) => UpdatePreview();
@@ -672,6 +1010,32 @@ internal static class WorkspaceCreatorVisuals
             if (chkUsePrTitle.Checked && fetchedPrTitle != null)
             {
                 txtSessionName.Text = fetchedPrTitle;
+                txtSessionName.ReadOnly = true;
+            }
+            else
+            {
+                txtSessionName.ReadOnly = false;
+            }
+        };
+
+        txtIssueNumber.TextChanged += (s, e) => { ResetIssueValidation(); UpdatePreview(); };
+        cmbIssueRemote.SelectedIndexChanged += (s, e) => { ResetIssueValidation(); UpdatePreview(); };
+        txtSessionName.TextChanged += (s, e) => UpdatePreview();
+
+        btnCheckIssue.Click += async (s, e) => await ValidateIssueAsync().ConfigureAwait(true);
+        txtIssueNumber.Leave += async (s, e) =>
+        {
+            if (rdoFromIssue.Checked && !string.IsNullOrWhiteSpace(txtIssueNumber.Text) && !issueValidated)
+            {
+                await ValidateIssueAsync().ConfigureAwait(true);
+            }
+        };
+
+        chkUseIssueTitle.CheckedChanged += (s, e) =>
+        {
+            if (chkUseIssueTitle.Checked && fetchedIssueTitle != null)
+            {
+                txtSessionName.Text = fetchedIssueTitle;
                 txtSessionName.ReadOnly = true;
             }
             else
@@ -712,7 +1076,59 @@ internal static class WorkspaceCreatorVisuals
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
+
+                    // Build GitHub URL for Edge tab
+                    string? prGhUrl = null;
+                    var prRemoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
+                    if (!string.IsNullOrEmpty(prRemoteUrl))
+                    {
+                        var parsed = GitService.ParseGitHubOwnerRepo(prRemoteUrl);
+                        if (parsed.HasValue)
+                        {
+                            prGhUrl = $"https://github.com/{parsed.Value.owner}/{parsed.Value.repo}/pull/{prNum}";
+                        }
+                    }
+
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, prGhUrl);
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                }
+                else
+                {
+                    btnCreate.Enabled = true;
+                    btnCreate.Text = "Create";
+                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else if (rdoFromIssue.Checked)
+            {
+                // Issue mode
+                var remoteName = cmbIssueRemote.SelectedItem?.ToString();
+                var issueText = txtIssueNumber.Text.Trim();
+                if (string.IsNullOrEmpty(remoteName) || !int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+                {
+                    MessageBox.Show("Enter a valid issue number.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!issueValidated)
+                {
+                    MessageBox.Show("Please validate the issue first.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var sessionName = txtSessionName.Text.Trim();
+                var branchName = Models.LauncherSettings.FormatBranchName(
+                    Program._settings.IssueBranchPattern, issueNum, sessionName);
+                var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
+
+                btnCreate.Enabled = false;
+                btnCreate.Text = "Creating...";
+                var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
+                    repoPath, repoFolderName!, branchName, baseBranch);
+                if (success)
+                {
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, issueGitHubUrl);
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }
@@ -739,7 +1155,7 @@ internal static class WorkspaceCreatorVisuals
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, null);
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }
@@ -757,7 +1173,7 @@ internal static class WorkspaceCreatorVisuals
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName);
+                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, null);
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }

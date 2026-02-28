@@ -17,7 +17,7 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal class NewSessionVisuals
 {
-    private static readonly string[] s_cwdColumnBaseNames = { "", "Directory", "# Sessions created", "Git" };
+    private static readonly string[] s_cwdColumnBaseNames = { "Directory", "# Sessions created", "Git" };
 
     internal ListView CwdListView = null!;
     internal Label LoadingOverlay = null!;
@@ -25,7 +25,7 @@ internal class NewSessionVisuals
     /// <summary>
     /// Gets the column sorter to assign as <see cref="ListView.ListViewItemSorter"/>.
     /// </summary>
-    internal ListViewColumnSorter Sorter { get; } = new(column: 2, order: SortOrder.Descending);
+    internal ListViewColumnSorter Sorter { get; } = new(column: 1, order: SortOrder.Descending, numericColumns: new HashSet<int> { 1 });
 
     // Context menu events — arg is always the selected CWD path.
     internal event Func<string, Task>? OnNewSession;
@@ -92,8 +92,7 @@ internal class NewSessionVisuals
             var isGit = data.CwdGitStatus.TryGetValue(cwd, out bool g) && g;
             this._cwdGitStatus[cwd] = isGit;
 
-            var item = new ListViewItem("▶") { Tag = cwd };
-            item.SubItems.Add(cwd);
+            var item = new ListViewItem(cwd) { Tag = cwd };
             item.SubItems.Add(kv.Value.ToString());
             item.SubItems.Add(isGit ? "Yes" : "");
             this.CwdListView.Items.Add(item);
@@ -117,18 +116,12 @@ internal class NewSessionVisuals
             MultiSelect = false,
             GridLines = !Application.IsDarkModeEnabled
         };
-        this.CwdListView.Columns.Add("", 30, HorizontalAlignment.Center);
-        this.CwdListView.Columns.Add("Directory", 330);
+        this.CwdListView.Columns.Add("Directory", 360);
         this.CwdListView.Columns.Add("# Sessions created ▼", 120, HorizontalAlignment.Center);
         this.CwdListView.Columns.Add("Git", 50, HorizontalAlignment.Center);
         this.CwdListView.ListViewItemSorter = this.Sorter;
         this.CwdListView.ColumnClick += (s, e) =>
         {
-            if (e.Column == 0)
-            {
-                return; // Don't sort by play column
-            }
-
             this.OnColumnClick(e);
         };
         SettingsVisuals.ApplyThemedSelection(this.CwdListView);
@@ -146,14 +139,17 @@ internal class NewSessionVisuals
             }
         };
 
-        // Click on play column shows context menu
+        // Left-click on any item opens context menu
         this.CwdListView.MouseClick += (s, e) =>
         {
-            var hit = this.CwdListView.HitTest(e.X, e.Y);
-            if (hit.Item != null && hit.SubItem != null && hit.Item.SubItems.IndexOf(hit.SubItem) == 0)
+            if (e.Button == MouseButtons.Left)
             {
-                hit.Item.Selected = true;
-                this.CwdListView.ContextMenuStrip?.Show(this.CwdListView, e.Location);
+                var hit = this.CwdListView.HitTest(e.X, e.Y);
+                if (hit.Item != null)
+                {
+                    hit.Item.Selected = true;
+                    this.CwdListView.ContextMenuStrip?.Show(this.CwdListView, e.Location);
+                }
             }
         };
 
@@ -283,21 +279,28 @@ internal class NewSessionVisuals
         cwdContextMenu.Opening += (s, e) =>
         {
             bool hasSelection = this.CwdListView.SelectedItems.Count > 0;
+
+            if (!hasSelection)
+            {
+                e.Cancel = true;
+                return;
+            }
+
             bool isGit = false;
             bool isPinned = false;
             int sessionCount = 0;
 
-            if (hasSelection && this.CwdListView.SelectedItems[0].Tag is string path
+            if (this.CwdListView.SelectedItems[0].Tag is string path
                 && this.GetCwdMenuInfo != null)
             {
                 (isGit, isPinned, sessionCount) = this.GetCwdMenuInfo(path, this._cwdGitStatus);
             }
 
-            menuNewSession.Visible = hasSelection;
-            menuNewSessionWorkspace.Visible = hasSelection && isGit;
-            menuOpenExplorer.Visible = hasSelection;
-            menuOpenTerminalCwd.Visible = hasSelection;
-            menuRemoveDirectory.Visible = hasSelection && isPinned && sessionCount == 0;
+            menuNewSession.Visible = true;
+            menuNewSessionWorkspace.Visible = isGit;
+            menuOpenExplorer.Visible = true;
+            menuOpenTerminalCwd.Visible = true;
+            menuRemoveDirectory.Visible = isPinned && sessionCount == 0;
         };
 
         this.CwdListView.ContextMenuStrip = cwdContextMenu;
@@ -318,7 +321,7 @@ internal class NewSessionVisuals
         {
             this.Sorter.SortColumn = e.Column;
             // Session count defaults to descending; others to ascending
-            this.Sorter.Order = e.Column == 2 ? SortOrder.Descending : SortOrder.Ascending;
+            this.Sorter.Order = e.Column == 1 ? SortOrder.Descending : SortOrder.Ascending;
         }
 
         for (int i = 0; i < s_cwdColumnBaseNames.Length; i++)

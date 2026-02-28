@@ -10,7 +10,7 @@ using CopilotBooster.Services;
 
 namespace CopilotBooster.Forms;
 
-internal enum BranchAction { None, ExistingBranch, NewBranch, FromPr }
+internal enum BranchAction { None, ExistingBranch, NewBranch, FromPr, FromIssue }
 
 internal record NewSessionResult(
     string? SessionName,
@@ -20,7 +20,9 @@ internal record NewSessionResult(
     string? Remote,
     int? PrNumber,
     GitService.HostingPlatform? Platform,
-    string? HeadBranch = null);
+    string? HeadBranch = null,
+    int? IssueNumber = null,
+    string? GitHubUrl = null);
 
 /// <summary>
 /// Provides a modal dialog for naming a new Copilot session.
@@ -267,14 +269,33 @@ internal static class NewSessionNameVisuals
         };
         form.Controls.Add(rdoSwitchBranch);
 
+        var rdoNewBranch = new RadioButton
+        {
+            Text = "New branch",
+            AutoSize = true,
+            Location = new Point(310, y)
+        };
+        form.Controls.Add(rdoNewBranch);
+        y += 26;
+
+        // Second row of radio buttons
         var rdoFromPr = new RadioButton
         {
             Text = "From PR #",
             AutoSize = true,
-            Location = new Point(310, y),
+            Location = new Point(14, y),
             Visible = remotePlatforms.Count > 0
         };
         form.Controls.Add(rdoFromPr);
+
+        var rdoFromIssue = new RadioButton
+        {
+            Text = "From Issue #",
+            AutoSize = true,
+            Location = new Point(160, y),
+            Visible = remotePlatforms.Count > 0
+        };
+        form.Controls.Add(rdoFromIssue);
         y += 26;
 
         // Current branch info label
@@ -339,6 +360,72 @@ internal static class NewSessionNameVisuals
             Visible = false
         };
         form.Controls.Add(lblBranchHelper);
+
+        // --- New Branch controls (hidden by default) ---
+        var lblNewBranchName = new Label
+        {
+            Text = "Branch Name *",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblNewBranchName);
+
+        var txtNewBranchName = new TextBox
+        {
+            PlaceholderText = "e.g., issues/123-new-issue",
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        var txtNewBranchNameWrapper = SettingsVisuals.WrapWithBorder(txtNewBranchName);
+        txtNewBranchNameWrapper.Visible = false;
+        form.Controls.Add(txtNewBranchNameWrapper);
+
+        var lblNewBranchHelper = new Label
+        {
+            Text = "Name for the new branch",
+            ForeColor = Color.Gray,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
+            AutoSize = true,
+            Location = new Point(14, y + 46),
+            Visible = false
+        };
+        form.Controls.Add(lblNewBranchHelper);
+
+        var lblBaseBranch = new Label
+        {
+            Text = "Base Branch",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblBaseBranch);
+
+        var cmbBaseBranch = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        foreach (var b in branches)
+        {
+            cmbBaseBranch.Items.Add(b);
+        }
+        if (cmbBaseBranch.Items.Contains("main"))
+        {
+            cmbBaseBranch.SelectedItem = "main";
+        }
+        else if (cmbBaseBranch.Items.Contains("master"))
+        {
+            cmbBaseBranch.SelectedItem = "master";
+        }
+        else if (cmbBaseBranch.Items.Count > 0)
+        {
+            cmbBaseBranch.SelectedIndex = 0;
+        }
+        form.Controls.Add(cmbBaseBranch);
 
         // --- PR mode controls (hidden by default) ---
         var lblRemote = new Label
@@ -424,6 +511,127 @@ internal static class NewSessionNameVisuals
         string? fetchedPrTitle = null;
         string? fetchedPrHeadBranch = null;
 
+        // --- Issue mode controls (hidden by default) ---
+        var lblIssueRemote = new Label
+        {
+            Text = "Remote",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueRemote);
+
+        var cmbIssueRemote = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        foreach (var kv in remotePlatforms)
+        {
+            if (kv.Value == GitService.HostingPlatform.GitHub)
+            {
+                cmbIssueRemote.Items.Add(kv.Key);
+            }
+        }
+        if (cmbIssueRemote.Items.Contains("origin"))
+        {
+            cmbIssueRemote.SelectedItem = "origin";
+        }
+        else if (cmbIssueRemote.Items.Count > 0)
+        {
+            cmbIssueRemote.SelectedIndex = 0;
+        }
+        form.Controls.Add(cmbIssueRemote);
+
+        var lblIssueNumber = new Label
+        {
+            Text = "Issue Number *",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueNumber);
+
+        var txtIssueNumber = new TextBox
+        {
+            PlaceholderText = "e.g., 42",
+            Location = new Point(14, y + 20),
+            Width = 360,
+            Visible = false
+        };
+        var txtIssueNumberWrapper = SettingsVisuals.WrapWithBorder(txtIssueNumber);
+        txtIssueNumberWrapper.Visible = false;
+        form.Controls.Add(txtIssueNumberWrapper);
+
+        var btnCheckIssue = new Button
+        {
+            Text = "Check",
+            Width = 80,
+            Visible = false
+        };
+        form.Controls.Add(btnCheckIssue);
+
+        var lblIssueValidation = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            MaximumSize = new Size(450, 0),
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 8f),
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueValidation);
+
+        var chkUseIssueTitle = new CheckBox
+        {
+            Text = "Use issue title as session name",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(chkUseIssueTitle);
+
+        var lblIssueBranch = new Label
+        {
+            Text = "Base Branch",
+            AutoSize = true,
+            Location = new Point(14, y),
+            Visible = false
+        };
+        form.Controls.Add(lblIssueBranch);
+
+        var cmbIssueBaseBranch = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(14, y + 20),
+            Width = 450,
+            Visible = false
+        };
+        foreach (var b in branches)
+        {
+            cmbIssueBaseBranch.Items.Add(b);
+        }
+        if (cmbIssueBaseBranch.Items.Contains("main"))
+        {
+            cmbIssueBaseBranch.SelectedItem = "main";
+        }
+        else if (cmbIssueBaseBranch.Items.Contains("master"))
+        {
+            cmbIssueBaseBranch.SelectedItem = "master";
+        }
+        else if (cmbIssueBaseBranch.Items.Count > 0)
+        {
+            cmbIssueBaseBranch.SelectedIndex = 0;
+        }
+        form.Controls.Add(cmbIssueBaseBranch);
+
+        // Track Issue validation state
+        bool issueValidated = false;
+        string? fetchedIssueTitle = null;
+        string? issueGitHubUrl = null;
+
         // Buttons
         var btnOk = new Button
         {
@@ -448,6 +656,14 @@ internal static class NewSessionNameVisuals
             {
                 btnOk.Enabled = hasAlias && prValidated;
             }
+            else if (rdoFromIssue.Checked)
+            {
+                btnOk.Enabled = hasAlias && issueValidated;
+            }
+            else if (rdoNewBranch.Checked)
+            {
+                btnOk.Enabled = hasAlias && !string.IsNullOrWhiteSpace(txtNewBranchName.Text);
+            }
             else
             {
                 btnOk.Enabled = hasAlias;
@@ -462,7 +678,9 @@ internal static class NewSessionNameVisuals
         {
             int cy = modeStartY;
             bool isSwitchBranch = rdoSwitchBranch.Checked;
+            bool isNewBranch = rdoNewBranch.Checked;
             bool isPrMode = rdoFromPr.Checked;
+            bool isIssueMode = rdoFromIssue.Checked;
             bool isSameBranch = rdoSameBranch.Checked;
 
             // Current branch label — only visible in Same Branch mode
@@ -478,6 +696,14 @@ internal static class NewSessionNameVisuals
             cmbBranch.Visible = isSwitchBranch;
             lblBranchHelper.Visible = isSwitchBranch;
 
+            // New Branch controls
+            lblNewBranchName.Visible = isNewBranch;
+            txtNewBranchName.Visible = isNewBranch;
+            txtNewBranchNameWrapper.Visible = isNewBranch;
+            lblNewBranchHelper.Visible = isNewBranch;
+            lblBaseBranch.Visible = isNewBranch;
+            cmbBaseBranch.Visible = isNewBranch;
+
             // PR mode controls
             lblRemote.Visible = isPrMode;
             cmbRemote.Visible = isPrMode;
@@ -490,6 +716,22 @@ internal static class NewSessionNameVisuals
             if (!isPrMode)
             {
                 chkUsePrTitle.Visible = false;
+            }
+
+            // Issue mode controls
+            lblIssueRemote.Visible = isIssueMode;
+            cmbIssueRemote.Visible = isIssueMode;
+            lblIssueNumber.Visible = isIssueMode;
+            txtIssueNumber.Visible = isIssueMode;
+            txtIssueNumberWrapper.Visible = isIssueMode;
+            btnCheckIssue.Visible = isIssueMode;
+            lblIssueValidation.Visible = isIssueMode;
+            lblIssueBranch.Visible = isIssueMode;
+            cmbIssueBaseBranch.Visible = isIssueMode;
+
+            if (!isIssueMode)
+            {
+                chkUseIssueTitle.Visible = false;
             }
 
             if (isPrMode)
@@ -526,6 +768,65 @@ internal static class NewSessionNameVisuals
                 btnOk.Enabled = prValidated && !string.IsNullOrWhiteSpace(txtSessionName.Text);
                 form.Height = cy + 70;
             }
+            else if (isIssueMode)
+            {
+                // Remote dropdown
+                lblIssueRemote.Location = new Point(14, cy);
+                cmbIssueRemote.Location = new Point(14, cy + 20);
+                cy += 50;
+
+                // Issue number + Check button
+                lblIssueNumber.Location = new Point(14, cy);
+                txtIssueNumber.Location = new Point(14, cy + 20);
+                txtIssueNumberWrapper.Location = new Point(14, cy + 20);
+                btnCheckIssue.Location = new Point(384, cy + 19);
+                cy += 48;
+
+                // Validation label
+                lblIssueValidation.Location = new Point(14, cy);
+                cy += Math.Max(20, lblIssueValidation.PreferredHeight + 4);
+
+                // Issue title checkbox
+                chkUseIssueTitle.Location = new Point(14, cy);
+                if (chkUseIssueTitle.Visible)
+                {
+                    cy += 24;
+                }
+
+                // Base branch
+                lblIssueBranch.Location = new Point(14, cy);
+                cmbIssueBaseBranch.Location = new Point(14, cy + 20);
+                cy += 50;
+
+                cy += 8;
+
+                // Buttons
+                btnOk.Location = new Point(300, cy);
+                btnCancel.Location = new Point(390, cy);
+
+                btnOk.Enabled = issueValidated && !string.IsNullOrWhiteSpace(txtSessionName.Text);
+                form.Height = cy + 70;
+            }
+            else if (isNewBranch)
+            {
+                lblNewBranchName.Location = new Point(14, cy);
+                txtNewBranchName.Location = new Point(14, cy + 20);
+                txtNewBranchNameWrapper.Location = new Point(14, cy + 20);
+                lblNewBranchHelper.Location = new Point(14, cy + 46);
+                cy += 68;
+
+                lblBaseBranch.Location = new Point(14, cy);
+                cmbBaseBranch.Location = new Point(14, cy + 20);
+                cy += 50;
+
+                int buttonY = cy + 8;
+                btnOk.Location = new Point(300, buttonY);
+                btnCancel.Location = new Point(390, buttonY);
+
+                btnOk.Enabled = !string.IsNullOrWhiteSpace(txtSessionName.Text)
+                    && !string.IsNullOrWhiteSpace(txtNewBranchName.Text);
+                form.Height = buttonY + 70;
+            }
             else if (isSwitchBranch)
             {
                 lblBranch.Location = new Point(14, cy);
@@ -561,6 +862,22 @@ internal static class NewSessionNameVisuals
             chkUsePrTitle.Checked = false;
             txtSessionName.ReadOnly = false;
             if (rdoFromPr.Checked)
+            {
+                btnOk.Enabled = false;
+            }
+        }
+
+        void ResetIssueValidation()
+        {
+            issueValidated = false;
+            fetchedIssueTitle = null;
+            issueGitHubUrl = null;
+            lblIssueValidation.Text = "";
+            lblIssueValidation.ForeColor = Color.Black;
+            chkUseIssueTitle.Visible = false;
+            chkUseIssueTitle.Checked = false;
+            txtSessionName.ReadOnly = false;
+            if (rdoFromIssue.Checked)
             {
                 btnOk.Enabled = false;
             }
@@ -684,16 +1001,140 @@ internal static class NewSessionNameVisuals
             isValidating = false;
         }
 
+        bool isValidatingIssue = false;
+
+        async Task ValidateIssueAsync()
+        {
+            if (isValidatingIssue)
+            {
+                return;
+            }
+
+            var remoteName = cmbIssueRemote.SelectedItem?.ToString();
+            var issueText = txtIssueNumber.Text.Trim();
+            if (string.IsNullOrEmpty(remoteName) || !int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+            {
+                lblIssueValidation.Text = "Enter a valid issue number.";
+                lblIssueValidation.ForeColor = Color.Red;
+                issueValidated = false;
+                btnOk.Enabled = false;
+                return;
+            }
+
+            isValidatingIssue = true;
+            lblIssueValidation.Text = "Checking...";
+            lblIssueValidation.ForeColor = Color.Gray;
+            btnCheckIssue.Enabled = false;
+
+            bool found = false;
+            string? issueTitle = null;
+            string? ghUrl = null;
+            try
+            {
+                (found, issueTitle, ghUrl) = await Task.Run(async () =>
+                {
+                    string? title = null;
+                    string? url = null;
+                    bool valid = false;
+
+                    try
+                    {
+                        var remoteUrl = GitService.GetRemoteUrl(gitRoot, remoteName);
+                        if (!string.IsNullOrEmpty(remoteUrl))
+                        {
+                            var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
+                            if (parsed.HasValue)
+                            {
+                                var (owner, repo) = parsed.Value;
+                                var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/issues/{issueNum}";
+                                var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+                                request.Headers.Add("User-Agent", "CopilotBooster");
+                                var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+                                if (response.IsSuccessStatusCode)
+                                {
+                                    var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                                    using var doc = JsonDocument.Parse(json);
+
+                                    // Ensure it's actually an issue, not a PR
+                                    if (!doc.RootElement.TryGetProperty("pull_request", out _))
+                                    {
+                                        valid = true;
+                                        if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                                        {
+                                            title = titleProp.GetString();
+                                        }
+
+                                        url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // API failure
+                    }
+
+                    return (valid, title, url);
+                }).ConfigureAwait(true);
+            }
+            catch
+            {
+                found = false;
+            }
+
+            if (found)
+            {
+                lblIssueValidation.Text = issueTitle != null
+                    ? $"✅ Issue #{issueNum}: {issueTitle}"
+                    : $"✅ Issue #{issueNum} found";
+                lblIssueValidation.ForeColor = Color.Green;
+                issueValidated = true;
+                btnOk.Enabled = !string.IsNullOrWhiteSpace(txtSessionName.Text);
+
+                if (issueTitle != null)
+                {
+                    fetchedIssueTitle = issueTitle;
+                    chkUseIssueTitle.Visible = true;
+                    RelayoutControls();
+                }
+
+                issueGitHubUrl = ghUrl;
+            }
+            else
+            {
+                lblIssueValidation.Text = $"❌ Issue #{issueNum} not found";
+                lblIssueValidation.ForeColor = Color.Red;
+                issueValidated = false;
+                btnOk.Enabled = false;
+            }
+
+            btnCheckIssue.Enabled = true;
+            isValidatingIssue = false;
+        }
+
         // Wire up radio button changes
         void OnModeChanged(object? s, EventArgs e)
         {
             ResetPrValidation();
+            ResetIssueValidation();
             RelayoutControls();
         }
 
         rdoSameBranch.CheckedChanged += OnModeChanged;
         rdoSwitchBranch.CheckedChanged += OnModeChanged;
+        rdoNewBranch.CheckedChanged += OnModeChanged;
         rdoFromPr.CheckedChanged += OnModeChanged;
+        rdoFromIssue.CheckedChanged += OnModeChanged;
+
+        txtNewBranchName.TextChanged += (s, e) =>
+        {
+            if (rdoNewBranch.Checked)
+            {
+                btnOk.Enabled = !string.IsNullOrWhiteSpace(txtSessionName.Text)
+                    && !string.IsNullOrWhiteSpace(txtNewBranchName.Text);
+            }
+        };
 
         txtPrNumber.TextChanged += (s, e) => ResetPrValidation();
         cmbRemote.SelectedIndexChanged += (s, e) => ResetPrValidation();
@@ -712,6 +1153,31 @@ internal static class NewSessionNameVisuals
             if (chkUsePrTitle.Checked && fetchedPrTitle != null)
             {
                 txtSessionName.Text = fetchedPrTitle;
+                txtSessionName.ReadOnly = true;
+            }
+            else
+            {
+                txtSessionName.ReadOnly = false;
+            }
+        };
+
+        txtIssueNumber.TextChanged += (s, e) => ResetIssueValidation();
+        cmbIssueRemote.SelectedIndexChanged += (s, e) => ResetIssueValidation();
+
+        btnCheckIssue.Click += async (s, e) => await ValidateIssueAsync().ConfigureAwait(true);
+        txtIssueNumber.Leave += async (s, e) =>
+        {
+            if (rdoFromIssue.Checked && !string.IsNullOrWhiteSpace(txtIssueNumber.Text) && !issueValidated)
+            {
+                await ValidateIssueAsync().ConfigureAwait(true);
+            }
+        };
+
+        chkUseIssueTitle.CheckedChanged += (s, e) =>
+        {
+            if (chkUseIssueTitle.Checked && fetchedIssueTitle != null)
+            {
+                txtSessionName.Text = fetchedIssueTitle;
                 txtSessionName.ReadOnly = true;
             }
             else
@@ -745,7 +1211,54 @@ internal static class NewSessionNameVisuals
                 }
 
                 var platform = remotePlatforms[remoteName];
-                result = new NewSessionResult(name, BranchAction.FromPr, null, null, remoteName, prNum, platform, fetchedPrHeadBranch);
+
+                // Build GitHub URL for Edge tab
+                string? prGhUrl = null;
+                var prRemoteUrl = GitService.GetRemoteUrl(gitRoot, remoteName);
+                if (!string.IsNullOrEmpty(prRemoteUrl))
+                {
+                    var parsed = GitService.ParseGitHubOwnerRepo(prRemoteUrl);
+                    if (parsed.HasValue)
+                    {
+                        prGhUrl = $"https://github.com/{parsed.Value.owner}/{parsed.Value.repo}/pull/{prNum}";
+                    }
+                }
+
+                result = new NewSessionResult(name, BranchAction.FromPr, null, null, remoteName, prNum, platform, fetchedPrHeadBranch, GitHubUrl: prGhUrl);
+            }
+            else if (rdoFromIssue.Checked)
+            {
+                var remoteName = cmbIssueRemote.SelectedItem?.ToString();
+                var issueText = txtIssueNumber.Text.Trim();
+                if (string.IsNullOrEmpty(remoteName) || !int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+                {
+                    MessageBox.Show("Enter a valid issue number.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!issueValidated)
+                {
+                    MessageBox.Show("Please validate the issue first.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var branchName = Models.LauncherSettings.FormatBranchName(
+                    Program._settings.IssueBranchPattern, issueNum, name);
+                var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
+
+                result = new NewSessionResult(name, BranchAction.FromIssue, branchName, baseBranch, remoteName, null, null, IssueNumber: issueNum, GitHubUrl: issueGitHubUrl);
+            }
+            else if (rdoNewBranch.Checked)
+            {
+                var branchName = txtNewBranchName.Text.Trim();
+                if (string.IsNullOrEmpty(branchName))
+                {
+                    MessageBox.Show("Enter a branch name.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var baseBranch = cmbBaseBranch.SelectedItem?.ToString() ?? "main";
+                result = new NewSessionResult(name, BranchAction.NewBranch, branchName, baseBranch, null, null, null);
             }
             else if (rdoSwitchBranch.Checked)
             {

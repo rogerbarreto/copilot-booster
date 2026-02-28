@@ -845,6 +845,32 @@ internal partial class MainForm : Form
         };
         wsDirPanel.Controls.AddRange([wsDirLabel, SettingsVisuals.WrapWithBorder(wsDirBox), wsDirBrowse]);
 
+        // Issue branch pattern
+        var issueBranchPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
+        var issueBranchLabel = new Label { Text = "Issue branch pattern:", AutoSize = true, Location = new Point(8, 12) };
+        var issueBranchBox = new TextBox
+        {
+            Text = Program._settings.IssueBranchPattern,
+            PlaceholderText = "issues/{number}-{alias}",
+            Location = new Point(170, 9),
+            Width = 360,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+        };
+        issueBranchPanel.Controls.AddRange([issueBranchLabel, SettingsVisuals.WrapWithBorder(issueBranchBox)]);
+
+        // PR branch pattern
+        var prBranchPanel = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(8, 8, 8, 4) };
+        var prBranchLabel = new Label { Text = "PR branch pattern:", AutoSize = true, Location = new Point(8, 12) };
+        var prBranchBox = new TextBox
+        {
+            Text = Program._settings.PrBranchPattern,
+            PlaceholderText = "prs/{number}-{alias}",
+            Location = new Point(170, 9),
+            Width = 360,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+        };
+        prBranchPanel.Controls.AddRange([prBranchLabel, SettingsVisuals.WrapWithBorder(prBranchBox)]);
+
         // Notifications
         var notifyPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
         var notifyOnBellCheck = new CheckBox
@@ -1082,6 +1108,10 @@ internal partial class MainForm : Form
             CopilotConfigService.SaveAllowedUrls(urlsList.Items.Cast<string>().ToList());
             Program._settings.DefaultWorkDir = workDirBox.Text.Trim();
             Program._settings.WorkspacesDir = wsDirBox.Text.Trim();
+            Program._settings.IssueBranchPattern = string.IsNullOrWhiteSpace(issueBranchBox.Text)
+                ? "issues/{number}-{alias}" : issueBranchBox.Text.Trim();
+            Program._settings.PrBranchPattern = string.IsNullOrWhiteSpace(prBranchBox.Text)
+                ? "prs/{number}-{alias}" : prBranchBox.Text.Trim();
             Program._settings.Ides = [];
             foreach (ListViewItem item in idesList.Items)
             {
@@ -1153,6 +1183,8 @@ internal partial class MainForm : Form
         settingsContainer.Controls.Add(edgeRenamePanel);
         settingsContainer.Controls.Add(notifyPanel);
         settingsContainer.Controls.Add(workDirPanel);
+        settingsContainer.Controls.Add(prBranchPanel);
+        settingsContainer.Controls.Add(issueBranchPanel);
         settingsContainer.Controls.Add(wsDirPanel);
         settingsContainer.Controls.Add(settingsBottomPanel);
 
@@ -1770,18 +1802,57 @@ internal partial class MainForm : Form
         // Wire events identically to the old tab-based visuals
         dialogVisuals.OnNewSession += async (selectedCwd) =>
         {
-            var sessionName = NewSessionNameVisuals.ShowNamePrompt();
-            if (sessionName == null)
+            var promptResult = NewSessionNameVisuals.ShowNamePrompt(selectedCwd);
+            if (promptResult == null)
             {
                 return;
             }
 
+            // Handle branch/PR/issue checkout before creating the session
+            if (promptResult.Action != BranchAction.None)
+            {
+                var gitRoot = SessionService.FindGitRoot(selectedCwd);
+                if (gitRoot != null)
+                {
+                    (bool success, string error) checkoutResult = promptResult.Action switch
+                    {
+                        BranchAction.ExistingBranch when !string.IsNullOrEmpty(promptResult.BranchName) =>
+                            GitService.CheckoutBranch(gitRoot, promptResult.BranchName),
+                        BranchAction.NewBranch when !string.IsNullOrEmpty(promptResult.BranchName) && !string.IsNullOrEmpty(promptResult.BaseBranch) =>
+                            GitService.CheckoutNewBranch(gitRoot, promptResult.BranchName, promptResult.BaseBranch),
+                        BranchAction.FromPr when promptResult.PrNumber.HasValue && !string.IsNullOrEmpty(promptResult.Remote) && promptResult.Platform.HasValue =>
+                            GitService.FetchAndCheckoutPr(gitRoot, promptResult.Remote, promptResult.Platform.Value, promptResult.PrNumber.Value, promptResult.HeadBranch ?? $"pr-{promptResult.PrNumber.Value}"),
+                        BranchAction.FromIssue when !string.IsNullOrEmpty(promptResult.BranchName) && !string.IsNullOrEmpty(promptResult.BaseBranch) =>
+                            GitService.CheckoutNewBranch(gitRoot, promptResult.BranchName, promptResult.BaseBranch),
+                        _ => (true, "")
+                    };
+
+                    if (!checkoutResult.success)
+                    {
+                        MessageBox.Show($"Failed to switch branch:\n{checkoutResult.error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+                }
+            }
+
+            var sessionName = promptResult.SessionName;
             var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(selectedCwd, sessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
             if (newSessionId != null)
             {
                 if (!string.IsNullOrWhiteSpace(sessionName))
                 {
                     SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                }
+
+                // Auto-add Edge tab for PR/Issue URL
+                if (!string.IsNullOrEmpty(promptResult.GitHubUrl))
+                {
+                    var existingTabs = EdgeTabPersistenceService.LoadTabs(newSessionId);
+                    if (!existingTabs.Contains(promptResult.GitHubUrl))
+                    {
+                        existingTabs.Add(promptResult.GitHubUrl);
+                        EdgeTabPersistenceService.SaveTabs(newSessionId, existingTabs);
+                    }
                 }
 
                 this._interactionManager.LaunchSession(newSessionId);
@@ -1808,6 +1879,17 @@ internal partial class MainForm : Form
                         if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
                         {
                             SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
+                        }
+
+                        // Auto-add Edge tab for PR/Issue URL
+                        if (!string.IsNullOrEmpty(wsResult.Value.GitHubUrl))
+                        {
+                            var existingTabs = EdgeTabPersistenceService.LoadTabs(newSessionId);
+                            if (!existingTabs.Contains(wsResult.Value.GitHubUrl))
+                            {
+                                existingTabs.Add(wsResult.Value.GitHubUrl);
+                                EdgeTabPersistenceService.SaveTabs(newSessionId, existingTabs);
+                            }
                         }
 
                         this._interactionManager.LaunchSession(newSessionId);

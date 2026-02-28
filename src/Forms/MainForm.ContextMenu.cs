@@ -81,6 +81,8 @@ internal partial class MainForm
                                 GitService.CheckoutNewBranch(gitRoot, promptResult.BranchName, promptResult.BaseBranch),
                             BranchAction.FromPr when promptResult.PrNumber.HasValue && !string.IsNullOrEmpty(promptResult.Remote) && promptResult.Platform.HasValue =>
                                 GitService.FetchAndCheckoutPr(gitRoot, promptResult.Remote, promptResult.Platform.Value, promptResult.PrNumber.Value, promptResult.HeadBranch ?? $"pr-{promptResult.PrNumber.Value}"),
+                            BranchAction.FromIssue when !string.IsNullOrEmpty(promptResult.BranchName) && !string.IsNullOrEmpty(promptResult.BaseBranch) =>
+                                GitService.CheckoutNewBranch(gitRoot, promptResult.BranchName, promptResult.BaseBranch),
                             _ => (true, "")
                         };
 
@@ -100,6 +102,17 @@ internal partial class MainForm
                     if (!string.IsNullOrWhiteSpace(sessionName))
                     {
                         SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, sessionName);
+                    }
+
+                    // Auto-add Edge tab for PR/Issue URL
+                    if (!string.IsNullOrEmpty(promptResult.GitHubUrl))
+                    {
+                        var existingTabs = EdgeTabPersistenceService.LoadTabs(newSessionId);
+                        if (!existingTabs.Contains(promptResult.GitHubUrl))
+                        {
+                            existingTabs.Add(promptResult.GitHubUrl);
+                            EdgeTabPersistenceService.SaveTabs(newSessionId, existingTabs);
+                        }
                     }
 
                     this._interactionManager.LaunchSession(newSessionId);
@@ -131,6 +144,17 @@ internal partial class MainForm
                             if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
                             {
                                 SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
+                            }
+
+                            // Auto-add Edge tab for PR/Issue URL
+                            if (!string.IsNullOrEmpty(wsResult.Value.GitHubUrl))
+                            {
+                                var existingTabs = EdgeTabPersistenceService.LoadTabs(newSessionId);
+                                if (!existingTabs.Contains(wsResult.Value.GitHubUrl))
+                                {
+                                    existingTabs.Add(wsResult.Value.GitHubUrl);
+                                    EdgeTabPersistenceService.SaveTabs(newSessionId, existingTabs);
+                                }
                             }
 
                             this._interactionManager.LaunchSession(newSessionId);

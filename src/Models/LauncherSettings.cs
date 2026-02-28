@@ -164,6 +164,20 @@ internal class LauncherSettings
     public bool ToastAnimate { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the branch naming pattern for issue-based sessions.
+    /// Placeholders: <c>{number}</c> (issue number), <c>{alias}</c> (slugified session alias).
+    /// </summary>
+    [JsonPropertyName("issueBranchPattern")]
+    public string IssueBranchPattern { get; set; } = "issues/{number}-{alias}";
+
+    /// <summary>
+    /// Gets or sets the branch naming pattern for PR-based sessions.
+    /// Placeholders: <c>{number}</c> (PR number), <c>{alias}</c> (slugified session alias).
+    /// </summary>
+    [JsonPropertyName("prBranchPattern")]
+    public string PrBranchPattern { get; set; } = "prs/{number}-{alias}";
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).
@@ -237,6 +251,36 @@ internal class LauncherSettings
             AllowedDirs = [],
             DefaultWorkDir = ""
         };
+    }
+
+    /// <summary>
+    /// Formats a branch name by replacing <c>{number}</c> and <c>{alias}</c> placeholders in the given pattern.
+    /// The alias is slugified: lowercased, spaces and special characters replaced with hyphens, consecutive hyphens collapsed.
+    /// </summary>
+    internal static string FormatBranchName(string pattern, int number, string? alias)
+    {
+        var slug = string.IsNullOrWhiteSpace(alias) ? "session" : Slugify(alias);
+        return pattern
+            .Replace("{number}", number.ToString(), StringComparison.OrdinalIgnoreCase)
+            .Replace("{alias}", slug, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Slugify(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        foreach (var ch in text.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                sb.Append(ch);
+            }
+            else if (sb.Length > 0 && sb[sb.Length - 1] != '-')
+            {
+                sb.Append('-');
+            }
+        }
+
+        return sb.ToString().TrimEnd('-');
     }
 
     /// <summary>
