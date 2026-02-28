@@ -226,7 +226,7 @@ Create a workspace from two places:
 - **New Session** → right-click a Git directory → **New Copilot Session Workspace**
 - **Existing Sessions** → right-click a session → **Open as New Copilot Session Workspace**
 
-Workspaces are stored in `%APPDATA%\CopilotBooster\Workspaces\` and named after the repository and branch (e.g., `myrepo-feature-xyz`).
+Workspaces are stored by default in `%APPDATA%\CopilotBooster\Workspaces\` and named after the repository and branch (e.g., `myrepo-feature-xyz`). The workspace directory can be changed in Settings.
 
 The workspace dialog offers three modes:
 
@@ -271,7 +271,8 @@ All configuration lives in a tabbed UI with info labels and tooltips — no JSON
 - **Max active sessions** — configurable limit (0 = unlimited)
 - **Pinned order** — sort pinned sessions by last updated or alias name
 - **Default Work Dir** — set the default working directory for new sessions
-- **Toast mode** — enable/disable toast mode, configure position (6 options), target screen (per-monitor), and slide animation
+- **Workspace Dir** — set the directory where Git worktree workspaces are stored (default: `%APPDATA%\CopilotBooster\Workspaces\`)
+- **Toast mode** — enable/disable Quick Slide, configure position (6 options), target screen (per-monitor), and slide animation
 
 #### 🛠️ Allowed Tools
 
@@ -318,7 +319,11 @@ Whitelist URLs that Copilot CLI can access without prompting. These are stored i
 
 #### 💻 IDEs
 
-Register your IDEs with optional file patterns (e.g., `*.sln;*.slnx`) for project file search in the context menu.
+Register your favorite IDEs — Visual Studio, VS Code, Rider, Eclipse, or any editor with a command-line launcher. Each IDE entry includes a description, executable path, and optional file pattern (e.g., `*.sln;*.slnx`) for automatic project file discovery in the context menu.
+
+<p align="center">
+  <img src="images/custom-ide-setup.png" alt="IDE settings with Add IDE dialog showing description, path, and file pattern" width="500">
+</p>
 
 #### 🔎 IDE Search
 
