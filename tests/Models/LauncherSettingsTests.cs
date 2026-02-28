@@ -307,4 +307,72 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.Equal("Date", settings.SessionColumnOrder[0]);
         Assert.Equal("CWD", settings.SessionColumnOrder[1]);
     }
+
+    [Fact]
+    public void ToastMode_DefaultsToEnabled()
+    {
+        var settings = new LauncherSettings();
+
+        Assert.True(settings.ToastMode);
+        Assert.Equal("bottom-center", settings.ToastPosition);
+        Assert.Equal("primary", settings.ToastScreen);
+        Assert.True(settings.ToastAnimate);
+    }
+
+    [Fact]
+    public void ToastMode_SerializesCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings
+        {
+            ToastMode = true,
+            ToastPosition = "top-right",
+            ToastScreen = "cursor",
+            ToastAnimate = false
+        };
+
+        settings.Save(file);
+
+        var loaded = LauncherSettings.Load(file);
+        Assert.True(loaded.ToastMode);
+        Assert.Equal("top-right", loaded.ToastPosition);
+        Assert.Equal("cursor", loaded.ToastScreen);
+        Assert.False(loaded.ToastAnimate);
+    }
+
+    [Fact]
+    public void Load_WithToastSettings_DeserializesCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var json = JsonSerializer.Serialize(new
+        {
+            toastMode = true,
+            toastPosition = "bottom-left",
+            toastScreen = "cursor",
+            toastAnimate = true
+        });
+        File.WriteAllText(file, json);
+
+        var settings = LauncherSettings.Load(file);
+
+        Assert.True(settings.ToastMode);
+        Assert.Equal("bottom-left", settings.ToastPosition);
+        Assert.Equal("cursor", settings.ToastScreen);
+        Assert.True(settings.ToastAnimate);
+    }
+
+    [Fact]
+    public void Load_WithoutToastSettings_DefaultsCorrectly()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var json = JsonSerializer.Serialize(new { allowedTools = Array.Empty<string>() });
+        File.WriteAllText(file, json);
+
+        var settings = LauncherSettings.Load(file);
+
+        Assert.True(settings.ToastMode);
+        Assert.Equal("bottom-center", settings.ToastPosition);
+        Assert.Equal("primary", settings.ToastScreen);
+        Assert.True(settings.ToastAnimate);
+    }
 }

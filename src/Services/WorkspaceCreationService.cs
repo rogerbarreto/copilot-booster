@@ -87,9 +87,9 @@ internal static class WorkspaceCreationService
     /// Creates a new workspace from a pull request number by fetching the PR ref and creating a worktree.
     /// </summary>
     internal static (string path, bool success, string? error) CreateWorkspaceFromPr(
-        string repoPath, string repoFolderName, string remote, int prNumber, GitService.HostingPlatform platform)
+        string repoPath, string repoFolderName, string remote, int prNumber, GitService.HostingPlatform platform, string? headBranch = null)
     {
-        var baseBranchName = $"pr-{prNumber}";
+        var baseBranchName = headBranch ?? $"pr-{prNumber}";
         var uniqueBranchName = ResolveUniqueBranchName(repoPath, baseBranchName);
         var worktreePath = BuildWorkspacePath(repoFolderName, uniqueBranchName);
 

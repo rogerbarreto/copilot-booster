@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -48,6 +49,14 @@ internal partial class MainForm : Form
     private NotifyIcon? _trayIcon;
     private bool _forceClose;
 
+    // Toast window mode
+    private GlobalHotkeyService? _hotkeyService;
+    private System.Windows.Forms.Timer? _toastAnimTimer;
+    private int _toastTargetTop;
+    private bool _toastVisible;
+    private bool _toastAnimating;
+    private long _toastShownTicks;
+
     /// <summary>
     /// Gets the identifier of the currently selected session.
     /// </summary>
@@ -77,7 +86,10 @@ internal partial class MainForm : Form
         this.Controls.Add(this._sessionsPanel);
         this.Controls.Add(this._updateLabel);
 
+        SetDoubleBuffered(this);
+
         this.SetupTimersAndEvents(initialTab);
+        this.SetupToastMode();
     }
 
     private void InitializeFormProperties()
@@ -89,10 +101,29 @@ internal partial class MainForm : Form
         this.StartPosition = FormStartPosition.CenterScreen;
         this.FormBorderStyle = FormBorderStyle.Sizable;
         this.TopMost = Program._settings.AlwaysOnTop;
+        this.DoubleBuffered = true;
+
+        if (Application.IsDarkModeEnabled)
+        {
+            this.BackColor = Color.FromArgb(0x1E, 0x1E, 0x1E);
+        }
 
         if (Program.AppIcon != null)
         {
             this.Icon = Program.AppIcon;
+        }
+    }
+
+    // Flicker prevention — set DoubleBuffered on controls via reflection
+    private static void SetDoubleBuffered(Control control)
+    {
+        var prop = typeof(Control).GetProperty("DoubleBuffered",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        prop?.SetValue(control, true);
+
+        foreach (Control child in control.Controls)
+        {
+            SetDoubleBuffered(child);
         }
     }
 
@@ -154,13 +185,262 @@ internal partial class MainForm : Form
     }
 
     /// <summary>
-    /// Restores the window from the system tray.
+    /// Restores the window from the system tray. Uses toast positioning when toast mode is active.
     /// </summary>
     private void RestoreFromTray()
     {
+        if (Program._settings.ToastMode && (!this.Visible || this.WindowState == FormWindowState.Minimized))
+        {
+            this.ShowToastAtCursor();
+            return;
+        }
+
         this.Show();
         this.WindowState = FormWindowState.Normal;
         this.Activate();
+    }
+
+    /// <summary>
+    /// Initializes the global hotkey for toast mode if enabled in settings.
+    /// </summary>
+    private void SetupToastMode()
+    {
+        if (!Program._settings.ToastMode)
+        {
+            return;
+        }
+
+        this._hotkeyService = new GlobalHotkeyService();
+        if (!this._hotkeyService.Register())
+        {
+            Program.Logger.LogWarning("Failed to register toast mode hotkey (Win+Alt+X)");
+            this._hotkeyService = null;
+            return;
+        }
+
+        this._hotkeyService.HotkeyPressed += this.OnToastHotkeyPressed;
+
+        this._toastAnimTimer = new System.Windows.Forms.Timer { Interval = 15 };
+        this._toastAnimTimer.Tick += this.OnToastAnimationTick;
+
+        this.Deactivate += this.OnToastDeactivate;
+        this._toastVisible = false;
+    }
+
+    private void OnToastHotkeyPressed()
+    {
+        if (this.InvokeRequired)
+        {
+            this.BeginInvoke(this.OnToastHotkeyPressed);
+            return;
+        }
+
+        if (this._toastVisible)
+        {
+            this.HideToast();
+        }
+        else
+        {
+            this.ShowToast();
+        }
+    }
+
+    private void ShowToast() => this.ShowToast(GetToastScreen());
+
+    private void ShowToastAtCursor() => this.ShowToast(Screen.FromPoint(Cursor.Position));
+
+    /// <summary>
+    /// Calculates the toast target position and animation start position for the given work area.
+    /// </summary>
+    internal static (Point Target, Point AnimStart, bool FromBottom) CalculateToastPosition(
+        Rectangle workArea, Size windowSize, string position)
+    {
+        int targetLeft = position switch
+        {
+            "bottom-left" or "top-left" => workArea.Left,
+            "bottom-right" or "top-right" => workArea.Right - windowSize.Width,
+            _ => workArea.Left + (workArea.Width - windowSize.Width) / 2
+        };
+
+        bool fromBottom = position.StartsWith("bottom", StringComparison.OrdinalIgnoreCase);
+        int targetTop = fromBottom
+            ? workArea.Bottom - windowSize.Height
+            : workArea.Top;
+
+        int startTop = fromBottom ? workArea.Bottom : workArea.Top - windowSize.Height;
+
+        return (new Point(targetLeft, targetTop), new Point(targetLeft, startTop), fromBottom);
+    }
+
+    private void ShowToast(Screen screen)
+    {
+        var workArea = screen.WorkingArea;
+        var pos = Program._settings.ToastPosition;
+        var (target, animStart, _) = CalculateToastPosition(workArea, this.Size, pos);
+
+        // Hide first to prevent flash when restoring from minimized
+        bool wasMinimized = this.WindowState == FormWindowState.Minimized;
+        if (wasMinimized)
+        {
+            this.Visible = false;
+        }
+
+        this.StartPosition = FormStartPosition.Manual;
+        this.WindowState = FormWindowState.Normal;
+
+        if (Program._settings.ToastAnimate)
+        {
+            this.Location = animStart;
+            this._toastTargetTop = target.Y;
+
+            this.Show();
+            this.Activate();
+            this._toastAnimating = true;
+            this._toastAnimTimer?.Start();
+        }
+        else
+        {
+            this.Location = target;
+            this.Show();
+            this.Activate();
+        }
+
+        this._toastVisible = true;
+        this._toastShownTicks = Environment.TickCount64;
+    }
+
+    private void HideToast()
+    {
+        if (this._toastAnimating)
+        {
+            this._toastAnimTimer?.Stop();
+            this._toastAnimating = false;
+        }
+
+        if (Program._settings.ToastAnimate)
+        {
+            var screen = GetToastScreen();
+            var workArea = screen.WorkingArea;
+            bool fromBottom = Program._settings.ToastPosition.StartsWith("bottom", StringComparison.OrdinalIgnoreCase);
+            this._toastTargetTop = fromBottom ? workArea.Bottom : workArea.Top - this.Height;
+            this._toastAnimating = true;
+            this._toastAnimTimer?.Start();
+        }
+        else
+        {
+            this.Hide();
+            this.WindowState = FormWindowState.Minimized;
+        }
+
+        this._toastVisible = false;
+    }
+
+    private void OnToastAnimationTick(object? sender, EventArgs e)
+    {
+        int step = Math.Max(1, Math.Abs(this._toastTargetTop - this.Top) / 4);
+        if (this.Top < this._toastTargetTop)
+        {
+            this.Top = Math.Min(this.Top + step, this._toastTargetTop);
+        }
+        else if (this.Top > this._toastTargetTop)
+        {
+            this.Top = Math.Max(this.Top - step, this._toastTargetTop);
+        }
+
+        if (this.Top == this._toastTargetTop)
+        {
+            this._toastAnimTimer?.Stop();
+            this._toastAnimating = false;
+
+            // If we animated to off-screen, hide the form
+            if (!this._toastVisible)
+            {
+                this.Hide();
+                this.WindowState = FormWindowState.Minimized;
+            }
+        }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    private void OnToastDeactivate(object? sender, EventArgs e)
+    {
+        if (!Program._settings.ToastMode || !this._toastVisible || this._toastAnimating)
+        {
+            return;
+        }
+
+        // Ignore deactivation when being minimized by taskbar click
+        if (this.WindowState == FormWindowState.Minimized)
+        {
+            this._toastVisible = false;
+            return;
+        }
+
+        // Ignore deactivation within 500ms of showing (prevents rapid show/hide from taskbar clicks)
+        if (Environment.TickCount64 - this._toastShownTicks < 500)
+        {
+            return;
+        }
+
+        // Don't hide if focus went to a window owned by our process (dialogs, context menus, etc.)
+        var foreground = GetForegroundWindow();
+        if (foreground != IntPtr.Zero)
+        {
+            GetWindowThreadProcessId(foreground, out uint pid);
+            if (pid == (uint)Environment.ProcessId)
+            {
+                return;
+            }
+        }
+
+        this.HideToast();
+    }
+
+    /// <summary>
+    /// Intercepts SC_RESTORE from taskbar clicks to re-trigger toast animation
+    /// instead of letting Windows restore to the last position.
+    /// </summary>
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_SYSCOMMAND = 0x0112;
+        const int SC_RESTORE = 0xF120;
+
+        if (m.Msg == WM_SYSCOMMAND
+            && (m.WParam.ToInt32() & 0xFFF0) == SC_RESTORE
+            && Program._settings.ToastMode
+            && this.WindowState == FormWindowState.Minimized)
+        {
+            // Let Windows handle the restore, then reposition with toast animation
+            base.WndProc(ref m);
+            this.BeginInvoke(this.ShowToastAtCursor);
+            return;
+        }
+
+        base.WndProc(ref m);
+    }
+
+    private static Screen GetToastScreen()
+    {
+        var setting = Program._settings.ToastScreen;
+
+        if (string.Equals(setting, "cursor", StringComparison.OrdinalIgnoreCase))
+        {
+            return Screen.FromPoint(Cursor.Position);
+        }
+
+        if (setting.StartsWith("screen-", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(setting.AsSpan(7), out int idx)
+            && idx >= 0 && idx < Screen.AllScreens.Length)
+        {
+            return Screen.AllScreens[idx];
+        }
+
+        return Screen.PrimaryScreen ?? Screen.AllScreens[0];
     }
 
     /// <summary>
@@ -183,6 +463,8 @@ internal partial class MainForm : Form
 
             return;
         }
+
+        this._hotkeyService?.Dispose();
 
         if (this._trayIcon != null)
         {
@@ -214,7 +496,9 @@ internal partial class MainForm : Form
 
         this._sessionsVisuals.OnTabChanged += () =>
         {
+            this.SuspendLayout();
             this.PopulateGridWithFilter(this._lastSnapshot);
+            this.ResumeLayout(true);
         };
 
         this._sessionsVisuals.OnNewSessionClicked += () =>
@@ -241,8 +525,8 @@ internal partial class MainForm : Form
         var dialog = new Form
         {
             Text = "Settings",
-            Size = new Size(700, 500),
-            MinimumSize = new Size(500, 400),
+            Size = new Size(700, 600),
+            MinimumSize = new Size(500, 480),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.Sizable,
             Font = this.Font,
@@ -435,10 +719,10 @@ internal partial class MainForm : Form
             }
         };
 
-        var btnRemoveTab = new Button { Text = "Remove", Width = 70 };
+        var btnRemoveTab = new Button { Text = "Remove", Width = 70, Enabled = false };
         btnRemoveTab.Click += (s, e) =>
         {
-            if (sessionTabsList.SelectedIndex <= 0)
+            if (sessionTabsList.SelectedIndex < 0 || sessionTabsList.Items.Count <= 1)
             {
                 return;
             }
@@ -452,6 +736,12 @@ internal partial class MainForm : Form
             }
 
             sessionTabsList.Items.RemoveAt(sessionTabsList.SelectedIndex);
+            btnRemoveTab.Enabled = sessionTabsList.Items.Count > 1 && sessionTabsList.SelectedIndex >= 0;
+        };
+
+        sessionTabsList.SelectedIndexChanged += (s, e) =>
+        {
+            btnRemoveTab.Enabled = sessionTabsList.Items.Count > 1 && sessionTabsList.SelectedIndex >= 0;
         };
 
         var btnMoveUp = new Button { Text = "▲ Up", Width = 70 };
@@ -487,7 +777,7 @@ internal partial class MainForm : Form
         sessionTabsButtons.Controls.AddRange([btnAddTab, btnRenameTab, btnRemoveTab, btnMoveUp, btnMoveDown]);
         sessionTabsTab.Controls.Add(sessionTabsList);
         sessionTabsTab.Controls.Add(sessionTabsButtons);
-        SettingsVisuals.ApplyTabInfo(sessionTabsTab, "Organize sessions into tabs. First tab cannot be removed.", "Tabs for grouping sessions. Max 20 characters per name.");
+        SettingsVisuals.ApplyTabInfo(sessionTabsTab, "Organize sessions into tabs. At least one tab must remain.", "Tabs for grouping sessions. Max 20 characters per name.");
         settingsTabs.TabPages.Add(sessionTabsTab);
 
         // Default Work Dir
@@ -681,6 +971,86 @@ internal partial class MainForm : Form
             : 0;
         pinnedOrderPanel.Controls.AddRange([pinnedOrderLabel, pinnedOrderCombo]);
 
+        // Toast mode
+        var toastModePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var toastModeCheck = new CheckBox
+        {
+            Text = "Toast mode (Win+Alt+X to show)",
+            Checked = Program._settings.ToastMode,
+            AutoSize = true,
+            Location = new Point(8, 5)
+        };
+        toastModePanel.Controls.Add(toastModeCheck);
+
+        // Toast position
+        var toastPositionPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var toastPositionLabel = new Label { Text = "Toast position:", AutoSize = true, Location = new Point(28, 7) };
+        var toastPositionCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(160, 4),
+            Width = 180
+        };
+        toastPositionCombo.Items.AddRange(new object[] { "Bottom Center", "Bottom Left", "Bottom Right", "Top Center", "Top Left", "Top Right" });
+        toastPositionCombo.SelectedIndex = Program._settings.ToastPosition switch
+        {
+            "bottom-left" => 1,
+            "bottom-right" => 2,
+            "top-center" => 3,
+            "top-left" => 4,
+            "top-right" => 5,
+            _ => 0
+        };
+        toastPositionPanel.Controls.AddRange([toastPositionLabel, toastPositionCombo]);
+
+        // Toast screen
+        var toastScreenPanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var toastScreenLabel = new Label { Text = "Toast screen:", AutoSize = true, Location = new Point(28, 7) };
+        var toastScreenCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(160, 4),
+            Width = 180
+        };
+        toastScreenCombo.Items.Add("Cursor");
+        // Add each screen with its Windows display number
+        var screens = Screen.AllScreens;
+        for (int i = 0; i < screens.Length; i++)
+        {
+            var label = screens[i].Primary ? $"Primary: {i + 1}" : $"Secondary: {i + 1}";
+            toastScreenCombo.Items.Add(label);
+        }
+
+        // Resolve selected index from setting
+        if (string.Equals(Program._settings.ToastScreen, "cursor", StringComparison.OrdinalIgnoreCase))
+        {
+            toastScreenCombo.SelectedIndex = 0;
+        }
+        else if (Program._settings.ToastScreen.StartsWith("screen-", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(Program._settings.ToastScreen.AsSpan(7), out int screenIdx)
+            && screenIdx >= 0 && screenIdx < screens.Length)
+        {
+            toastScreenCombo.SelectedIndex = screenIdx + 1; // +1 because index 0 is "Cursor"
+        }
+        else
+        {
+            // "primary" — find the primary screen index
+            var primaryIdx = Array.FindIndex(screens, s => s.Primary);
+            toastScreenCombo.SelectedIndex = (primaryIdx >= 0 ? primaryIdx : 0) + 1;
+        }
+        toastScreenPanel.Controls.AddRange([toastScreenLabel, toastScreenCombo]);
+
+        // Toast animate
+        var toastAnimatePanel = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(8, 4, 8, 4) };
+        var toastAnimateCheck = new CheckBox
+        {
+            Text = "Slide animation",
+            Checked = Program._settings.ToastAnimate,
+            AutoSize = true,
+            Location = new Point(28, 5)
+        };
+        toastAnimatePanel.Controls.Add(toastAnimateCheck);
+
         // Bottom buttons
         var settingsBottomPanel = new FlowLayoutPanel
         {
@@ -728,6 +1098,20 @@ internal partial class MainForm : Form
                 _ => "running"
             };
             Program._settings.SessionTabs = sessionTabsList.Items.Cast<string>().ToList();
+            Program._settings.ToastMode = toastModeCheck.Checked;
+            Program._settings.ToastPosition = toastPositionCombo.SelectedIndex switch
+            {
+                1 => "bottom-left",
+                2 => "bottom-right",
+                3 => "top-center",
+                4 => "top-left",
+                5 => "top-right",
+                _ => "bottom-center"
+            };
+            Program._settings.ToastScreen = toastScreenCombo.SelectedIndex == 0
+                ? "cursor"
+                : $"screen-{toastScreenCombo.SelectedIndex - 1}";
+            Program._settings.ToastAnimate = toastAnimateCheck.Checked;
             this.TopMost = Program._settings.AlwaysOnTop;
             Program._settings.Save();
             this._sessionsVisuals.BuildSessionTabs();
@@ -749,6 +1133,10 @@ internal partial class MainForm : Form
         settingsBottomPanel.Controls.Add(btnAbout);
 
         settingsContainer.Controls.Add(settingsTabs);
+        settingsContainer.Controls.Add(toastAnimatePanel);
+        settingsContainer.Controls.Add(toastScreenPanel);
+        settingsContainer.Controls.Add(toastPositionPanel);
+        settingsContainer.Controls.Add(toastModePanel);
         settingsContainer.Controls.Add(pinnedOrderPanel);
         settingsContainer.Controls.Add(maxSessionsPanel);
         settingsContainer.Controls.Add(themePanel);
@@ -811,6 +1199,12 @@ internal partial class MainForm : Form
 
         this.Shown += async (s, e) =>
         {
+            // On first launch with toast mode, slide up instead of just hiding
+            if (Program._settings.ToastMode && !this._toastVisible)
+            {
+                this.ShowToast();
+            }
+
             await this.LoadInitialDataAsync().ConfigureAwait(true);
             _ = this.CheckForUpdateInBackgroundAsync();
         };
@@ -905,6 +1299,12 @@ internal partial class MainForm : Form
         if (tabIndex == 2)
         {
             this.BuildAndShowSettingsDialog();
+        }
+
+        if (Program._settings.ToastMode && (!this.Visible || this.WindowState == FormWindowState.Minimized))
+        {
+            this.ShowToastAtCursor();
+            return;
         }
 
         if (this.WindowState == FormWindowState.Minimized)

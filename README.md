@@ -34,12 +34,30 @@ Modern AI-assisted development isn't one task at a time — it's **multiple Copi
 
 ## ✨ Features at a Glance
 
+### 🍞 Quick Slide
+
+Press **Win+Alt+X** from anywhere to slide the Booster window up from the taskbar like a toast notification. Click away to dismiss — no window management needed.
+
+<p align="center">
+  <img src="images/QuickSlide.gif" alt="Quick Slide — window slides up from taskbar" width="700">
+</p>
+
+- **Global hotkey (Win+Alt+X)** — show/hide from anywhere, system-wide via Win32 `RegisterHotKey`
+- **Slide animation** — smooth slide-up from the bottom of the screen (configurable)
+- **Auto-hide on focus loss** — the window dismisses when you click elsewhere (stays visible for dialogs, context menus, and settings)
+- **6 position options** — Bottom Left, Bottom Center, Bottom Right, Top Left, Top Center, Top Right
+- **Per-monitor support** — choose which screen to show the toast on, or follow the cursor
+- **Tray/taskbar activation** — clicking the tray icon or taskbar button shows the toast on the cursor's screen
+- **Enabled by default** — toast mode is on out of the box; configure position and screen in Settings
+
+---
+
 ### 📌 Taskbar Jump List
 
 Right-click the pinned icon to access everything:
 
 <p align="center">
-  <img src="images/jumplist.png" alt="Jump list with tasks" width="300">
+  <img src="images/menu-tasks.png" alt="Jump list with tasks" width="300">
 </p>
 
 - **New Copilot Session** — start a new session with a smart directory picker
@@ -53,7 +71,7 @@ Right-click the pinned icon to access everything:
 The session browser is the central hub. Each session shows **Session**, **CWD** (with ⎇ for Git repos), **Date**, and **Running** columns — giving you a live view of what's running where. Sessions with active processes are automatically sorted to the top.
 
 <p align="center">
-  <img src="images/existing-sessions-active-tracking.png" alt="Session browser with active tracking, bell notifications, and multi-select" width="700">
+  <img src="images/session-browser-state.png" alt="Session browser with active tracking, bell notifications, and status indicators" width="700">
 </p>
 
 The **Running** column tracks running contexts across multiple environments:
@@ -73,12 +91,28 @@ Each active context is a **clickable link** — click to focus the corresponding
   <img src="images/Focus-Feature-Per-Session.gif" alt="Click-to-focus across Terminal, IDE, and Edge per session" width="700">
 </p>
 
+#### 📑 Custom Session Tabs
+
+Organize your sessions into custom tabs — up to 10 tabs with full drag-and-drop reordering. Add new tabs directly from the main window with the **+** button, or manage them in Settings.
+
+<p align="center">
+  <img src="images/organize-your-sessions.png" alt="Session tabs with drag-and-drop reordering" width="700">
+</p>
+
+<p align="center">
+  <img src="images/custom-multiple-tabs.png" alt="Multiple custom session tabs for organizing work" width="700">
+</p>
+
+- **Quick add (+) button** — create new tabs directly from the session tab strip without opening Settings
+- **Drag-and-drop columns** — reorder grid columns by dragging headers; column order is persisted across restarts (Status column stays pinned)
+- **Move sessions between tabs** — right-click → "Move to" to reassign sessions to any tab
+
 Other session browser features:
 - **Multi-select** — hold Ctrl for individual selection or Shift for range selection; batch Pin/Unpin and Move to tab via context menu
 - **Search** — filter sessions by title, folder, or metadata as you type
-- **Configurable session tabs** — organize sessions into custom tabs (up to 10). Add, rename, remove, and reorder tabs in Settings. First tab is the default for new sessions.
 - **Pinned sessions** — pin sessions to keep them at the top regardless of sorting
 - **Running-first sorting** — sessions with active processes automatically float to the top
+- **Auto-select on tab switch** — switching tabs immediately selects the first row for quick navigation
 - **Auto-refresh** — the list updates when new sessions appear or names change externally
 - **Auto-cleanup** — empty sessions with no activity are automatically removed
 
@@ -156,7 +190,7 @@ Configure file patterns per IDE (e.g., `*.sln;*.slnx`) in Settings. When a patte
 Open a managed Microsoft Edge window linked to any session. Each workspace gets a unique anchor tab that lets Copilot Booster track, focus, and detect whether the browser window is still open.
 
 <p align="center">
-  <img src="images/edge-session-tracking.png" alt="Edge browser workspace with session anchor tab" width="700">
+  <img src="images/session-browser-state.png" alt="Edge browser workspace with session anchor tab" width="700">
 </p>
 
 - **Tab save/restore** — save Edge tabs via "Save Edge State" in the context menu; tabs are restored when reopening Edge for the session
@@ -194,6 +228,32 @@ Create a workspace from two places:
 
 Workspaces are stored in `%APPDATA%\CopilotBooster\Workspaces\` and named after the repository and branch (e.g., `myrepo-feature-xyz`).
 
+The workspace dialog offers three modes:
+
+#### Existing Branch
+
+Check out an existing branch into its own worktree. The branch dropdown lists all local and remote branches.
+
+<p align="center">
+  <img src="images/create-workspace-specific-branch.png" alt="Create workspace from an existing branch" width="450">
+</p>
+
+#### New Branch
+
+Create a new branch based on any existing branch. Pick a base branch from the dropdown and name your new branch.
+
+<p align="center">
+  <img src="images/create-workspace-new-based-branch.png" alt="Create workspace with a new branch from a base branch" width="450">
+</p>
+
+#### From PR #
+
+Start a workspace directly from a GitHub PR number. Copilot Booster fetches the PR metadata via the GitHub API and checks out the contributor's original branch name — matching what `gh pr checkout` does.
+
+<p align="center">
+  <img src="images/create-workspace-from-pr.png" alt="Create workspace from a GitHub Pull Request" width="450">
+</p>
+
 ---
 
 ### ⚙️ Settings
@@ -211,6 +271,7 @@ All configuration lives in a tabbed UI with info labels and tooltips — no JSON
 - **Max active sessions** — configurable limit (0 = unlimited)
 - **Pinned order** — sort pinned sessions by last updated or alias name
 - **Default Work Dir** — set the default working directory for new sessions
+- **Toast mode** — enable/disable toast mode, configure position (6 options), target screen (per-monitor), and slide animation
 
 #### 🛠️ Allowed Tools
 
@@ -247,6 +308,14 @@ Grant Copilot access to specific directories on your machine. Each entry is pass
 
 > **Tip:** Add your top-level project folders so Copilot can navigate across repositories without being blocked by directory restrictions.
 
+#### 🌐 Allowed URLs
+
+Whitelist URLs that Copilot CLI can access without prompting. These are stored in the Copilot CLI global config (`~/.copilot/config.json`) as `allowed_urls`.
+
+<p align="center">
+  <img src="images/global-allowed-urls.png" alt="Allowed URLs settings tab" width="500">
+</p>
+
 #### 💻 IDEs
 
 Register your IDEs with optional file patterns (e.g., `*.sln;*.slnx`) for project file search in the context menu.
@@ -257,6 +326,14 @@ Manage directories excluded from IDE file pattern search (e.g., `node_modules`, 
 
 <p align="center">
   <img src="images/settings-ide-search.png" alt="IDE Search settings tab with ignored directories" width="400">
+</p>
+
+#### 📑 Session Tabs
+
+Configure custom session tabs — add, rename, remove, and reorder tabs. The first tab is the default for new sessions.
+
+<p align="center">
+  <img src="images/settings-session-tabs.png" alt="Session Tabs settings with add, rename, remove, and reorder" width="500">
 </p>
 
 ---
@@ -376,6 +453,7 @@ CopilotBooster.exe (WinForms .NET 10, persistent taskbar window)
 | `ActiveStatusTracker` | Aggregates active status across all context types with HWND persistence |
 | `EventsJournalService` | Content-based Copilot CLI status detection via events.jsonl parsing |
 | `BellNotificationService` | Toast notifications and bell state management |
+| `GlobalHotkeyService` | System-wide Win+Alt+X hotkey via Win32 `RegisterHotKey` |
 | `SessionDataService` | Unified session loading with Git detection caching |
 | `CopilotSessionCreatorService` | Creates new sessions with workspace.yaml and events.jsonl |
 | `EdgeWorkspaceService` | Edge browser workspace lifecycle and UI Automation |
@@ -388,6 +466,7 @@ CopilotBooster.exe (WinForms .NET 10, persistent taskbar window)
 | `SessionService` | Session CRUD, search, and Git root detection |
 | `SessionArchiveService` | Archive and pin state persistence |
 | `CopilotLocator` | Finds the Copilot CLI executable |
+| `CopilotConfigService` | Reads/writes Copilot CLI global config (allowed_urls, trusted_folders) |
 
 ### Files
 

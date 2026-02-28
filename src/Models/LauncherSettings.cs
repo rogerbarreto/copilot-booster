@@ -136,6 +136,34 @@ internal class LauncherSettings
     public List<string> SessionColumnOrder { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets whether toast mode is enabled.
+    /// When enabled, a global hotkey shows the window sliding up from the screen edge.
+    /// </summary>
+    [JsonPropertyName("toastMode")]
+    public bool ToastMode { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the toast window position.
+    /// Valid values: <c>"bottom-center"</c> (default), <c>"bottom-left"</c>, <c>"bottom-right"</c>,
+    /// <c>"top-center"</c>, <c>"top-left"</c>, <c>"top-right"</c>.
+    /// </summary>
+    [JsonPropertyName("toastPosition")]
+    public string ToastPosition { get; set; } = "bottom-center";
+
+    /// <summary>
+    /// Gets or sets which screen the toast window appears on.
+    /// Valid values: <c>"primary"</c> (default), <c>"cursor"</c> (screen where the cursor is).
+    /// </summary>
+    [JsonPropertyName("toastScreen")]
+    public string ToastScreen { get; set; } = "primary";
+
+    /// <summary>
+    /// Gets or sets whether the toast window uses a slide animation.
+    /// </summary>
+    [JsonPropertyName("toastAnimate")]
+    public bool ToastAnimate { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).

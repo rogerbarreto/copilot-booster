@@ -27,7 +27,14 @@ internal class ExistingSessionsVisuals
     /// <summary>
     /// Gets the name of the currently selected session tab.
     /// </summary>
-    internal string SelectedTabName => this.SessionTabs.SelectedTab?.Tag as string ?? Program._settings.SessionTabs[0];
+    internal string SelectedTabName
+    {
+        get
+        {
+            var tag = this.SessionTabs.SelectedTab?.Tag as string;
+            return tag ?? Program._settings.SessionTabs[0];
+        }
+    }
 
     /// <summary>Fired when the user clicks Refresh.</summary>
     internal event Action? OnRefreshRequested;
@@ -115,32 +122,27 @@ internal class ExistingSessionsVisuals
         this.GridVisuals = new SessionGridVisuals(this.SessionGrid, activeTracker);
         this.BuildGridContextMenu();
 
-        // Dynamic session tabs from settings
-        this.SessionTabs = new TabControl { Dock = DockStyle.Fill };
-        if (!Application.IsDarkModeEnabled)
-        {
-            this.SessionTabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-            this.SessionTabs.DrawItem += (s, e) =>
-            {
-                bool selected = e.Index == this.SessionTabs.SelectedIndex;
-                var back = selected ? SystemColors.Window : Color.FromArgb(220, 220, 220);
-                var fore = SystemColors.ControlText;
-                using var brush = new SolidBrush(back);
-                e.Graphics.FillRectangle(brush, e.Bounds);
-                var text = this.SessionTabs.TabPages[e.Index].Text;
-                TextRenderer.DrawText(e.Graphics, text, this.SessionTabs.Font, e.Bounds, fore, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            };
-        }
+        // Dynamic session tabs from settings — reduced padding keeps the "+" tab compact
+        this.SessionTabs = new DarkTabControl { Dock = DockStyle.Fill, Padding = new Point(12, 3) };
         this.BuildSessionTabs();
+        this.SessionTabs.Selecting += (s, e) =>
+        {
+            // Block selection of the "+" tab — defer the prompt to after the event returns
+            if (e.TabPage?.Tag == null && e.TabPage?.Text.Trim() == "+")
+            {
+                e.Cancel = true;
+                this.SessionTabs.BeginInvoke(this.PromptAddTab);
+            }
+        };
         this.SessionTabs.SelectedIndexChanged += (s, e) =>
         {
-            // Move the grid to the newly selected tab
             var selectedTab = this.SessionTabs.SelectedTab;
-            if (selectedTab == null)
+            if (selectedTab == null || selectedTab.Tag == null)
             {
                 return;
             }
 
+            // Move the grid to the newly selected tab
             selectedTab.Controls.Add(this.SessionGrid);
             this.OnTabChanged?.Invoke();
         };
@@ -860,8 +862,15 @@ internal class ExistingSessionsVisuals
 
         foreach (var tabName in Program._settings.SessionTabs)
         {
-            var page = new TabPage(tabName) { Tag = tabName };
+            var page = new TabPage(tabName) { Tag = tabName, UseVisualStyleBackColor = true };
             this.SessionTabs.TabPages.Add(page);
+        }
+
+        // Add the "+" tab for quick tab creation
+        if (Program._settings.SessionTabs.Count < Program._settings.MaxSessionTabs)
+        {
+            var addPage = new TabPage("+") { ToolTipText = "Add a new tab", UseVisualStyleBackColor = true };
+            this.SessionTabs.TabPages.Add(addPage);
         }
 
         // Restore selection or default to first tab
@@ -878,13 +887,55 @@ internal class ExistingSessionsVisuals
         }
 
         // Ensure the grid is parented on the selected tab.
-        // SelectedTab may be null when the handle is not yet created (e.g. during construction),
-        // so fall back to the first tab page.
         var targetTab = this.SessionTabs.SelectedTab ??
             (this.SessionTabs.TabPages.Count > 0 ? this.SessionTabs.TabPages[0] : null);
-        if (targetTab != null)
+        if (targetTab != null && targetTab.Tag != null)
         {
             targetTab.Controls.Add(this.SessionGrid);
         }
+    }
+
+    private void PromptAddTab()
+    {
+        if (Program._settings.SessionTabs.Count >= Program._settings.MaxSessionTabs)
+        {
+            MessageBox.Show($"Maximum of {Program._settings.MaxSessionTabs} tabs allowed.", "Limit Reached", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var name = SettingsVisuals.PromptInput("Add Tab", "Tab name (max 20 chars):", "");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        name = name.Trim();
+        if (name.Length > 20)
+        {
+            name = name[..20];
+        }
+
+        if (Program._settings.SessionTabs.Any(t => string.Equals(t, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            MessageBox.Show("A tab with that name already exists.", "Duplicate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        Program._settings.SessionTabs.Add(name);
+        Program._settings.Save();
+        this.SessionTabs.SuspendLayout();
+        this.BuildSessionTabs();
+
+        foreach (TabPage page in this.SessionTabs.TabPages)
+        {
+            if (string.Equals(page.Tag as string, name, StringComparison.OrdinalIgnoreCase))
+            {
+                this.SessionTabs.SelectedTab = page;
+                break;
+            }
+        }
+
+        this.SessionTabs.ResumeLayout(true);
+        this.OnTabChanged?.Invoke();
     }
 }

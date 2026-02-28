@@ -328,6 +328,18 @@ internal class SessionGridVisuals
                 {
                     row.Selected = true;
                 }
+
+                // No matching rows found on this tab — select the first row
+                if (rowsToSelect.Count == 0 && this._grid.RowCount > 0)
+                {
+                    this._grid.CurrentCell = this._grid.Rows[0].Cells[0];
+                    this._grid.Rows[0].Selected = true;
+                }
+            }
+            else if (this._grid.RowCount > 0)
+            {
+                this._grid.CurrentCell = this._grid.Rows[0].Cells[0];
+                this._grid.Rows[0].Selected = true;
             }
 
             // Restore scroll position

@@ -19,7 +19,8 @@ internal record NewSessionResult(
     string? BaseBranch,
     string? Remote,
     int? PrNumber,
-    GitService.HostingPlatform? Platform);
+    GitService.HostingPlatform? Platform,
+    string? HeadBranch = null);
 
 /// <summary>
 /// Provides a modal dialog for naming a new Copilot session.
@@ -415,6 +416,7 @@ internal static class NewSessionNameVisuals
         // Track PR validation state
         bool prValidated = false;
         string? fetchedPrTitle = null;
+        string? fetchedPrHeadBranch = null;
 
         // Buttons
         var btnOk = new Button
@@ -531,6 +533,7 @@ internal static class NewSessionNameVisuals
         {
             prValidated = false;
             fetchedPrTitle = null;
+            fetchedPrHeadBranch = null;
             lblPrValidation.Text = "";
             lblPrValidation.ForeColor = Color.Black;
             chkUsePrTitle.Visible = false;
@@ -574,12 +577,14 @@ internal static class NewSessionNameVisuals
 
             bool found = false;
             string? prTitle = null;
+            string? prHeadBranch = null;
             try
             {
-                (found, prTitle) = await Task.Run(async () =>
+                (found, prTitle, prHeadBranch) = await Task.Run(async () =>
                 {
                     var valid = GitService.ValidatePrRef(gitRoot, remoteName, detectedPlatform, prNum);
                     string? title = null;
+                    string? headRef = null;
 
                     if (valid && detectedPlatform == GitService.HostingPlatform.GitHub)
                     {
@@ -604,6 +609,12 @@ internal static class NewSessionNameVisuals
                                         {
                                             title = titleProp.GetString();
                                         }
+
+                                        if (doc.RootElement.TryGetProperty("head", out var headProp) &&
+                                            headProp.TryGetProperty("ref", out var refProp))
+                                        {
+                                            headRef = refProp.GetString();
+                                        }
                                     }
                                 }
                             }
@@ -614,7 +625,7 @@ internal static class NewSessionNameVisuals
                         }
                     }
 
-                    return (valid, title);
+                    return (valid, title, headRef);
                 }).ConfigureAwait(true);
             }
             catch
@@ -637,6 +648,8 @@ internal static class NewSessionNameVisuals
                     chkUsePrTitle.Visible = true;
                     RelayoutControls();
                 }
+
+                fetchedPrHeadBranch = prHeadBranch;
             }
             else
             {
@@ -711,7 +724,7 @@ internal static class NewSessionNameVisuals
                 }
 
                 var platform = remotePlatforms[remoteName];
-                result = new NewSessionResult(name, BranchAction.FromPr, null, null, remoteName, prNum, platform);
+                result = new NewSessionResult(name, BranchAction.FromPr, null, null, remoteName, prNum, platform, fetchedPrHeadBranch);
             }
             else if (rdoSwitchBranch.Checked)
             {

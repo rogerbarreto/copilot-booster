@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.0] - 2026-02-28
+
+### Added
+
+- **Window Toast Mode** — the Booster window now slides up from the taskbar like a toast notification. Activated via global hotkey `Win+Alt+X` or by clicking the tray/taskbar icon. Auto-hides when focus is lost (but stays visible when interacting with dialogs, context menus, or settings). Configurable position (6 options), target screen (per-monitor with display numbers), and slide animation toggle. Enabled by default. (Closes #9)
+- **Global hotkey (Win+Alt+X)** — system-wide hotkey to show/hide the Booster window from anywhere, registered via Win32 `RegisterHotKey` API.
+- **Quick add tab (+) button** — a "+" tab in the session tab strip lets you create new tabs directly from the main window without opening Settings.
+- **DarkTabControl** — custom `TabControl` subclass with `UserPaint` for proper dark mode rendering (no white borders or backgrounds).
+- **Dark mode flicker prevention** — recursive `DoubleBuffered` on all controls, dark `BackColor` set early in constructor, `SuspendLayout`/`ResumeLayout` during tab switches.
+- **Auto-select first row on tab switch** — switching session tabs now immediately selects the first row instead of showing an empty selection.
+
+### Fixed
+
+- **Tab remove guard** — the Remove button in Settings is now disabled when only one tab remains (previously only blocked removing the first tab by index).
+
 ## [0.15.0] - 2026-02-27
 
 ### Added

@@ -335,4 +335,71 @@
             form.Close();
         });
     }
+
+    [Fact]
+    public void Populate_AutoSelectsFirstRow_WhenNoPreviousSelection()
+    {
+        RunOnSta(() =>
+        {
+            var grid = new DataGridView
+            {
+                AllowUserToAddRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+            grid.Columns.Add("Status", "");
+            grid.Columns.Add("Name", "Name");
+            grid.Columns.Add("CWD", "CWD");
+            grid.Columns.Add("LastModified", "LastModified");
+            grid.Columns.Add("Active", "Active");
+
+            var tracker = new ActiveStatusTracker();
+            var visuals = new SessionGridVisuals(grid, tracker);
+
+            // Populate with no prior selection (simulates first load or tab switch)
+            var sessions = MakeSessions(("s1", 0), ("s2", 1), ("s3", 2));
+            visuals.Populate(sessions, MakeSnapshot(), null);
+
+            // First row should be auto-selected
+            Assert.Single(grid.SelectedRows);
+            Assert.Equal("s1", grid.SelectedRows[0].Tag);
+            Assert.Equal("s1", visuals.GetSelectedSessionId());
+        });
+    }
+
+    [Fact]
+    public void Populate_AutoSelectsFirstRow_WhenPreviousSelectionNotInNewTab()
+    {
+        RunOnSta(() =>
+        {
+            var grid = new DataGridView
+            {
+                AllowUserToAddRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+            grid.Columns.Add("Status", "");
+            grid.Columns.Add("Name", "Name");
+            grid.Columns.Add("CWD", "CWD");
+            grid.Columns.Add("LastModified", "LastModified");
+            grid.Columns.Add("Active", "Active");
+
+            var tracker = new ActiveStatusTracker();
+            var visuals = new SessionGridVisuals(grid, tracker);
+
+            // First tab: select session-A
+            var tabASessions = MakeSessions(("session-A", 0), ("session-B", 1));
+            visuals.Populate(tabASessions, MakeSnapshot(), null);
+            grid.ClearSelection();
+            grid.Rows[0].Selected = true;
+            grid.CurrentCell = grid.Rows[0].Cells[0];
+            Assert.Equal("session-A", visuals.GetSelectedSessionId());
+
+            // Switch to different tab with completely different sessions
+            var tabBSessions = MakeSessions(("session-X", 0), ("session-Y", 1));
+            visuals.Populate(tabBSessions, MakeSnapshot(), null);
+
+            // session-A doesn't exist here — first row should be auto-selected
+            Assert.Single(grid.SelectedRows);
+            Assert.Equal("session-X", visuals.GetSelectedSessionId());
+        });
+    }
 }

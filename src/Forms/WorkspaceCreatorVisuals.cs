@@ -318,6 +318,7 @@ internal static class WorkspaceCreatorVisuals
         // Track PR validation state
         bool prValidated = false;
         string? fetchedPrTitle = null;
+        string? fetchedPrHeadBranch = null;
 
         // Preview label
         var lblPreview = new Label
@@ -508,6 +509,7 @@ internal static class WorkspaceCreatorVisuals
         {
             prValidated = false;
             fetchedPrTitle = null;
+            fetchedPrHeadBranch = null;
             lblPrValidation.Text = "";
             lblPrValidation.ForeColor = Color.Black;
             chkUsePrTitle.Visible = false;
@@ -551,13 +553,15 @@ internal static class WorkspaceCreatorVisuals
 
             bool found = false;
             string? prTitle = null;
+            string? prHeadBranch = null;
             try
             {
                 // Run git ls-remote and optional GitHub API title fetch entirely on background thread
-                (found, prTitle) = await Task.Run(async () =>
+                (found, prTitle, prHeadBranch) = await Task.Run(async () =>
                 {
                     var valid = GitService.ValidatePrRef(repoPath, remoteName, platform, prNum);
                     string? title = null;
+                    string? headRef = null;
 
                     if (valid && platform == GitService.HostingPlatform.GitHub)
                     {
@@ -582,6 +586,12 @@ internal static class WorkspaceCreatorVisuals
                                         {
                                             title = titleProp.GetString();
                                         }
+
+                                        if (doc.RootElement.TryGetProperty("head", out var headProp) &&
+                                            headProp.TryGetProperty("ref", out var refProp))
+                                        {
+                                            headRef = refProp.GetString();
+                                        }
                                     }
                                 }
                             }
@@ -592,7 +602,7 @@ internal static class WorkspaceCreatorVisuals
                         }
                     }
 
-                    return (valid, title);
+                    return (valid, title, headRef);
                 }).ConfigureAwait(true);
             }
             catch
@@ -615,6 +625,8 @@ internal static class WorkspaceCreatorVisuals
                     chkUsePrTitle.Visible = true;
                     RelayoutControls();
                 }
+
+                fetchedPrHeadBranch = prHeadBranch;
             }
             else
             {
@@ -696,7 +708,7 @@ internal static class WorkspaceCreatorVisuals
                 btnCreate.Text = "Creating...";
                 var (worktreePath, success, error) = await Task.Run(() =>
                     WorkspaceCreationService.CreateWorkspaceFromPr(
-                        repoPath, repoFolderName!, remoteName, prNum, platform)).ConfigureAwait(true);
+                        repoPath, repoFolderName!, remoteName, prNum, platform, fetchedPrHeadBranch)).ConfigureAwait(true);
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
