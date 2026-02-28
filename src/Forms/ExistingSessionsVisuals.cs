@@ -25,6 +25,12 @@ internal class ExistingSessionsVisuals
     internal Button NewSessionButton = null!;
     internal Button SettingsButton = null!;
 
+    /// <summary>Current sort column name. Defaults to "RunningApps".</summary>
+    internal string SortColumn = "RunningApps";
+
+    /// <summary>Current sort direction. Defaults to Descending (running first).</summary>
+    internal SortOrder SortDirection = SortOrder.Descending;
+
     /// <summary>
     /// Gets the name of the currently selected session tab.
     /// </summary>
@@ -67,6 +73,9 @@ internal class ExistingSessionsVisuals
     internal event Action<string, string>? OnMoveToTab;
     internal event Action<string>? OnPinSession;
     internal event Action<string>? OnUnpinSession;
+
+    /// <summary>Fired when the user clicks a column header to change sort order.</summary>
+    internal event Action? OnSortChanged;
 
     /// <summary>
     /// Fired for IDE context-menu clicks.
@@ -276,6 +285,40 @@ internal class ExistingSessionsVisuals
                 Program._settings.Save();
                 savingColumnOrder = false;
             });
+        };
+
+        // Column header click → sort by that column
+        this.SessionGrid.Columns["RunningApps"]!.HeaderCell.SortGlyphDirection = SortOrder.Descending;
+        this.SessionGrid.ColumnHeaderMouseClick += (s, e) =>
+        {
+            var col = this.SessionGrid.Columns[e.ColumnIndex];
+            if (col.Frozen)
+            {
+                return;
+            }
+
+            if (col.Name == this.SortColumn)
+            {
+                this.SortDirection = this.SortDirection == SortOrder.Ascending
+                    ? SortOrder.Descending
+                    : SortOrder.Ascending;
+            }
+            else
+            {
+                this.SortColumn = col.Name;
+                this.SortDirection = col.Name is "Date" or "RunningApps"
+                    ? SortOrder.Descending
+                    : SortOrder.Ascending;
+            }
+
+            foreach (DataGridViewColumn c in this.SessionGrid.Columns)
+            {
+                c.HeaderCell.SortGlyphDirection = c.Name == this.SortColumn
+                    ? this.SortDirection
+                    : SortOrder.None;
+            }
+
+            this.OnSortChanged?.Invoke();
         };
 
         bool adjustingSessionWidth = false;

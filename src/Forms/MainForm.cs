@@ -569,6 +569,11 @@ internal partial class MainForm : Form
             this.PopulateGridWithFilter(this._lastSnapshot);
         };
 
+        this._sessionsVisuals.OnSortChanged += () =>
+        {
+            this.PopulateGridWithFilter(this._lastSnapshot);
+        };
+
         this._sessionsVisuals.OnTabChanged += () =>
         {
             this.SuspendLayout();
@@ -910,65 +915,111 @@ internal partial class MainForm : Form
         var selectedTab = this._sessionsVisuals.SelectedTabName;
         var filtered = this._cachedSessions.Where(s => string.Equals(s.Tab, selectedTab, StringComparison.OrdinalIgnoreCase)).ToList();
 
-        SortSessions(filtered, snapshot, Program._settings.PinnedOrder);
+        SortSessions(filtered, snapshot, Program._settings.PinnedOrder,
+            this._sessionsVisuals.SortColumn, this._sessionsVisuals.SortDirection);
 
         return filtered;
     }
 
     /// <summary>
-    /// Sorts sessions: pinned first, then running, then by date.
+    /// Sorts sessions: pinned first (using pinnedOrder), then by column sort.
     /// Extracted for testability.
     /// </summary>
-    internal static void SortSessions(List<NamedSession> sessions, ActiveStatusSnapshot? snapshot, string pinnedOrder)
+    internal static void SortSessions(List<NamedSession> sessions, ActiveStatusSnapshot? snapshot,
+        string pinnedOrder, string sortColumn = "RunningApps", SortOrder sortDirection = SortOrder.Descending)
     {
         sessions.Sort((a, b) =>
         {
+            // Pinned always first
             if (a.IsPinned != b.IsPinned)
             {
                 return a.IsPinned ? -1 : 1;
             }
 
+            // Among pinned: use PinnedOrder setting
             if (a.IsPinned && b.IsPinned)
             {
-                if (string.Equals(pinnedOrder, "alias", StringComparison.OrdinalIgnoreCase))
-                {
-                    var nameA = !string.IsNullOrEmpty(a.Alias) ? a.Alias : a.Summary;
-                    var nameB = !string.IsNullOrEmpty(b.Alias) ? b.Alias : b.Summary;
-                    return string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
-                }
-
-                if (string.Equals(pinnedOrder, "created", StringComparison.OrdinalIgnoreCase))
-                {
-                    return b.LastModified.CompareTo(a.LastModified);
-                }
-
-                // Default ("running"): running pinned first, then by date
-                if (snapshot != null)
-                {
-                    bool aRunning = snapshot.ActiveTextBySessionId.ContainsKey(a.Id);
-                    bool bRunning = snapshot.ActiveTextBySessionId.ContainsKey(b.Id);
-                    if (aRunning != bRunning)
-                    {
-                        return aRunning ? -1 : 1;
-                    }
-                }
-
-                return b.LastModified.CompareTo(a.LastModified);
+                return ComparePinned(a, b, snapshot, pinnedOrder);
             }
 
-            // Among non-pinned: running sessions first
-            if (snapshot != null)
+            // Among non-pinned: use column sort
+            int result = CompareByColumn(a, b, snapshot, sortColumn);
+            if (result != 0)
             {
-                bool aRunning = snapshot.ActiveTextBySessionId.ContainsKey(a.Id);
-                bool bRunning = snapshot.ActiveTextBySessionId.ContainsKey(b.Id);
-                if (aRunning != bRunning)
-                {
-                    return aRunning ? -1 : 1;
-                }
+                return sortDirection == SortOrder.Ascending ? result : -result;
             }
 
-            return b.LastModified.CompareTo(a.LastModified);
+            // Tie-break: use PinnedOrder setting
+            return CompareTiebreak(a, b, snapshot, pinnedOrder);
         });
+    }
+
+    private static int ComparePinned(NamedSession a, NamedSession b, ActiveStatusSnapshot? snapshot, string pinnedOrder)
+    {
+        if (string.Equals(pinnedOrder, "alias", StringComparison.OrdinalIgnoreCase))
+        {
+            var nameA = !string.IsNullOrEmpty(a.Alias) ? a.Alias : a.Summary;
+            var nameB = !string.IsNullOrEmpty(b.Alias) ? b.Alias : b.Summary;
+            return string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.Equals(pinnedOrder, "created", StringComparison.OrdinalIgnoreCase))
+        {
+            return b.LastModified.CompareTo(a.LastModified);
+        }
+
+        // Default ("running"): running pinned first, then by date
+        if (snapshot != null)
+        {
+            bool aRunning = snapshot.ActiveTextBySessionId.ContainsKey(a.Id);
+            bool bRunning = snapshot.ActiveTextBySessionId.ContainsKey(b.Id);
+            if (aRunning != bRunning)
+            {
+                return aRunning ? -1 : 1;
+            }
+        }
+
+        return b.LastModified.CompareTo(a.LastModified);
+    }
+
+    private static int CompareByColumn(NamedSession a, NamedSession b, ActiveStatusSnapshot? snapshot, string column)
+    {
+        return column switch
+        {
+            "Session" => string.Compare(
+                !string.IsNullOrEmpty(a.Alias) ? a.Alias : a.Summary,
+                !string.IsNullOrEmpty(b.Alias) ? b.Alias : b.Summary,
+                StringComparison.OrdinalIgnoreCase),
+            "CWD" => string.Compare(a.Folder, b.Folder, StringComparison.OrdinalIgnoreCase),
+            "Date" => a.LastModified.CompareTo(b.LastModified),
+            "RunningApps" => CompareRunning(a, b, snapshot),
+            _ => 0
+        };
+    }
+
+    private static int CompareRunning(NamedSession a, NamedSession b, ActiveStatusSnapshot? snapshot)
+    {
+        if (snapshot == null)
+        {
+            return 0;
+        }
+
+        bool aRunning = snapshot.ActiveTextBySessionId.ContainsKey(a.Id);
+        bool bRunning = snapshot.ActiveTextBySessionId.ContainsKey(b.Id);
+        return aRunning.CompareTo(bRunning);
+    }
+
+    private static int CompareTiebreak(NamedSession a, NamedSession b, ActiveStatusSnapshot? snapshot, string pinnedOrder)
+    {
+        if (string.Equals(pinnedOrder, "alias", StringComparison.OrdinalIgnoreCase))
+        {
+            var nameA = !string.IsNullOrEmpty(a.Alias) ? a.Alias : a.Summary;
+            var nameB = !string.IsNullOrEmpty(b.Alias) ? b.Alias : b.Summary;
+            return string.Compare(nameA, nameB, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Default tiebreak: by date descending (newest first)
+        return b.LastModified.CompareTo(a.LastModified);
     }
 
     /// <summary>
