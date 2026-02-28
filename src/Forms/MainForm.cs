@@ -245,6 +245,83 @@ internal partial class MainForm : Form
 
     private void ShowToast() => this.ShowToast(GetToastScreen());
 
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        var tabs = this._sessionsVisuals.SessionTabs;
+        var grid = this._sessionsVisuals.SessionGrid;
+        int realTabCount = Program._settings.SessionTabs.Count;
+
+        switch (keyData)
+        {
+            case Keys.Tab | Keys.Shift:
+                // Next tab (wrap around, skip "+" tab)
+                if (realTabCount > 1)
+                {
+                    tabs.SelectedIndex = (tabs.SelectedIndex + 1) % realTabCount;
+                }
+
+                return true;
+
+            case Keys.Tab | Keys.Shift | Keys.Control:
+                // Previous tab (wrap around, skip "+" tab)
+                if (realTabCount > 1)
+                {
+                    tabs.SelectedIndex = (tabs.SelectedIndex - 1 + realTabCount) % realTabCount;
+                }
+
+                return true;
+
+            case Keys.Tab:
+                // Cycle focus: Search → New Session → Settings → Grid
+                var search = this._sessionsVisuals.SearchBox;
+                var newBtn = this._sessionsVisuals.NewSessionButton;
+                var setBtn = this._sessionsVisuals.SettingsButton;
+
+                if (search.Focused)
+                {
+                    newBtn.Focus();
+                }
+                else if (newBtn.Focused)
+                {
+                    setBtn.Focus();
+                }
+                else if (setBtn.Focused)
+                {
+                    grid.Focus();
+                    if (grid.CurrentRow == null && grid.Rows.Count > 0)
+                    {
+                        grid.CurrentCell = grid.Rows[0].Cells[1];
+                    }
+                }
+                else
+                {
+                    search.Focus();
+                    search.SelectAll();
+                }
+
+                return true;
+
+            case Keys.Enter when grid.Focused && grid.CurrentRow != null:
+                // Show context menu at the selected row
+                var cellRect = grid.GetCellDisplayRectangle(1, grid.CurrentRow.Index, false);
+                grid.ContextMenuStrip?.Show(grid, cellRect.Left, cellRect.Bottom);
+                return true;
+
+            case Keys.Enter | Keys.Shift when grid.Focused && grid.CurrentRow != null:
+                // Launch session (same as double-click)
+                var sid = grid.CurrentRow.Tag as string;
+                if (sid != null)
+                {
+                    this.SelectedSessionId = sid;
+                    this.LaunchSession();
+                }
+
+                return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     private void ShowToastAtCursor() => this.ShowToast(Screen.FromPoint(Cursor.Position));
 
     /// <summary>
@@ -485,14 +562,6 @@ internal partial class MainForm : Form
 
     private void WireSessionsEvents()
     {
-        this._sessionsVisuals.OnRefreshRequested += async () =>
-        {
-            this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-            this.ApplySessionStates(this._cachedSessions);
-            var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
-            this.PopulateGridWithFilter(snapshot);
-        };
-
         this._sessionsVisuals.OnSearchChanged += () =>
         {
             this.PopulateGridWithFilter(this._lastSnapshot);

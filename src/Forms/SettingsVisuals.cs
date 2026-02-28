@@ -37,9 +37,9 @@ internal static class SettingsVisuals
         var wrapper = new Panel
         {
             Location = textBox.Location,
-            Size = new Size(textBox.Width, textBox.Height + 6),
+            Size = new Size(textBox.Width, textBox.Height + 10),
             Anchor = textBox.Anchor,
-            Padding = new Padding(1),
+            Padding = new Padding(4, 3, 4, 3),
             BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark
         };
         textBox.Location = Point.Empty;

@@ -281,6 +281,11 @@ internal class SessionGridVisuals
                     row.Cells[1].ToolTipText = session.Summary;
                 }
 
+                if (session.IsGitRepo)
+                {
+                    row.Cells["CWD"].ToolTipText = "Git-enabled repository";
+                }
+
                 if (statusIcon == "bell")
                 {
                     row.DefaultCellStyle.BackColor = BellRowColor;

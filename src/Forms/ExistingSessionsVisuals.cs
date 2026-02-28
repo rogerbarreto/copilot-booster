@@ -23,6 +23,7 @@ internal class ExistingSessionsVisuals
     internal Label LoadingOverlay = null!;
     internal DarkTabControl SessionTabs = null!;
     internal Button NewSessionButton = null!;
+    internal Button SettingsButton = null!;
 
     /// <summary>
     /// Gets the name of the currently selected session tab.
@@ -35,9 +36,6 @@ internal class ExistingSessionsVisuals
             return tag ?? Program._settings.SessionTabs[0];
         }
     }
-
-    /// <summary>Fired when the user clicks Refresh.</summary>
-    internal event Action? OnRefreshRequested;
 
     /// <summary>Fired when the user double-clicks a session row. Arg = session id.</summary>
     internal event Action<string>? OnSessionDoubleClicked;
@@ -376,20 +374,10 @@ internal class ExistingSessionsVisuals
         {
             Text = "Search:",
             AutoSize = true,
-            Location = new Point(112, 9)
+            Location = new Point(112, 9),
+            Margin = new Padding(0, 0, 8, 0)
         };
-        var btnRefreshTop = new Button
-        {
-            Text = "Refresh",
-            Width = 65,
-            Height = 27,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Location = new Point(searchPanel.Width - 105, 3)
-        };
-        searchPanel.Resize += (s, e) => btnRefreshTop.Left = searchPanel.ClientSize.Width - 105;
-        btnRefreshTop.Click += (s, e) => this.OnRefreshRequested?.Invoke();
-
-        var btnSettings = new Button
+        this.SettingsButton = new Button
         {
             Text = "⚙",
             Width = 32,
@@ -400,12 +388,12 @@ internal class ExistingSessionsVisuals
             FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand
         };
-        btnSettings.FlatAppearance.BorderSize = 0;
-        searchPanel.Resize += (s, e) => btnSettings.Left = searchPanel.ClientSize.Width - 37;
-        btnSettings.Click += (s, e) => this.OnSettingsClicked?.Invoke();
+        this.SettingsButton.FlatAppearance.BorderSize = 0;
+        searchPanel.Resize += (s, e) => this.SettingsButton.Left = searchPanel.ClientSize.Width - 37;
+        this.SettingsButton.Click += (s, e) => this.OnSettingsClicked?.Invoke();
         this.SearchBox = new TextBox
         {
-            Location = new Point(162, 4),
+            Location = new Point(170, 4),
             Width = 100,
             Height = 20,
             Multiline = true,
@@ -422,7 +410,7 @@ internal class ExistingSessionsVisuals
             }
         };
         var searchBorder = SettingsVisuals.WrapWithBorder(this.SearchBox);
-        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 275;
+        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 210;
         var debounceTimer = new Timer { Interval = 500 };
         debounceTimer.Tick += (s, e) =>
         {
@@ -435,8 +423,7 @@ internal class ExistingSessionsVisuals
             debounceTimer.Start();
         };
         searchPanel.Controls.Add(searchBorder);
-        searchPanel.Controls.Add(btnSettings);
-        searchPanel.Controls.Add(btnRefreshTop);
+        searchPanel.Controls.Add(this.SettingsButton);
         searchPanel.Controls.Add(searchLabel);
         searchPanel.Controls.Add(this.NewSessionButton);
         return searchPanel;
