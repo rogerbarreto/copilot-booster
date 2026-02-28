@@ -383,7 +383,9 @@ internal partial class MainForm : Form
         this._toastVisible = true;
         this._toastShownTicks = Environment.TickCount64;
 
-        // Instantly repopulate grid from cached data and restart visual polling
+        // Re-apply session states from disk before populating so that any tab
+        // changes made while hidden are reflected immediately.
+        this.ApplySessionStates(this._cachedSessions);
         this.PopulateGridWithFilter(this._lastSnapshot);
         this._visualRefreshTimer?.Start();
     }
