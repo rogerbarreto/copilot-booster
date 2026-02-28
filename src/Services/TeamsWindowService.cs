@@ -80,7 +80,7 @@ internal partial class TeamsWindowService
                 return false;
             }
 
-            return GetWindowTitle(this.CachedHwnd).Contains(WindowTitle, StringComparison.OrdinalIgnoreCase);
+            return IsTeamsWindowTitle(GetWindowTitle(this.CachedHwnd));
         }
     }
 
@@ -168,7 +168,7 @@ internal partial class TeamsWindowService
     internal bool Focus()
     {
         if (this.CachedHwnd != IntPtr.Zero && IsWindow(this.CachedHwnd)
-            && GetWindowTitle(this.CachedHwnd).Contains(WindowTitle, StringComparison.OrdinalIgnoreCase))
+            && IsTeamsWindowTitle(GetWindowTitle(this.CachedHwnd)))
         {
             return WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
         }
@@ -191,6 +191,16 @@ internal partial class TeamsWindowService
     /// Builds the command-line arguments for launching Edge in app mode.
     /// </summary>
     internal static string BuildAppArguments() => $"--app={TeamsUrl}";
+
+    /// <summary>
+    /// Returns true if the window title indicates a Teams window.
+    /// Matches both the loaded title ("Microsoft Teams") and the loading title ("teams.microsoft.com").
+    /// </summary>
+    internal static bool IsTeamsWindowTitle(string title)
+    {
+        return title.Contains(WindowTitle, StringComparison.OrdinalIgnoreCase)
+            || title.Contains("teams.microsoft.com", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Returns the path where the Teams favicon should be cached.
@@ -248,7 +258,7 @@ internal partial class TeamsWindowService
     }
 
     /// <summary>
-    /// Returns all visible Teams window handles (Edge PWA windows with "Microsoft Teams" in title).
+    /// Returns all visible Teams window handles (Edge PWA windows with Teams-related title).
     /// </summary>
     internal static List<IntPtr> FindAllTeamsWindows()
     {
@@ -262,7 +272,7 @@ internal partial class TeamsWindowService
             }
 
             var title = GetWindowTitle(hWnd);
-            if (title.Contains(WindowTitle, StringComparison.OrdinalIgnoreCase))
+            if (IsTeamsWindowTitle(title))
             {
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 try

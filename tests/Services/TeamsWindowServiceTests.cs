@@ -121,4 +121,21 @@
         service.CheckAlive();
         Assert.True(closedFired);
     }
+
+    // --- Title matching tests ---
+
+    [Theory]
+    [InlineData("Microsoft Teams", true)]
+    [InlineData("Chat | Emma Lynch | Microsoft Teams", true)]
+    [InlineData("teams.microsoft.com", true)]
+    [InlineData("https://teams.microsoft.com", true)]
+    [InlineData("https://teams.microsoft.com/", true)]
+    [InlineData("Microsoft Teams - Loading...", true)]
+    [InlineData("", false)]
+    [InlineData("Some other app", false)]
+    [InlineData("Google Chrome", false)]
+    public void IsTeamsWindowTitle_MatchesExpected(string title, bool expected)
+    {
+        Assert.Equal(expected, TeamsWindowService.IsTeamsWindowTitle(title));
+    }
 }
