@@ -669,6 +669,11 @@ internal class ActiveStatusTracker
 
         foreach (var id in closedTeams)
         {
+            if (this._teamsWindows.TryGetValue(id, out var tw))
+            {
+                tw.Release();
+            }
+
             this._teamsWindows.Remove(id);
         }
 
@@ -902,6 +907,11 @@ internal class ActiveStatusTracker
     /// </summary>
     internal void RemoveTeams(string sessionId)
     {
+        if (this._teamsWindows.TryGetValue(sessionId, out var tw))
+        {
+            tw.Release();
+        }
+
         this._teamsWindows.Remove(sessionId);
     }
 

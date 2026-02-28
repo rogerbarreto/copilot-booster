@@ -22,6 +22,9 @@ internal partial class TeamsWindowService
     private const string WindowTitle = "Microsoft Teams";
     private const string IconFileName = "teams-favicon.ico";
 
+    // Shared across all instances to prevent cross-session HWND theft
+    private static readonly HashSet<IntPtr> s_claimedHwnds = [];
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsWindow(IntPtr hWnd);
@@ -63,31 +66,42 @@ internal partial class TeamsWindowService
 
     /// <summary>
     /// Returns true if the tracked Teams window is still open.
-    /// Only checks the cached HWND — does NOT scan for windows (avoids stealing another session's window).
+    /// If the cached HWND died (Edge recycled it), re-scans for an unclaimed replacement.
     /// </summary>
     internal bool IsOpen
     {
         get
         {
-            if (this.CachedHwnd == IntPtr.Zero)
+            if (this.CachedHwnd != IntPtr.Zero)
             {
-                return false;
-            }
+                if (IsWindow(this.CachedHwnd) && IsTeamsWindowTitle(GetWindowTitle(this.CachedHwnd)))
+                {
+                    return true;
+                }
 
-            if (!IsWindow(this.CachedHwnd))
-            {
+                // Cached HWND died — unclaim it and try to re-acquire
+                s_claimedHwnds.Remove(this.CachedHwnd);
                 this.CachedHwnd = IntPtr.Zero;
-                return false;
             }
 
-            return IsTeamsWindowTitle(GetWindowTitle(this.CachedHwnd));
+            // Re-scan for an unclaimed Teams window (Edge may have recycled the HWND)
+            var replacement = FindUnclaimedTeamsWindow();
+            if (replacement != IntPtr.Zero)
+            {
+                this.CachedHwnd = replacement;
+                s_claimedHwnds.Add(replacement);
+                Program.Logger.LogInformation("[Teams] Re-acquired HWND={Hwnd}", replacement);
+                return true;
+            }
+
+            return false;
         }
     }
 
     /// <summary>
     /// Opens Teams in Edge app mode. Captures the new window handle by
-    /// snapshotting existing Teams HWNDs before launch and polling for a new one.
-    /// Awaitable — resolves when the HWND is captured (or after timeout).
+    /// snapshotting existing Teams HWNDs before launch and polling until
+    /// the HWND stabilizes (survives for multiple consecutive checks).
     /// </summary>
     internal async Task OpenAsync()
     {
@@ -101,6 +115,8 @@ internal partial class TeamsWindowService
         // Snapshot existing Teams windows so we can detect the new one
         var existingHwnds = FindAllTeamsWindows();
         this.IsPendingOpen = true;
+        Program.Logger.LogDebug("[Teams] OpenAsync: existing={Count} HWNDs=[{Hwnds}]",
+            existingHwnds.Count, string.Join(",", existingHwnds));
 
         try
         {
@@ -118,37 +134,66 @@ internal partial class TeamsWindowService
             return;
         }
 
-        // Poll for the new window (up to 10 seconds)
-        var captured = await PollForNewWindow(existingHwnds).ConfigureAwait(false);
-        if (captured != IntPtr.Zero)
+        // Poll for a STABLE new window: must survive 3 consecutive checks (750ms)
+        // Edge PWA mode recycles the initial HWND during startup
+        var stableHwnd = await PollForStableWindow(existingHwnds).ConfigureAwait(false);
+        if (stableHwnd != IntPtr.Zero)
         {
-            this.CachedHwnd = captured;
-            Program.Logger.LogInformation("Teams window captured: HWND={Hwnd}", captured);
+            this.CachedHwnd = stableHwnd;
+            s_claimedHwnds.Add(stableHwnd);
+            Program.Logger.LogInformation("[Teams] Stable window captured: HWND={Hwnd}", stableHwnd);
         }
         else
         {
-            Program.Logger.LogWarning("Could not capture Teams window handle after 10s");
+            Program.Logger.LogWarning("[Teams] Could not capture stable window handle after timeout");
         }
 
         this.IsPendingOpen = false;
     }
 
     /// <summary>
-    /// Polls for a new Teams window that wasn't in the existing snapshot.
+    /// Polls for a new Teams window that stabilizes (same HWND for 3 consecutive checks).
+    /// Timeout: ~30 seconds total.
     /// </summary>
-    private static async Task<IntPtr> PollForNewWindow(List<IntPtr> existingHwnds)
+    private static async Task<IntPtr> PollForStableWindow(List<IntPtr> existingHwnds)
     {
-        for (int i = 0; i < 40; i++)
+        IntPtr candidate = IntPtr.Zero;
+        int stableCount = 0;
+        const int requiredStable = 3;
+
+        for (int i = 0; i < 120; i++)
         {
             await Task.Delay(250).ConfigureAwait(false);
             var newHwnd = FindNewTeamsWindow(existingHwnds);
-            if (newHwnd != IntPtr.Zero)
+
+            if (newHwnd == IntPtr.Zero)
             {
-                return newHwnd;
+                // No window found — reset stability counter
+                candidate = IntPtr.Zero;
+                stableCount = 0;
+                continue;
+            }
+
+            if (newHwnd == candidate)
+            {
+                stableCount++;
+                if (stableCount >= requiredStable)
+                {
+                    Program.Logger.LogDebug("[Teams] HWND={Hwnd} stable after {Checks} checks", candidate, i + 1);
+                    return candidate;
+                }
+            }
+            else
+            {
+                // New/different HWND — restart stability counter
+                Program.Logger.LogDebug("[Teams] Poll {I}: candidate changed {Old} -> {New}", i, candidate, newHwnd);
+                candidate = newHwnd;
+                stableCount = 1;
             }
         }
 
-        return IntPtr.Zero;
+        // Return whatever we have, even if not fully stable
+        return candidate;
     }
 
     /// <summary>
@@ -162,18 +207,39 @@ internal partial class TeamsWindowService
     }
 
     /// <summary>
+    /// Finds a Teams window that isn't claimed by any other TeamsWindowService instance.
+    /// Used for HWND re-acquisition when Edge recycles window handles.
+    /// </summary>
+    private static IntPtr FindUnclaimedTeamsWindow()
+    {
+        var allWindows = FindAllTeamsWindows();
+        return allWindows.Find(h => !s_claimedHwnds.Contains(h));
+    }
+
+    /// <summary>
+    /// Releases the claimed HWND when this service is no longer tracking a session.
+    /// </summary>
+    internal void Release()
+    {
+        if (this.CachedHwnd != IntPtr.Zero)
+        {
+            s_claimedHwnds.Remove(this.CachedHwnd);
+            this.CachedHwnd = IntPtr.Zero;
+        }
+    }
+
+    /// <summary>
     /// Brings the Teams window to the foreground.
-    /// Only operates on the cached HWND — does NOT scan for windows.
+    /// Uses IsOpen to handle HWND re-acquisition if Edge recycled the window.
     /// </summary>
     internal bool Focus()
     {
-        if (this.CachedHwnd != IntPtr.Zero && IsWindow(this.CachedHwnd)
-            && IsTeamsWindowTitle(GetWindowTitle(this.CachedHwnd)))
+        if (!this.IsOpen)
         {
-            return WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
+            return false;
         }
 
-        return false;
+        return WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
     }
 
     /// <summary>
