@@ -21,7 +21,7 @@ internal class ExistingSessionsVisuals
     internal DataGridView SessionGrid = null!;
     internal SessionGridVisuals GridVisuals = null!;
     internal Label LoadingOverlay = null!;
-    internal TabControl SessionTabs = null!;
+    internal DarkTabControl SessionTabs = null!;
     internal Button NewSessionButton = null!;
 
     /// <summary>
@@ -144,6 +144,21 @@ internal class ExistingSessionsVisuals
 
             // Move the grid to the newly selected tab
             selectedTab.Controls.Add(this.SessionGrid);
+            this.OnTabChanged?.Invoke();
+        };
+        this.SessionTabs.TabReordered += (s, e) =>
+        {
+            var tabs = Program._settings.SessionTabs;
+            if (e.OldIndex < 0 || e.OldIndex >= tabs.Count || e.NewIndex < 0 || e.NewIndex >= tabs.Count)
+            {
+                return;
+            }
+
+            var tab = tabs[e.OldIndex];
+            tabs.RemoveAt(e.OldIndex);
+            tabs.Insert(e.NewIndex, tab);
+            Program._settings.Save();
+            this.BuildSessionTabs();
             this.OnTabChanged?.Invoke();
         };
 
