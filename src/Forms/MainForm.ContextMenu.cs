@@ -317,6 +317,39 @@ internal partial class MainForm
         this._sessionsVisuals.IsEdgeOpen = (sid) =>
             this._activeTracker.TryGetEdge(sid, out var ws) && ws.IsOpen;
 
+        this._sessionsVisuals.OnOpenTeams += (sid) =>
+        {
+            if (this._activeTracker.TryGetTeams(sid, out var existing) && existing.IsOpen)
+            {
+                existing.Focus();
+                return;
+            }
+
+            var teamsWindow = new TeamsWindowService();
+            teamsWindow.WindowClosed += () =>
+            {
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(() =>
+                    {
+                        this._activeTracker.RemoveTeams(sid);
+                        this.RefreshActiveStatusAsync();
+                    });
+                }
+                else
+                {
+                    this._activeTracker.RemoveTeams(sid);
+                    this.RefreshActiveStatusAsync();
+                }
+            };
+            this._activeTracker.TrackTeams(sid, teamsWindow);
+            teamsWindow.Open();
+            this.RefreshActiveStatusAsync();
+        };
+
+        this._sessionsVisuals.IsTeamsOpen = (sid) =>
+            this._activeTracker.TryGetTeams(sid, out var tw) && tw.IsOpen;
+
         this._sessionsVisuals.GetGitRootInfo = (sessionId) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sessionId);

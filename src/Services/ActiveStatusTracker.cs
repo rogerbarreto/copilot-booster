@@ -28,6 +28,7 @@ internal class ActiveStatusTracker
     private Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>> _activeTrackedWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<ActiveProcess>> _trackedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TeamsWindowService> _teamsWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<(string Label, IntPtr Hwnd)>> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     internal readonly EventsJournalService EventsJournal = new();
@@ -42,6 +43,11 @@ internal class ActiveStatusTracker
     /// Callback invoked (possibly from a background thread) when an Edge workspace is closed.
     /// </summary>
     internal Action<string>? OnEdgeWorkspaceClosed { get; set; }
+
+    /// <summary>
+    /// Callback invoked when a tracked Teams window is detected as closed.
+    /// </summary>
+    internal Action<string>? OnTeamsWindowClosed { get; set; }
 
     /// <summary>
     /// Seeds sessions present at startup. These will output "" instead of "bell"
@@ -191,6 +197,11 @@ internal class ActiveStatusTracker
             parts.Add("Edge");
         }
 
+        if (this._teamsWindows.TryGetValue(sessionId, out var teams) && teams.IsOpen)
+        {
+            parts.Add("Teams");
+        }
+
         return string.Join("\n", parts);
     }
 
@@ -301,6 +312,11 @@ internal class ActiveStatusTracker
             focusTargets.Add(("Edge", () => ws.Focus()));
         }
 
+        if (this._teamsWindows.TryGetValue(sessionId, out var teams) && teams.IsOpen)
+        {
+            focusTargets.Add(("Teams", () => teams.Focus()));
+        }
+
         if (focusTargets.Count == 0)
         {
             return;
@@ -340,6 +356,12 @@ internal class ActiveStatusTracker
             && focusedEdge.CachedHwnd != IntPtr.Zero)
         {
             excludeHwnds.Add(focusedEdge.CachedHwnd);
+        }
+
+        if (this._teamsWindows.TryGetValue(excludeSessionId, out var focusedTeams)
+            && focusedTeams.CachedHwnd != IntPtr.Zero)
+        {
+            excludeHwnds.Add(focusedTeams.CachedHwnd);
         }
 
         if (this._explorerWindows.TryGetValue(excludeSessionId, out var focusedExplorers))
@@ -399,6 +421,19 @@ internal class ActiveStatusTracker
             }
 
             // IsOpen refreshes CachedHwnd if needed
+            if (kvp.Value.IsOpen && kvp.Value.CachedHwnd != IntPtr.Zero)
+            {
+                WindowFocusService.MinimizeWindow(kvp.Value.CachedHwnd);
+            }
+        }
+
+        foreach (var kvp in this._teamsWindows.ToList())
+        {
+            if (string.Equals(kvp.Key, excludeSessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (kvp.Value.IsOpen && kvp.Value.CachedHwnd != IntPtr.Zero)
             {
                 WindowFocusService.MinimizeWindow(kvp.Value.CachedHwnd);
@@ -622,6 +657,21 @@ internal class ActiveStatusTracker
             this._edgeWorkspaces.Remove(id);
         }
 
+        // Clean up closed Teams windows
+        var closedTeams = new List<string>();
+        foreach (var kvp in this._teamsWindows.ToList())
+        {
+            if (!kvp.Value.IsOpen)
+            {
+                closedTeams.Add(kvp.Key);
+            }
+        }
+
+        foreach (var id in closedTeams)
+        {
+            this._teamsWindows.Remove(id);
+        }
+
         // Edge workspace scanning happens separately via ScanAndTrackEdgeWorkspaces()
         // which must run on the UI (STA) thread for UI Automation to work.
 
@@ -837,6 +887,38 @@ internal class ActiveStatusTracker
     internal bool TryGetEdge(string sessionId, [NotNullWhen(true)] out EdgeWorkspaceService? workspace)
     {
         return this._edgeWorkspaces.TryGetValue(sessionId, out workspace);
+    }
+
+    /// <summary>
+    /// Tracks a Teams window for the given session.
+    /// </summary>
+    internal void TrackTeams(string sessionId, TeamsWindowService teamsWindow)
+    {
+        this._teamsWindows[sessionId] = teamsWindow;
+    }
+
+    /// <summary>
+    /// Removes a Teams window for the given session.
+    /// </summary>
+    internal void RemoveTeams(string sessionId)
+    {
+        this._teamsWindows.Remove(sessionId);
+    }
+
+    /// <summary>
+    /// Returns true if the given session has an associated Teams window.
+    /// </summary>
+    internal bool HasTeamsWindow(string sessionId)
+    {
+        return this._teamsWindows.ContainsKey(sessionId);
+    }
+
+    /// <summary>
+    /// Tries to get the Teams window for the given session.
+    /// </summary>
+    internal bool TryGetTeams(string sessionId, [NotNullWhen(true)] out TeamsWindowService? teamsWindow)
+    {
+        return this._teamsWindows.TryGetValue(sessionId, out teamsWindow);
     }
 
     /// <summary>

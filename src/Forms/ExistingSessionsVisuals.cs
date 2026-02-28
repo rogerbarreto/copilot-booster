@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
@@ -17,6 +18,8 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal class ExistingSessionsVisuals
 {
+    private Image? _teamsIcon;
+
     internal TextBox SearchBox = null!;
     internal DataGridView SessionGrid = null!;
     internal SessionGridVisuals GridVisuals = null!;
@@ -66,6 +69,7 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenTerminal;
     internal event Action<string>? OnOpenEdge;
     internal event Action<string>? OnSaveEdgeTabs;
+    internal event Action<string>? OnOpenTeams;
     internal event Action<string>? OnDeleteSession;
     internal event Action<string>? OnOpenSessionFolder;
     internal event Action<string>? OnOpenFile;
@@ -115,6 +119,11 @@ internal class ExistingSessionsVisuals
     /// Callback to determine if a session has an open Edge workspace.
     /// </summary>
     internal Func<string, bool>? IsEdgeOpen;
+
+    /// <summary>
+    /// Callback to determine if a session has an open Teams window.
+    /// </summary>
+    internal Func<string, bool>? IsTeamsOpen;
 
     /// <summary>
     /// Callback to get a session's CWD and optional git root path.
@@ -509,8 +518,20 @@ internal class ExistingSessionsVisuals
         return null;
     }
 
+    private async Task LoadTeamsIconAsync()
+    {
+        try
+        {
+            this._teamsIcon = await TeamsWindowService.GetCachedIconAsync().ConfigureAwait(false);
+        }
+        catch { /* icon is optional */ }
+    }
+
     internal void BuildGridContextMenu()
     {
+        // Start loading Teams icon asynchronously
+        _ = this.LoadTeamsIconAsync();
+
         var gridContextMenu = new ContextMenuStrip();
         var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
         var imageres = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "imageres.dll");
@@ -710,6 +731,18 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuSaveEdgeTabs);
 
+        // --- Teams ---
+        var menuOpenTeams = new ToolStripMenuItem("Open in Teams") { Image = this._teamsIcon };
+        menuOpenTeams.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnOpenTeams?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuOpenTeams);
+
         // --- Delete (last) ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
@@ -737,6 +770,7 @@ internal class ExistingSessionsVisuals
             menuOpenTerminal.Enabled = !isMultiSelect;
             menuOpenEdge.Enabled = !isMultiSelect;
             menuSaveEdgeTabs.Enabled = !isMultiSelect;
+            menuOpenTeams.Enabled = !isMultiSelect;
             menuOpenCwdExplorer.Enabled = !isMultiSelect;
             menuOpenFiles.Enabled = !isMultiSelect;
             menuDeleteSession.Enabled = !isMultiSelect;
@@ -763,6 +797,10 @@ internal class ExistingSessionsVisuals
             // Save Edge Tabs — only visible when Edge is open for this session
             bool edgeOpen = !isMultiSelect && sessionId != null && this.IsEdgeOpen != null && this.IsEdgeOpen(sessionId);
             menuSaveEdgeTabs.Visible = edgeOpen;
+
+            // Teams — update label based on open state
+            bool teamsOpen = !isMultiSelect && sessionId != null && this.IsTeamsOpen != null && this.IsTeamsOpen(sessionId);
+            menuOpenTeams.Text = teamsOpen ? "Focus Teams" : "Open in Teams";
 
             // "Move to" submenu — show all tabs except current
             menuMoveToTab.DropDownItems.Clear();
