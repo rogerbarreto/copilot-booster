@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
@@ -56,27 +57,30 @@ internal partial class TeamsWindowService
 
     /// <summary>
     /// Returns true if the tracked Teams window is still open.
+    /// Only checks the cached HWND — does NOT scan for windows (avoids stealing another session's window).
     /// </summary>
     internal bool IsOpen
     {
         get
         {
-            if (this.CachedHwnd != IntPtr.Zero && IsWindow(this.CachedHwnd))
+            if (this.CachedHwnd == IntPtr.Zero)
             {
-                if (GetWindowTitle(this.CachedHwnd).Contains(WindowTitle, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return false;
             }
 
-            var hwnd = FindTeamsWindow();
-            this.CachedHwnd = hwnd;
-            return hwnd != IntPtr.Zero;
+            if (!IsWindow(this.CachedHwnd))
+            {
+                this.CachedHwnd = IntPtr.Zero;
+                return false;
+            }
+
+            return GetWindowTitle(this.CachedHwnd).Contains(WindowTitle, StringComparison.OrdinalIgnoreCase);
         }
     }
 
     /// <summary>
-    /// Opens Teams in Edge app mode.
+    /// Opens Teams in Edge app mode. Captures the new window handle by
+    /// snapshotting existing Teams HWNDs before launch and polling for a new one.
     /// </summary>
     internal void Open()
     {
@@ -86,6 +90,9 @@ internal partial class TeamsWindowService
             Program.Logger.LogWarning("Cannot open Teams: Edge not found");
             return;
         }
+
+        // Snapshot existing Teams windows so we can detect the new one
+        var existingHwnds = FindAllTeamsWindows();
 
         try
         {
@@ -99,11 +106,32 @@ internal partial class TeamsWindowService
         catch (Exception ex)
         {
             Program.Logger.LogWarning("Failed to open Teams: {Error}", ex.Message);
+            return;
         }
+
+        // Poll for the new window (up to 10 seconds)
+        _ = Task.Run(async () =>
+        {
+            for (int i = 0; i < 40; i++)
+            {
+                await Task.Delay(250).ConfigureAwait(false);
+                var currentHwnds = FindAllTeamsWindows();
+                var newHwnd = currentHwnds.Find(h => !existingHwnds.Contains(h));
+                if (newHwnd != IntPtr.Zero)
+                {
+                    this.CachedHwnd = newHwnd;
+                    Program.Logger.LogInformation("Teams window captured: HWND={Hwnd}", newHwnd);
+                    return;
+                }
+            }
+
+            Program.Logger.LogWarning("Could not capture Teams window handle after 10s");
+        });
     }
 
     /// <summary>
     /// Brings the Teams window to the foreground.
+    /// Only operates on the cached HWND — does NOT scan for windows.
     /// </summary>
     internal bool Focus()
     {
@@ -111,13 +139,6 @@ internal partial class TeamsWindowService
             && GetWindowTitle(this.CachedHwnd).Contains(WindowTitle, StringComparison.OrdinalIgnoreCase))
         {
             return WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
-        }
-
-        var hwnd = FindTeamsWindow();
-        if (hwnd != IntPtr.Zero)
-        {
-            this.CachedHwnd = hwnd;
-            return WindowFocusService.TryFocusWindowHandle(hwnd);
         }
 
         return false;
@@ -194,9 +215,12 @@ internal partial class TeamsWindowService
         }
     }
 
-    private static IntPtr FindTeamsWindow()
+    /// <summary>
+    /// Returns all visible Teams window handles (Edge PWA windows with "Microsoft Teams" in title).
+    /// </summary>
+    private static List<IntPtr> FindAllTeamsWindows()
     {
-        IntPtr found = IntPtr.Zero;
+        var results = new List<IntPtr>();
 
         EnumWindows((hWnd, _) =>
         {
@@ -208,15 +232,13 @@ internal partial class TeamsWindowService
             var title = GetWindowTitle(hWnd);
             if (title.Contains(WindowTitle, StringComparison.OrdinalIgnoreCase))
             {
-                // Verify it's an Edge process (PWA mode)
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 try
                 {
                     using var proc = Process.GetProcessById((int)pid);
                     if (proc.ProcessName.Contains("msedge", StringComparison.OrdinalIgnoreCase))
                     {
-                        found = hWnd;
-                        return false;
+                        results.Add(hWnd);
                     }
                 }
                 catch { /* process may have exited */ }
@@ -225,7 +247,7 @@ internal partial class TeamsWindowService
             return true;
         }, IntPtr.Zero);
 
-        return found;
+        return results;
     }
 
     private static string GetWindowTitle(IntPtr hWnd)
