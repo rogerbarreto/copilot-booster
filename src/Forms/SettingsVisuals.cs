@@ -282,12 +282,12 @@ internal static class SettingsVisuals
             Text = title,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             Size = new Size(500, 255),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
             TopMost = Program._settings.AlwaysOnTop
         };
+        AlignWithParent(form);
 
         var lblDesc = new Label { Text = "Description:", Location = new Point(12, 15), AutoSize = true };
         var txtDesc = new TextBox { Text = defaultDesc, Location = new Point(12, 35), Width = 455 };
@@ -350,12 +350,12 @@ internal static class SettingsVisuals
             Text = title,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             Size = new Size(450, 150),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
             TopMost = Program._settings.AlwaysOnTop
         };
+        AlignWithParent(form);
 
         var lbl = new Label { Text = label, Location = new Point(12, 15), AutoSize = true };
         var txt = new TextBox { Text = defaultValue, Location = new Point(12, 38), Width = 405 };
@@ -367,6 +367,29 @@ internal static class SettingsVisuals
         form.CancelButton = btnCancel;
 
         return form.ShowDialog() == DialogResult.OK ? txt.Text : null;
+    }
+
+    /// <summary>
+    /// Positions a dialog centered horizontally on the active parent form and
+    /// aligned vertically with the parent's title bar.
+    /// </summary>
+    internal static void AlignWithParent(Form dialog)
+    {
+        var parent = Form.ActiveForm;
+        if (parent != null && parent != dialog &&
+            (dialog.Width > parent.Width || dialog.Height > parent.Height))
+        {
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            return;
+        }
+
+        dialog.StartPosition = FormStartPosition.Manual;
+        if (parent != null && parent != dialog)
+        {
+            dialog.Location = new Point(
+                parent.Left + (parent.Width - dialog.Width) / 2,
+                parent.Top);
+        }
     }
 
     /// <summary>

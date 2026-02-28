@@ -44,7 +44,6 @@ internal static class NewSessionNameVisuals
         {
             Text = "New Copilot Session",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
@@ -52,6 +51,7 @@ internal static class NewSessionNameVisuals
             Height = 220,
             TopMost = Program._settings.AlwaysOnTop
         };
+        SettingsVisuals.AlignWithParent(form);
 
         if (Program.AppIcon != null)
         {
@@ -182,7 +182,6 @@ internal static class NewSessionNameVisuals
         {
             Text = "New Copilot Session",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
@@ -190,6 +189,7 @@ internal static class NewSessionNameVisuals
             Height = SameBranchHeight,
             TopMost = Program._settings.AlwaysOnTop
         };
+        SettingsVisuals.AlignWithParent(form);
 
         if (Program.AppIcon != null)
         {

@@ -57,7 +57,6 @@ internal static class WorkspaceCreatorVisuals
         {
             Text = "Create New Workspace",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
@@ -65,6 +64,7 @@ internal static class WorkspaceCreatorVisuals
             Height = CollapsedHeight,
             TopMost = Program._settings.AlwaysOnTop
         };
+        SettingsVisuals.AlignWithParent(form);
 
         if (Program.AppIcon != null)
         {

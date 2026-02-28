@@ -28,7 +28,6 @@ internal static class SessionEditorVisuals
         {
             Text = "Edit Session",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
@@ -36,6 +35,7 @@ internal static class SessionEditorVisuals
             Height = 330,
             TopMost = Program._settings.AlwaysOnTop
         };
+        SettingsVisuals.AlignWithParent(form);
 
         if (Program.AppIcon != null)
         {

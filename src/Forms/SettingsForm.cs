@@ -28,8 +28,8 @@ internal sealed class SettingsForm : Form
         this.Text = "Settings";
         this.Size = new Size(880, 620);
         this.MinimumSize = new Size(680, 480);
-        this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.Sizable;
+        SettingsVisuals.AlignWithParent(this);
         this.TopMost = Program._settings.AlwaysOnTop;
 
         this.BuildLayout();

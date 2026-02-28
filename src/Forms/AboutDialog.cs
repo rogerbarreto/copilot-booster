@@ -29,12 +29,12 @@ internal static class AboutDialog
             Text = "About Copilot Booster",
             Size = new Size(400, 390),
             FormBorderStyle = FormBorderStyle.FixedDialog,
-            StartPosition = FormStartPosition.CenterParent,
             MaximizeBox = false,
             MinimizeBox = false,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             TopMost = (owner as Form)?.TopMost ?? false
         };
+        SettingsVisuals.AlignWithParent(dialog);
 
         if (Program.AppIcon != null)
         {

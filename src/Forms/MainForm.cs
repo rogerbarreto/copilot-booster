@@ -1115,12 +1115,12 @@ internal partial class MainForm : Form
             Text = "New Session — Select Directory",
             Size = new Size(650, 450),
             MinimumSize = new Size(450, 300),
-            StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.Sizable,
             Font = this.Font,
             Icon = this.Icon,
             TopMost = this.TopMost
         };
+        SettingsVisuals.AlignWithParent(dialog);
 
         var dialogPanel = new Panel { Dock = DockStyle.Fill };
 
