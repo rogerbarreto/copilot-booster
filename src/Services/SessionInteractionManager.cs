@@ -27,11 +27,16 @@ internal class SessionInteractionManager
 
     /// <summary>
     /// Launches a Copilot session by starting a new process with <c>--resume</c>.
+    /// Self-heals the workspace.yaml before launching.
     /// </summary>
     /// <param name="sessionId">The session ID to resume.</param>
     /// <returns>The started process, or <c>null</c> if the launch failed.</returns>
     internal Process? LaunchSession(string sessionId)
     {
+        // Self-heal workspace.yaml before launching
+        var wsFile = Path.Combine(this._sessionStateDir, sessionId, "workspace.yaml");
+        CopilotSessionCreatorService.HealWorkspaceYaml(wsFile);
+
         var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
         try
         {
@@ -256,6 +261,22 @@ internal class SessionInteractionManager
             {
                 return line.Substring("cwd:".Length).Trim();
             }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the CWD from a session's workspace.yaml and validates that the directory exists.
+    /// </summary>
+    /// <param name="sessionId">The session ID to look up.</param>
+    /// <returns>The CWD value if the directory exists, or <c>null</c> if not found or the directory doesn't exist.</returns>
+    internal string? GetValidatedSessionCwd(string sessionId)
+    {
+        var cwd = this.GetSessionCwd(sessionId);
+        if (cwd != null && Directory.Exists(cwd))
+        {
+            return cwd;
         }
 
         return null;

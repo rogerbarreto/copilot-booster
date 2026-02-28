@@ -159,7 +159,7 @@ internal class SessionService
                 }
                 else if (line.StartsWith("summary:"))
                 {
-                    summary = line[8..].Trim();
+                    summary = line[8..].Trim().Trim('"');
                 }
             }
 
@@ -255,7 +255,7 @@ internal class SessionService
                         }
                         else if (line.StartsWith("summary:"))
                         {
-                            summary = line[8..].Trim();
+                            summary = line[8..].Trim().Trim('"');
                         }
                     }
 

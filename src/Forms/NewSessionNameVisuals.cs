@@ -91,7 +91,7 @@ internal static class NewSessionNameVisuals
 
         var lblHelper = new Label
         {
-            Text = "A stable label for your session (optional)",
+            Text = "A stable label for your session (required)",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,
@@ -106,7 +106,8 @@ internal static class NewSessionNameVisuals
             Text = "OK",
             DialogResult = DialogResult.None,
             Width = 80,
-            Location = new Point(300, y)
+            Location = new Point(300, y),
+            Enabled = false
         };
 
         var btnCancel = new Button
@@ -115,6 +116,11 @@ internal static class NewSessionNameVisuals
             DialogResult = DialogResult.Cancel,
             Width = 80,
             Location = new Point(390, y)
+        };
+
+        txtName.TextChanged += (s, e) =>
+        {
+            btnOk.Enabled = !string.IsNullOrWhiteSpace(txtName.Text);
         };
 
         btnOk.Click += (s, e) =>
@@ -223,7 +229,7 @@ internal static class NewSessionNameVisuals
 
         var lblSessionNameHelper = new Label
         {
-            Text = "A stable label for your session (optional)",
+            Text = "A stable label for your session (required)",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,
@@ -423,7 +429,8 @@ internal static class NewSessionNameVisuals
         {
             Text = "OK",
             DialogResult = DialogResult.None,
-            Width = 80
+            Width = 80,
+            Enabled = false
         };
 
         var btnCancel = new Button
@@ -431,6 +438,20 @@ internal static class NewSessionNameVisuals
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
             Width = 80
+        };
+
+        // Alias is required — enable OK only when non-empty
+        txtSessionName.TextChanged += (s, e) =>
+        {
+            bool hasAlias = !string.IsNullOrWhiteSpace(txtSessionName.Text);
+            if (rdoFromPr.Checked)
+            {
+                btnOk.Enabled = hasAlias && prValidated;
+            }
+            else
+            {
+                btnOk.Enabled = hasAlias;
+            }
         };
 
         form.Controls.Add(btnOk);
@@ -502,7 +523,7 @@ internal static class NewSessionNameVisuals
                 btnOk.Location = new Point(300, cy);
                 btnCancel.Location = new Point(390, cy);
 
-                btnOk.Enabled = prValidated;
+                btnOk.Enabled = prValidated && !string.IsNullOrWhiteSpace(txtSessionName.Text);
                 form.Height = cy + 70;
             }
             else if (isSwitchBranch)
@@ -515,7 +536,7 @@ internal static class NewSessionNameVisuals
                 btnOk.Location = new Point(300, buttonY);
                 btnCancel.Location = new Point(390, buttonY);
 
-                btnOk.Enabled = true;
+                btnOk.Enabled = !string.IsNullOrWhiteSpace(txtSessionName.Text);
                 form.Height = buttonY + 70;
             }
             else
@@ -524,7 +545,7 @@ internal static class NewSessionNameVisuals
                 btnOk.Location = new Point(300, cy);
                 btnCancel.Location = new Point(390, cy);
 
-                btnOk.Enabled = true;
+                btnOk.Enabled = !string.IsNullOrWhiteSpace(txtSessionName.Text);
                 form.Height = cy + 70;
             }
         }

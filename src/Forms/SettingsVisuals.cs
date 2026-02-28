@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using CopilotBooster.Models;
@@ -13,6 +14,16 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal static class SettingsVisuals
 {
+    /// <summary>
+    /// Prefix applied to directory entries in the settings list when the directory does not exist.
+    /// </summary>
+    internal const string NotFoundPrefix = "(not found) ";
+
+    /// <summary>
+    /// Strips the <see cref="NotFoundPrefix"/> from a directory path if present.
+    /// </summary>
+    internal static string StripNotFoundPrefix(string path) =>
+        path.StartsWith(NotFoundPrefix, StringComparison.Ordinal) ? path[NotFoundPrefix.Length..] : path;
     /// <summary>
     /// Wraps a <see cref="TextBox"/> in a <see cref="Panel"/> that provides a themed border.
     /// The text box is set to <see cref="BorderStyle.None"/> and fills the panel interior.
@@ -527,7 +538,7 @@ internal static class SettingsVisuals
         dirsList.Items.Clear();
         foreach (var dir in fresh.AllowedDirs)
         {
-            dirsList.Items.Add(dir);
+            dirsList.Items.Add(Directory.Exists(dir) ? dir : NotFoundPrefix + dir);
         }
 
         idesList.Items.Clear();

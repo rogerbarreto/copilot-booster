@@ -29,7 +29,8 @@ internal partial class MainForm : Form
     private readonly ActiveStatusTracker _activeTracker = new();
     private readonly SessionRefreshCoordinator _refreshCoordinator;
     private readonly SessionInteractionManager _interactionManager;
-    private System.Windows.Forms.Timer? _activeStatusTimer;
+    private System.Windows.Forms.Timer? _backgroundPollTimer;
+    private System.Windows.Forms.Timer? _visualRefreshTimer;
     private System.Windows.Forms.Timer? _spinnerTimer;
     private BellNotificationService? _bellService;
 
@@ -307,6 +308,10 @@ internal partial class MainForm : Form
 
         this._toastVisible = true;
         this._toastShownTicks = Environment.TickCount64;
+
+        // Instantly repopulate grid from cached data and restart visual polling
+        this.PopulateGridWithFilter(this._lastSnapshot);
+        this._visualRefreshTimer?.Start();
     }
 
     private void HideToast()
@@ -316,6 +321,8 @@ internal partial class MainForm : Form
             this._toastAnimTimer?.Stop();
             this._toastAnimating = false;
         }
+
+        this._visualRefreshTimer?.Stop();
 
         if (Program._settings.ToastAnimate)
         {
@@ -570,7 +577,7 @@ internal partial class MainForm : Form
         SettingsVisuals.ApplyThemedSelection(dirsList);
         foreach (var dir in Program._settings.AllowedDirs)
         {
-            dirsList.Items.Add(dir);
+            dirsList.Items.Add(Directory.Exists(dir) ? dir : SettingsVisuals.NotFoundPrefix + dir);
         }
         var dirsButtons = SettingsVisuals.CreateListButtons(dirsList, "Directory path:", "Add Directory", addBrowse: true);
         dirsTab.Controls.Add(dirsList);
@@ -1070,7 +1077,8 @@ internal partial class MainForm : Form
         btnSave.Click += (s, e) =>
         {
             Program._settings.AllowedTools = toolsList.Items.Cast<string>().ToList();
-            Program._settings.AllowedDirs = dirsList.Items.Cast<string>().ToList();
+            Program._settings.AllowedDirs = dirsList.Items.Cast<string>()
+                .Select(SettingsVisuals.StripNotFoundPrefix).ToList();
             CopilotConfigService.SaveAllowedUrls(urlsList.Items.Cast<string>().ToList());
             Program._settings.DefaultWorkDir = workDirBox.Text.Trim();
             Program._settings.WorkspacesDir = wsDirBox.Text.Trim();
@@ -1189,9 +1197,13 @@ internal partial class MainForm : Form
             }
         };
 
-        this._activeStatusTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        this._activeStatusTimer.Tick += (s, e) => this.RefreshActiveStatusAsync();
-        this._activeStatusTimer.Start();
+        this._backgroundPollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        this._backgroundPollTimer.Tick += (s, e) => this.RefreshBackgroundAsync();
+        this._backgroundPollTimer.Start();
+
+        this._visualRefreshTimer = new System.Windows.Forms.Timer { Interval = 3000 };
+        this._visualRefreshTimer.Tick += (s, e) => this.RefreshVisualsAsync();
+        this._visualRefreshTimer.Start();
 
         this._spinnerTimer = new System.Windows.Forms.Timer { Interval = 100 };
         this._spinnerTimer.Tick += (s, e) => this._sessionsVisuals.GridVisuals.AdvanceSpinnerFrame();
@@ -1206,6 +1218,7 @@ internal partial class MainForm : Form
             }
 
             await this.LoadInitialDataAsync().ConfigureAwait(true);
+            this.CheckForMissingAllowedDirs();
             _ = this.CheckForUpdateInBackgroundAsync();
         };
 
@@ -1216,7 +1229,8 @@ internal partial class MainForm : Form
 
         this.FormClosed += (s, e) =>
         {
-            this._activeStatusTimer?.Stop();
+            this._backgroundPollTimer?.Stop();
+            this._visualRefreshTimer?.Stop();
             this._spinnerTimer?.Stop();
             this._updateCheckTimer?.Stop();
         };
@@ -1530,7 +1544,11 @@ internal partial class MainForm : Form
         this._sessionsVisuals.UpdateTabCounts(counts);
     }
 
-    private async void RefreshActiveStatusAsync()
+    /// <summary>
+    /// Core background refresh: refreshes session data, Edge tracking, and notifications.
+    /// Returns the latest snapshot. Does not touch the grid.
+    /// </summary>
+    private async Task RefreshBackgroundCoreAsync()
     {
         if (this._refreshInProgress)
         {
@@ -1565,7 +1583,7 @@ internal partial class MainForm : Form
                 TaskCreationOptions.None,
                 StaTaskScheduler.Instance).ConfigureAwait(true);
 
-            this.PopulateGridWithFilter(snapshot);
+            this._lastSnapshot = snapshot;
 
             // Bell notification: detect transitions and fire toast
             this._bellService?.CheckAndNotify(snapshot);
@@ -1574,6 +1592,30 @@ internal partial class MainForm : Form
         {
             this._refreshInProgress = false;
         }
+    }
+
+    /// <summary>
+    /// Background polling callback: refreshes data, Edge tracking, and notifications.
+    /// Runs even when the toast is hidden.
+    /// </summary>
+    private async void RefreshBackgroundAsync() => await this.RefreshBackgroundCoreAsync().ConfigureAwait(true);
+
+    /// <summary>
+    /// Visual polling: repopulates the grid from the latest cached snapshot.
+    /// Stopped when the toast is hidden, restarted when shown.
+    /// </summary>
+    private void RefreshVisualsAsync()
+    {
+        this.PopulateGridWithFilter(this._lastSnapshot);
+    }
+
+    /// <summary>
+    /// Full refresh: background data + visual grid. Used by user-triggered actions (context menu, etc.).
+    /// </summary>
+    private async void RefreshActiveStatusAsync()
+    {
+        await this.RefreshBackgroundCoreAsync().ConfigureAwait(true);
+        this.PopulateGridWithFilter(this._lastSnapshot);
     }
 
     /// <summary>
@@ -1666,6 +1708,16 @@ internal partial class MainForm : Form
 
         this.PopulateGridWithFilter(snapshot);
         this._sessionsVisuals.LoadingOverlay.Visible = false;
+    }
+
+    private void CheckForMissingAllowedDirs()
+    {
+        var missing = Program._settings.AllowedDirs.Where(d => !Directory.Exists(d)).ToList();
+        if (missing.Count > 0)
+        {
+            var names = string.Join(", ", missing.Select(d => Path.GetFileName(d.TrimEnd('\\')) ?? d));
+            this._toast.ShowWarning($"⚠️ {missing.Count} allowed dir(s) not found: {names} — check Settings");
+        }
     }
 
     private async Task RefreshGridAsync()

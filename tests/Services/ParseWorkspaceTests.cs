@@ -106,4 +106,40 @@
         Assert.NotNull(result);
         Assert.Equal("Unknown", result!.Cwd);
     }
+
+    [Fact]
+    public void ParseWorkspace_QuotedEmptySummary_TreatsAsEmpty()
+    {
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
+        File.WriteAllText(wsFile, "id: s1\ncwd: C:\\myproject\nsummary: \"\"");
+
+        var result = SessionService.ParseWorkspace(wsFile, 1);
+
+        Assert.NotNull(result);
+        Assert.Equal("myproject", result!.Summary);
+    }
+
+    [Fact]
+    public void ParseWorkspace_BareNullSummary_TreatsAsEmpty()
+    {
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
+        File.WriteAllText(wsFile, "id: s1\ncwd: C:\\myproject\nsummary:");
+
+        var result = SessionService.ParseWorkspace(wsFile, 1);
+
+        Assert.NotNull(result);
+        Assert.Equal("myproject", result!.Summary);
+    }
+
+    [Fact]
+    public void ParseWorkspace_QuotedSummaryWithText_StripsQuotes()
+    {
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
+        File.WriteAllText(wsFile, "id: s1\ncwd: C:\\myproject\nsummary: \"My Session\"");
+
+        var result = SessionService.ParseWorkspace(wsFile, 1);
+
+        Assert.NotNull(result);
+        Assert.Equal("My Session", result!.Summary);
+    }
 }

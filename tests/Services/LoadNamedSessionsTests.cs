@@ -92,4 +92,34 @@
         Assert.Equal("new", result[0].Id);
         Assert.Equal("old", result[1].Id);
     }
+
+    [Fact]
+    public void LoadNamedSessions_QuotedEmptySummary_TreatsAsEmpty()
+    {
+        var sessionDir = Path.Combine(this._tempDir, "session-quoted");
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
+            "id: session-quoted\ncwd: C:\\myproject\nsummary: \"\"");
+
+        var result = SessionService.LoadNamedSessions(this._tempDir);
+
+        Assert.Single(result);
+        Assert.Equal("", result[0].Summary);
+        Assert.Equal("myproject", result[0].Folder);
+    }
+
+    [Fact]
+    public void LoadNamedSessions_BareNullSummary_TreatsAsEmpty()
+    {
+        var sessionDir = Path.Combine(this._tempDir, "session-null");
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
+            "id: session-null\ncwd: C:\\myproject\nsummary:");
+
+        var result = SessionService.LoadNamedSessions(this._tempDir);
+
+        Assert.Single(result);
+        Assert.Equal("", result[0].Summary);
+        Assert.Equal("myproject", result[0].Folder);
+    }
 }

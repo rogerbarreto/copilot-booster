@@ -339,6 +339,12 @@ internal class Program
             var wsFile = Path.Combine(SessionStateDir, resumeSessionId, "workspace.yaml");
             if (File.Exists(wsFile))
             {
+                // Self-heal workspace.yaml before launching (fix bare null fields like "summary:")
+                if (CopilotSessionCreatorService.HealWorkspaceYaml(wsFile))
+                {
+                    Logger.LogInformation("Healed workspace.yaml for session {SessionId}", resumeSessionId);
+                }
+
                 foreach (var line in File.ReadAllLines(wsFile))
                 {
                     if (line.StartsWith("cwd:"))

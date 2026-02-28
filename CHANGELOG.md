@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.1] - 2026-02-28
+
+### Fixed
+
+- **Toast mode stale grid** — when the toast window reappears (via Win+Alt+X or tray icon), the session list now renders instantly from cached data instead of showing stale/empty rows until the next 3-second refresh tick. Split the single polling timer into a background timer (data refresh, Edge tracking, bell notifications — always runs) and a visual timer (grid population — paused while hidden, restarted on show).
+
 ## [0.16.0] - 2026-02-28
 
 ### Added

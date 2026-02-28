@@ -255,8 +255,11 @@ internal class LauncherSettings
 
         foreach (var dir in this.AllowedDirs)
         {
-            parts.Add("--add-dir");
-            parts.Add($"\"{dir}\"");
+            if (Directory.Exists(dir))
+            {
+                parts.Add("--add-dir");
+                parts.Add($"\"{dir}\"");
+            }
         }
 
         foreach (var arg in extraArgs)

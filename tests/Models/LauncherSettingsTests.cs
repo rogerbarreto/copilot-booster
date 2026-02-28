@@ -136,15 +136,15 @@ public sealed class LauncherSettingsTests : IDisposable
         var settings = new LauncherSettings
         {
             AllowedTools = ["bash", "python"],
-            AllowedDirs = [@"C:\code", @"D:\work"]
+            AllowedDirs = [this._tempDir, Path.GetTempPath()]
         };
 
         var result = settings.BuildCopilotArgs([]);
 
         Assert.Contains("--allow-tool \"bash\"", result);
         Assert.Contains("--allow-tool \"python\"", result);
-        Assert.Contains("--add-dir \"C:\\code\"", result);
-        Assert.Contains("--add-dir \"D:\\work\"", result);
+        Assert.Contains($"--add-dir \"{this._tempDir}\"", result);
+        Assert.Contains($"--add-dir \"{Path.GetTempPath()}\"", result);
     }
 
     [Fact]
@@ -167,12 +167,12 @@ public sealed class LauncherSettingsTests : IDisposable
         var settings = new LauncherSettings
         {
             AllowedTools = ["tool1"],
-            AllowedDirs = [@"C:\dir"]
+            AllowedDirs = [this._tempDir]
         };
 
         var result = settings.BuildCopilotArgs([]);
 
-        Assert.Equal("--allow-tool \"tool1\" --add-dir \"C:\\dir\"", result);
+        Assert.Equal($"--allow-tool \"tool1\" --add-dir \"{this._tempDir}\"", result);
     }
 
     [Fact]
@@ -374,5 +374,33 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.Equal("bottom-center", settings.ToastPosition);
         Assert.Equal("primary", settings.ToastScreen);
         Assert.True(settings.ToastAnimate);
+    }
+
+    [Fact]
+    public void BuildCopilotArgs_WithNonExistentDir_SkipsIt()
+    {
+        var settings = new LauncherSettings
+        {
+            AllowedDirs = [@"Z:\NonExistent\FakeDir", @"C:\"]
+        };
+
+        var result = settings.BuildCopilotArgs([]);
+
+        Assert.DoesNotContain("FakeDir", result);
+        Assert.Contains(@"--add-dir ""C:\""", result);
+    }
+
+    [Fact]
+    public void BuildCopilotArgs_AllDirsNonExistent_ReturnsNoAddDir()
+    {
+        var settings = new LauncherSettings
+        {
+            AllowedDirs = [@"Z:\Nope", @"Q:\AlsoNope"]
+        };
+
+        var result = settings.BuildCopilotArgs(["--resume", "abc"]);
+
+        Assert.DoesNotContain("--add-dir", result);
+        Assert.Equal("--resume abc", result);
     }
 }

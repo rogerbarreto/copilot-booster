@@ -49,11 +49,13 @@ internal static class CopilotSessionCreatorService
                     }
                     else if (line.StartsWith("summary:"))
                     {
-                        updatedLines.Add($"summary: {sessionName ?? ""}");
+                        var val = sessionName ?? "";
+                        updatedLines.Add(string.IsNullOrEmpty(val) ? "summary: \"\"" : $"summary: {val}");
                     }
                     else if (line.StartsWith("name:"))
                     {
-                        updatedLines.Add($"name: {sessionName ?? ""}");
+                        var val = sessionName ?? "";
+                        updatedLines.Add(string.IsNullOrEmpty(val) ? "name: \"\"" : $"name: {val}");
                         foundName = true;
                     }
                     else if (line.StartsWith("created_at:") || line.StartsWith("updated_at:"))
@@ -115,6 +117,54 @@ internal static class CopilotSessionCreatorService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Heals a workspace.yaml file by fixing bare null YAML fields (e.g., <c>summary:</c> with no value).
+    /// Replaces them with quoted empty strings so the Copilot CLI doesn't reject them.
+    /// </summary>
+    /// <param name="workspaceFile">Path to the workspace.yaml file.</param>
+    /// <returns><c>true</c> if the file was modified; otherwise, <c>false</c>.</returns>
+    internal static bool HealWorkspaceYaml(string workspaceFile)
+    {
+        if (!File.Exists(workspaceFile))
+        {
+            return false;
+        }
+
+        try
+        {
+            var lines = File.ReadAllLines(workspaceFile);
+            bool modified = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                // Detect bare null fields: "key:" or "key: " with nothing after
+                var colonIdx = line.IndexOf(':');
+                if (colonIdx > 0)
+                {
+                    var afterColon = line[(colonIdx + 1)..].Trim();
+                    if (afterColon.Length == 0)
+                    {
+                        var key = line[..colonIdx];
+                        lines[i] = $"{key}: \"\"";
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified)
+            {
+                File.WriteAllLines(workspaceFile, lines);
+            }
+
+            return modified;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void WriteNewWorkspaceYaml(string wsFile, string sessionId, string workingDirectory, string? sessionName)
