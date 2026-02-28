@@ -51,6 +51,12 @@ internal partial class TeamsWindowService
     internal IntPtr CachedHwnd { get; set; }
 
     /// <summary>
+    /// True while the window is being opened and we're polling for the HWND.
+    /// Prevents cleanup from removing the entry before the HWND is captured.
+    /// </summary>
+    internal bool IsPendingOpen { get; private set; }
+
+    /// <summary>
     /// Fired when the Teams window is detected as closed.
     /// </summary>
     internal event Action? WindowClosed;
@@ -81,8 +87,9 @@ internal partial class TeamsWindowService
     /// <summary>
     /// Opens Teams in Edge app mode. Captures the new window handle by
     /// snapshotting existing Teams HWNDs before launch and polling for a new one.
+    /// Awaitable — resolves when the HWND is captured (or after timeout).
     /// </summary>
-    internal void Open()
+    internal async Task OpenAsync()
     {
         var edgePath = EdgeWorkspaceService.FindEdgePath();
         if (edgePath == null)
@@ -93,6 +100,7 @@ internal partial class TeamsWindowService
 
         // Snapshot existing Teams windows so we can detect the new one
         var existingHwnds = FindAllTeamsWindows();
+        this.IsPendingOpen = true;
 
         try
         {
@@ -106,27 +114,51 @@ internal partial class TeamsWindowService
         catch (Exception ex)
         {
             Program.Logger.LogWarning("Failed to open Teams: {Error}", ex.Message);
+            this.IsPendingOpen = false;
             return;
         }
 
         // Poll for the new window (up to 10 seconds)
-        _ = Task.Run(async () =>
+        var captured = await PollForNewWindow(existingHwnds).ConfigureAwait(false);
+        if (captured != IntPtr.Zero)
         {
-            for (int i = 0; i < 40; i++)
-            {
-                await Task.Delay(250).ConfigureAwait(false);
-                var currentHwnds = FindAllTeamsWindows();
-                var newHwnd = currentHwnds.Find(h => !existingHwnds.Contains(h));
-                if (newHwnd != IntPtr.Zero)
-                {
-                    this.CachedHwnd = newHwnd;
-                    Program.Logger.LogInformation("Teams window captured: HWND={Hwnd}", newHwnd);
-                    return;
-                }
-            }
-
+            this.CachedHwnd = captured;
+            Program.Logger.LogInformation("Teams window captured: HWND={Hwnd}", captured);
+        }
+        else
+        {
             Program.Logger.LogWarning("Could not capture Teams window handle after 10s");
-        });
+        }
+
+        this.IsPendingOpen = false;
+    }
+
+    /// <summary>
+    /// Polls for a new Teams window that wasn't in the existing snapshot.
+    /// </summary>
+    private static async Task<IntPtr> PollForNewWindow(List<IntPtr> existingHwnds)
+    {
+        for (int i = 0; i < 40; i++)
+        {
+            await Task.Delay(250).ConfigureAwait(false);
+            var newHwnd = FindNewTeamsWindow(existingHwnds);
+            if (newHwnd != IntPtr.Zero)
+            {
+                return newHwnd;
+            }
+        }
+
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Finds a Teams window HWND that is not in the given set of existing handles.
+    /// Extracted for testability.
+    /// </summary>
+    internal static IntPtr FindNewTeamsWindow(List<IntPtr> existingHwnds)
+    {
+        var currentHwnds = FindAllTeamsWindows();
+        return currentHwnds.Find(h => !existingHwnds.Contains(h));
     }
 
     /// <summary>
@@ -218,7 +250,7 @@ internal partial class TeamsWindowService
     /// <summary>
     /// Returns all visible Teams window handles (Edge PWA windows with "Microsoft Teams" in title).
     /// </summary>
-    private static List<IntPtr> FindAllTeamsWindows()
+    internal static List<IntPtr> FindAllTeamsWindows()
     {
         var results = new List<IntPtr>();
 

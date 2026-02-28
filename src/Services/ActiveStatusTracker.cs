@@ -197,7 +197,7 @@ internal class ActiveStatusTracker
             parts.Add("Edge");
         }
 
-        if (this._teamsWindows.TryGetValue(sessionId, out var teams) && teams.IsOpen)
+        if (this._teamsWindows.TryGetValue(sessionId, out var teams) && (teams.IsOpen || teams.IsPendingOpen))
         {
             parts.Add("Teams");
         }
@@ -657,11 +657,11 @@ internal class ActiveStatusTracker
             this._edgeWorkspaces.Remove(id);
         }
 
-        // Clean up closed Teams windows
+        // Clean up closed Teams windows (skip entries still pending HWND capture)
         var closedTeams = new List<string>();
         foreach (var kvp in this._teamsWindows.ToList())
         {
-            if (!kvp.Value.IsOpen)
+            if (!kvp.Value.IsPendingOpen && !kvp.Value.IsOpen)
             {
                 closedTeams.Add(kvp.Key);
             }

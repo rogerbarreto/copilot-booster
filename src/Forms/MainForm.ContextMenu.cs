@@ -317,7 +317,7 @@ internal partial class MainForm
         this._sessionsVisuals.IsEdgeOpen = (sid) =>
             this._activeTracker.TryGetEdge(sid, out var ws) && ws.IsOpen;
 
-        this._sessionsVisuals.OnOpenTeams += (sid) =>
+        this._sessionsVisuals.OnOpenTeams += async (sid) =>
         {
             if (this._activeTracker.TryGetTeams(sid, out var existing) && existing.IsOpen)
             {
@@ -343,7 +343,7 @@ internal partial class MainForm
                 }
             };
             this._activeTracker.TrackTeams(sid, teamsWindow);
-            teamsWindow.Open();
+            await teamsWindow.OpenAsync().ConfigureAwait(true);
             this.RefreshActiveStatusAsync();
         };
 
