@@ -138,7 +138,7 @@ internal static class CwdPickerVisuals
         var btnBrowse = new Button { Text = "Browse...", Width = 90 };
         btnBrowse.Click += (s, e) =>
         {
-            using var fbd = new FolderBrowserDialog { SelectedPath = defaultWorkDir };
+            using var fbd = new FolderBrowserDialog { InitialDirectory = SettingsVisuals.GetBrowseInitialDirectory(defaultWorkDir) };
             if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
             {
                 selectedPath = fbd.SelectedPath;

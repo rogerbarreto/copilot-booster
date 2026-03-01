@@ -1434,7 +1434,7 @@ internal partial class MainForm : Form
 
         dialogVisuals.OnAddDirectory += async () =>
         {
-            using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
+            using var fbd = new FolderBrowserDialog { InitialDirectory = SettingsVisuals.GetBrowseInitialDirectory(Program._settings.DefaultWorkDir) };
             if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
             {
                 PinnedDirectoryService.Add(fbd.SelectedPath);
