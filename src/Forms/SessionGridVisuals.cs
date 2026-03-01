@@ -108,6 +108,12 @@ internal class SessionGridVisuals
 
             var row = this._grid.Rows[e.RowIndex];
 
+            // Dismiss bell on any left-click
+            if (e.Button == MouseButtons.Left)
+            {
+                this.DismissBell(row);
+            }
+
             // Context column — handle file/edge icon clicks
             if (e.ColumnIndex == 4 && row.Tag is string ctxSessionId)
             {
@@ -129,17 +135,15 @@ internal class SessionGridVisuals
                 {
                     this._activeTracker.FocusActiveProcess(sessionId, clickedLine);
                 }
+            }
+        };
 
-                // Suppress bell until session transitions to working again
-                this._activeTracker.InitStartedSessions([sessionId]);
-
-                // Clear bell status when user focuses a session
-                row.Cells[0].Value = "";
-                if (!string.IsNullOrEmpty(activeText))
-                {
-                    row.DefaultCellStyle.BackColor = ActiveRowColor;
-                    row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
-                }
+        // Dismiss bell on Enter keypress
+        this._grid.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Enter && this._grid.CurrentRow is { } row)
+            {
+                this.DismissBell(row);
             }
         };
 
@@ -644,6 +648,35 @@ internal class SessionGridVisuals
             e.Graphics!.DrawImage(icon, ix, iy, icon.Width, icon.Height);
             ix += icon.Width + Spacing;
         }
+    }
+
+    /// <summary>
+    /// Clears the bell notification icon and row highlight for a session row, if active.
+    /// </summary>
+    private void DismissBell(DataGridViewRow row)
+    {
+        var statusValue = row.Cells[0].Value as string;
+        if (statusValue != "bell" || row.Tag is not string sessionId)
+        {
+            return;
+        }
+
+        this._activeTracker.InitStartedSessions([sessionId]);
+        row.Cells[0].Value = "";
+
+        var activeText = row.Cells[5].Value as string;
+        if (!string.IsNullOrEmpty(activeText))
+        {
+            row.DefaultCellStyle.BackColor = ActiveRowColor;
+            row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
+        }
+        else
+        {
+            row.DefaultCellStyle.BackColor = Color.Empty;
+            row.DefaultCellStyle.ForeColor = Color.Empty;
+        }
+
+        row.DefaultCellStyle.SelectionBackColor = Color.Empty;
     }
 
     private void HandleContextClick(DataGridViewRow row, string sessionId, DataGridViewCellMouseEventArgs e)
