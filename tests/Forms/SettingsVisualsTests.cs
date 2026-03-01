@@ -60,4 +60,32 @@
 
         Assert.Equal(tempDir, result);
     }
+
+    [StaFact]
+    public void FolderBrowserDialog_InitialDirectory_OpensInsideFolder()
+    {
+        var targetDir = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+
+        using var fbd = new FolderBrowserDialog
+        {
+            InitialDirectory = targetDir
+        };
+
+        Assert.Equal(targetDir, fbd.InitialDirectory);
+        Assert.Equal("", fbd.SelectedPath);
+    }
+
+    [StaFact]
+    public void FolderBrowserDialog_SelectedPath_DoesNotSetInitialDirectory()
+    {
+        var targetDir = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+
+        using var fbd = new FolderBrowserDialog
+        {
+            SelectedPath = targetDir
+        };
+
+        Assert.Equal(targetDir, fbd.SelectedPath);
+        Assert.Equal("", fbd.InitialDirectory);
+    }
 }
