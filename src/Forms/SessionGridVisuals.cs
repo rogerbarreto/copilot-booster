@@ -653,7 +653,7 @@ internal class SessionGridVisuals
     /// <summary>
     /// Clears the bell notification icon and row highlight for a session row, if active.
     /// </summary>
-    private void DismissBell(DataGridViewRow row)
+    internal void DismissBell(DataGridViewRow row)
     {
         var statusValue = row.Cells[0].Value as string;
         if (statusValue != "bell" || row.Tag is not string sessionId)
