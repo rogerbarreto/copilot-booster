@@ -136,7 +136,7 @@ internal partial class TeamsWindowService
 
         // Poll for a STABLE new window: must survive 3 consecutive checks (750ms)
         // Edge PWA mode recycles the initial HWND during startup
-        var stableHwnd = await PollForStableWindow(existingHwnds).ConfigureAwait(false);
+        var stableHwnd = await PollForStableWindowAsync(existingHwnds).ConfigureAwait(false);
         if (stableHwnd != IntPtr.Zero)
         {
             this.CachedHwnd = stableHwnd;
@@ -155,11 +155,11 @@ internal partial class TeamsWindowService
     /// Polls for a new Teams window that stabilizes (same HWND for 3 consecutive checks).
     /// Timeout: ~30 seconds total.
     /// </summary>
-    private static async Task<IntPtr> PollForStableWindow(List<IntPtr> existingHwnds)
+    private static async Task<IntPtr> PollForStableWindowAsync(List<IntPtr> existingHwnds)
     {
         IntPtr candidate = IntPtr.Zero;
         int stableCount = 0;
-        const int requiredStable = 3;
+        const int RequiredStable = 3;
 
         for (int i = 0; i < 120; i++)
         {
@@ -177,7 +177,7 @@ internal partial class TeamsWindowService
             if (newHwnd == candidate)
             {
                 stableCount++;
-                if (stableCount >= requiredStable)
+                if (stableCount >= RequiredStable)
                 {
                     Program.Logger.LogDebug("[Teams] HWND={Hwnd} stable after {Checks} checks", candidate, i + 1);
                     return candidate;

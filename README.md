@@ -191,7 +191,7 @@ Configure file patterns per IDE (e.g., `*.sln;*.slnx`) in Settings. When a patte
 Open a managed Microsoft Edge window linked to any session. Each workspace gets a unique anchor tab that lets Copilot Booster track, focus, and detect whether the browser window is still open.
 
 <p align="center">
-  <img src="images/session-browser-state.png" alt="Edge browser workspace with session anchor tab" width="700">
+  <img src="images/edge-session-tracking.png" alt="Edge browser workspace with session anchor tab" width="700">
 </p>
 
 - **Tab save/restore** — save Edge tabs via "Save Edge State" in the context menu; tabs are restored when reopening Edge for the session
