@@ -1534,7 +1534,7 @@ internal partial class MainForm : Form
         // Reserved Copilot CLI files and folders to exclude
         var reservedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "events.jsonl", "workspace.yaml", "session.db", "vscode.metadata.json"
+            "events.jsonl", "workspace.yaml", "workspace-deleted.yaml", "session.db", "vscode.metadata.json"
         };
         var reservedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {

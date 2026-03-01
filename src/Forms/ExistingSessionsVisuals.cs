@@ -70,7 +70,7 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnOpenEdge;
     internal event Action<string>? OnSaveEdgeTabs;
     internal event Action<string>? OnOpenTeams;
-    internal event Action<string>? OnDeleteSession;
+    internal event Action<List<string>>? OnDeleteSessions;
     internal event Action<string>? OnOpenSessionFolder;
     internal event Action<string>? OnOpenFile;
     internal event Action<string>? OnOpenCwdExplorer;
@@ -948,10 +948,10 @@ internal class ExistingSessionsVisuals
         var menuDeleteSession = new ToolStripMenuItem("Delete Session") { Image = TryExtractIcon(shell32, 131) };
         menuDeleteSession.Click += (s, e) =>
         {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            var sids = this.GridVisuals.GetSelectedSessionIds();
+            if (sids.Count > 0)
             {
-                this.OnDeleteSession?.Invoke(sid);
+                this.OnDeleteSessions?.Invoke(sids);
             }
         };
         gridContextMenu.Items.Add(menuDeleteSession);
@@ -972,7 +972,8 @@ internal class ExistingSessionsVisuals
             menuOpenTeams.Enabled = !isMultiSelect;
             menuOpenCwdExplorer.Enabled = !isMultiSelect;
             menuOpenFiles.Enabled = !isMultiSelect;
-            menuDeleteSession.Enabled = !isMultiSelect;
+            menuDeleteSession.Enabled = true;
+            menuDeleteSession.Text = isMultiSelect ? $"Delete Sessions ({selectedIds.Count})" : "Delete Session";
 
             // IDE items — disable in multi-select
             foreach (ToolStripItem item in gridContextMenu.Items)

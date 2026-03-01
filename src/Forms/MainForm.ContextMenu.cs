@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -363,23 +364,38 @@ internal partial class MainForm
             return (false, false);
         };
 
-        this._sessionsVisuals.OnDeleteSession += (sid) =>
+        this._sessionsVisuals.OnDeleteSessions += (sids) =>
         {
-            var session = this._cachedSessions.Find(x => x.Id == sid);
-            var sessionName = !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary ?? sid;
+            var sessionNames = sids.Select(sid =>
+            {
+                var session = this._cachedSessions.Find(x => x.Id == sid);
+                return !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary ?? sid;
+            }).ToList();
+
+            var message = sids.Count == 1
+                ? $"Delete session \"{sessionNames[0]}\"?\n\n"
+                : $"Delete {sids.Count} sessions?\n\n";
+            message += "This will only remove the session(s) from Copilot — your code and files are not affected.\n" +
+                "This action can be reversed.";
+
             var result = MessageBox.Show(
-                $"Delete session \"{sessionName}\"?\n\n" +
-                "This will only remove the session from Copilot — your code and files are not affected.\n" +
-                "This action can be reversed.",
-                "Delete Session",
+                message,
+                sids.Count == 1 ? "Delete Session" : "Delete Sessions",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question,
                 MessageBoxDefaultButton.Button2);
-            if (result == DialogResult.Yes && this._interactionManager.DeleteSession(sid))
+            if (result == DialogResult.Yes)
             {
-                SessionArchiveService.Remove(Program.SessionStateFile, sid);
-                this._cachedSessions.RemoveAll(x => x.Id == sid);
-                this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
+                foreach (var sid in sids)
+                {
+                    if (this._interactionManager.DeleteSession(sid))
+                    {
+                        SessionArchiveService.Remove(Program.SessionStateFile, sid);
+                        this._cachedSessions.RemoveAll(x => x.Id == sid);
+                        this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
+                    }
+                }
+
                 this.UpdateTabCounts();
             }
         };
