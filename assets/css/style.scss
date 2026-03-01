@@ -8,14 +8,28 @@ body {
   color: #d4d4d4;
 }
 
+#main_content_wrap {
+  background-color: #1e1e1e;
+  border-top: none;
+}
+
 #main_content {
   background-color: #252526;
   color: #d4d4d4;
   border-color: #3c3c3c;
 }
 
+.inner {
+  color: #d4d4d4;
+}
+
 h1, h2, h3, h4, h5, h6 {
   color: #e0e0e0;
+  text-shadow: none;
+}
+
+p, li, td, th {
+  color: #d4d4d4;
 }
 
 a {
@@ -28,7 +42,13 @@ a:hover {
 
 code, pre {
   background-color: #1e1e1e;
-  color: #d4d4d4;
+  color: #ce9178;
+  border-color: #3c3c3c;
+}
+
+.language-plaintext.highlighter-rouge {
+  background-color: #333333;
+  color: #ce9178;
   border-color: #3c3c3c;
 }
 
@@ -55,8 +75,14 @@ blockquote {
 
 hr {
   border-color: #3c3c3c;
+  background-color: #3c3c3c;
 }
 
 strong {
   color: #e0e0e0;
+}
+
+#footer_wrap {
+  background-color: #1a1a1a;
+  border-top-color: #3c3c3c;
 }
