@@ -178,10 +178,10 @@ Configure file patterns per IDE (e.g., `*.sln;*.slnx`) in Settings. When a patte
 
 - **Fast search** — uses `git ls-files` for Git repos (respects .gitignore), falls back to directory walk with configurable ignored directories
 - **Depth-sorted** — shallowest matches shown first, up to 5 results
-- **Configurable exclusions** — manage ignored directories (node_modules, bin, obj, etc.) in the "IDE Search" settings tab
+- **Configurable exclusions** — manage ignored directories (node_modules, bin, obj, etc.) in the IDEs settings tab
 
 <p align="center">
-  <img src="images/settings-ide-search.png" alt="IDE Search settings tab with ignored directories" width="400">
+  <img src="images/custom-ide-setup.png" alt="IDE settings with IDEs and search ignored directories" width="400">
 </p>
 
 ---
@@ -255,6 +255,10 @@ Start a workspace directly from a GitHub PR number. Copilot Booster fetches the 
   <img src="images/create-workspace-from-pr.png" alt="Create workspace from a GitHub Pull Request" width="450">
 </p>
 
+#### From Issue #
+
+Start a workspace from a GitHub issue number. Copilot Booster creates a new branch based on a selected base branch, using the issue branch pattern configured in Settings (default: `issues/{number}-{alias}`). This lets you quickly spin up an isolated workspace to work on a specific issue.
+
 ---
 
 ### ⚙️ Settings
@@ -325,18 +329,10 @@ Whitelist URLs that Copilot CLI can access without prompting. These are stored i
 
 #### 💻 IDEs
 
-Register your favorite IDEs — Visual Studio, VS Code, Rider, Eclipse, or any editor with a command-line launcher. Each IDE entry includes a description, executable path, and optional file pattern (e.g., `*.sln;*.slnx`) for automatic project file discovery in the context menu.
+Register your favorite IDEs — Visual Studio, VS Code, Rider, Eclipse, or any editor with a command-line launcher. Each IDE entry includes a description, executable path, and optional file pattern (e.g., `*.sln;*.slnx`) for automatic project file discovery in the context menu. The IDE Search section lets you manage directories excluded from file pattern search (e.g., `node_modules`, `bin`, `obj`).
 
 <p align="center">
-  <img src="images/custom-ide-setup.png" alt="IDE settings with Add IDE dialog showing description, path, and file pattern" width="500">
-</p>
-
-#### 🔎 IDE Search
-
-Manage directories excluded from IDE file pattern search (e.g., `node_modules`, `bin`, `obj`).
-
-<p align="center">
-  <img src="images/settings-ide-search.png" alt="IDE Search settings tab with ignored directories" width="400">
+  <img src="images/custom-ide-setup.png" alt="IDE settings with IDEs table and search ignored directories" width="500">
 </p>
 
 #### 📑 Session Tabs
@@ -345,6 +341,22 @@ Configure custom session tabs — add, rename, remove, and reorder tabs. The fir
 
 <p align="center">
   <img src="images/settings-session-tabs.png" alt="Session Tabs settings with add, rename, remove, and reorder" width="500">
+</p>
+
+#### 🔀 Git & GitHub
+
+Configure branch naming patterns for issue and PR-based workspaces. Use `{number}` and `{alias}` as placeholders.
+
+<p align="center">
+  <img src="images/settings-git-github.png" alt="Git & GitHub settings with issue and PR branch patterns" width="500">
+</p>
+
+#### 🌐 Edge
+
+Configure Microsoft Edge integration — toggle whether renaming a session automatically updates the Edge anchor tab title.
+
+<p align="center">
+  <img src="images/settings-edge.png" alt="Edge settings with tab rename sync option" width="500">
 </p>
 
 ---
