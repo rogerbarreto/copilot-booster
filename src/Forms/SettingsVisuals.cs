@@ -89,7 +89,13 @@ internal static class SettingsVisuals
         {
             if (addBrowse)
             {
-                using var fbd = new FolderBrowserDialog { SelectedPath = Program._settings.DefaultWorkDir };
+                var initialDir = Program._settings.DefaultWorkDir;
+                if (!string.IsNullOrEmpty(initialDir) && !initialDir.EndsWith(Path.DirectorySeparatorChar))
+                {
+                    initialDir += Path.DirectorySeparatorChar;
+                }
+
+                using var fbd = new FolderBrowserDialog { SelectedPath = initialDir };
                 if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
                 {
                     if (!listBox.Items.Cast<string>().Any(x => string.Equals(x, fbd.SelectedPath, StringComparison.OrdinalIgnoreCase)))
