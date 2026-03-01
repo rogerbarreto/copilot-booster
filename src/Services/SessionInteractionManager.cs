@@ -13,16 +13,19 @@ internal class SessionInteractionManager
 {
     private readonly string _sessionStateDir;
     private readonly string _terminalCacheFile;
+    private readonly string _sessionStateFile;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionInteractionManager"/> class.
     /// </summary>
     /// <param name="sessionStateDir">Path to the directory containing session state.</param>
     /// <param name="terminalCacheFile">Path to the terminal cache JSON file.</param>
-    internal SessionInteractionManager(string sessionStateDir, string terminalCacheFile)
+    /// <param name="sessionStateFile">Path to the session states JSON file for archive/delete tracking.</param>
+    internal SessionInteractionManager(string sessionStateDir, string terminalCacheFile, string? sessionStateFile = null)
     {
         this._sessionStateDir = sessionStateDir;
         this._terminalCacheFile = terminalCacheFile;
+        this._sessionStateFile = sessionStateFile ?? Program.SessionStateFile;
     }
 
     /// <summary>
@@ -135,7 +138,7 @@ internal class SessionInteractionManager
     /// <param name="sessionId">The session ID to delete.</param>
     /// <returns><c>true</c> if the session was deleted; otherwise, <c>false</c>.</returns>
     /// <summary>
-    /// Soft-deletes a session by creating a workspace-deleted.yaml marker file.
+    /// Soft-deletes a session by marking it as deleted in the session state file.
     /// The session directory and all artifacts are preserved for potential recovery.
     /// </summary>
     internal bool DeleteSession(string sessionId)
@@ -148,7 +151,7 @@ internal class SessionInteractionManager
 
         try
         {
-            File.WriteAllText(Path.Combine(sessionDir, "workspace-deleted.yaml"), "");
+            SessionArchiveService.SetDeleted(this._sessionStateFile, sessionId);
             return true;
         }
         catch

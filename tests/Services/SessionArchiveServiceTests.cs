@@ -1,5 +1,12 @@
 ﻿public sealed class SessionArchiveServiceTests
 {
+    private static LauncherSettings CreateTestSettings()
+    {
+        var settings = LauncherSettings.CreateDefault();
+        settings.SuppressSave = true;
+        return settings;
+    }
+
     private string CreateTempFile()
     {
         var path = Path.Combine(Path.GetTempPath(), $"archive-test-{Guid.NewGuid()}.json");
@@ -319,7 +326,7 @@
         };
 
         // DefaultTab is still "Active" — tab order doesn't matter
-        MainForm.ApplySessionStates(sessions, states, "Active");
+        MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         // The existing session keeps its explicit "Active" tab
         Assert.Equal("Active", sessions[1].Tab);
@@ -343,7 +350,7 @@
         };
 
         // DefaultTab is "Active" regardless of tab order
-        MainForm.ApplySessionStates(sessions, states, "Active");
+        MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         Assert.Equal("Active", sessions[0].Tab);
     }
@@ -364,7 +371,7 @@
         var states = new Dictionary<string, SessionArchiveService.SessionState>();
 
         // DefaultTab tracks the rename
-        MainForm.ApplySessionStates(sessions, states, renamedFirst);
+        MainForm.ApplySessionStates(sessions, states, renamedFirst, CreateTestSettings());
 
         Assert.Equal(renamedFirst, sessions[0].Tab);
     }
@@ -388,7 +395,7 @@
             ["legacy"] = new() { Tab = "" }
         };
 
-        MainForm.ApplySessionStates(sessions, states, renamedFirst);
+        MainForm.ApplySessionStates(sessions, states, renamedFirst, CreateTestSettings());
 
         Assert.Equal(renamedFirst, sessions[0].Tab);
     }
@@ -410,7 +417,7 @@
         var states = new Dictionary<string, SessionArchiveService.SessionState>();
 
         // DefaultTab is renamedFirst regardless of position
-        MainForm.ApplySessionStates(sessions, states, renamedFirst);
+        MainForm.ApplySessionStates(sessions, states, renamedFirst, CreateTestSettings());
 
         Assert.Equal(renamedFirst, sessions[0].Tab);
     }
@@ -446,7 +453,7 @@
         };
 
         // Apply with original order
-        MainForm.ApplySessionStates(sessions, states, "Active");
+        MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         // Verify initial assignment
         Assert.All(sessions.Where(s => s.Id.StartsWith("a")), s => Assert.Equal("Active", s.Tab));
@@ -460,7 +467,7 @@
             s.Tab = null!;
         }
 
-        MainForm.ApplySessionStates(sessions, states, "Active");
+        MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         Assert.All(sessions.Where(s => s.Id.StartsWith("a")), s => Assert.Equal("Active", s.Tab));
         Assert.All(sessions.Where(s => s.Id.StartsWith("w")), s => Assert.Equal("Work", s.Tab));
@@ -500,7 +507,7 @@
             ["p2"] = new() { Tab = "Personal" },
         };
 
-        MainForm.ApplySessionStates(sessions, states, "Active");
+        MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         // Regardless of tab order, filtering by name returns the right sessions
         foreach (var tabName in tabOrder)
@@ -543,7 +550,7 @@
         };
 
         // DefaultTab is "Active" — untagged sessions go there
-        MainForm.ApplySessionStates(sessions, states, "Active");
+        MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         Assert.Equal("Work", sessions[0].Tab);
         Assert.Equal("Personal", sessions[1].Tab);
@@ -557,7 +564,7 @@
             s.Tab = null!;
         }
 
-        MainForm.ApplySessionStates(sessions, states, "Main");
+        MainForm.ApplySessionStates(sessions, states, "Main", CreateTestSettings());
 
         // Tagged sessions keep their tabs
         Assert.Equal("Work", sessions[0].Tab);

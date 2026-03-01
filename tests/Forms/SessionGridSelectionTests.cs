@@ -1,8 +1,10 @@
 ﻿public sealed class SessionGridSelectionTests
 {
-    public SessionGridSelectionTests()
+    private static LauncherSettings CreateTestSettings()
     {
-        Program._settings ??= LauncherSettings.CreateDefault();
+        var settings = LauncherSettings.CreateDefault();
+        settings.SuppressSave = true;
+        return settings;
     }
 
     private static ActiveStatusSnapshot MakeSnapshot(params string[] runningIds)
@@ -46,7 +48,7 @@
         grid.Columns.Add("Active", "Active");
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // Initial state: session-A (newest), session-B, session-C (oldest) — none running
         var sessions = MakeSessions(("session-A", 0), ("session-B", 1), ("session-C", 2));
@@ -102,7 +104,7 @@
         grid.Columns.Add("Active", "Active");
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // Initial: 3 sessions, none running
         var sessions = MakeSessions(("s1", 0), ("s2", 1), ("s3", 2));
@@ -149,7 +151,7 @@
         form.Show();
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // 5 sessions, none running
         var sessions = MakeSessions(
@@ -212,7 +214,7 @@
         form.Show();
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // 5 sessions, none running
         var sessions = MakeSessions(
@@ -274,7 +276,7 @@
         form.Show();
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // Create enough sessions to require scrolling (small form, many rows)
         var items = Enumerable.Range(1, 30)
@@ -321,7 +323,7 @@
         grid.Columns.Add("Active", "Active");
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // Populate with no prior selection (simulates first load or tab switch)
         var sessions = MakeSessions(("s1", 0), ("s2", 1), ("s3", 2));
@@ -348,7 +350,7 @@
         grid.Columns.Add("Active", "Active");
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         // First tab: select session-A
         var tabASessions = MakeSessions(("session-A", 0), ("session-B", 1));

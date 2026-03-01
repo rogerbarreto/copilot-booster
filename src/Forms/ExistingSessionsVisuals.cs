@@ -19,6 +19,8 @@ namespace CopilotBooster.Forms;
 internal class ExistingSessionsVisuals
 {
     private Image? _teamsIcon;
+    private bool _suppressColumnOrderSave;
+    private readonly LauncherSettings _settings;
 
     internal TextBox SearchBox = null!;
     internal DataGridView SessionGrid = null!;
@@ -42,7 +44,7 @@ internal class ExistingSessionsVisuals
         get
         {
             var tag = this.SessionTabs.SelectedTab?.Tag as string;
-            return tag ?? Program._settings.SessionTabs[0];
+            return tag ?? this._settings.SessionTabs[0];
         }
     }
 
@@ -131,11 +133,12 @@ internal class ExistingSessionsVisuals
     /// </summary>
     internal Func<string, (string? cwd, string? gitRoot)>? GetSessionPaths;
 
-    internal ExistingSessionsVisuals(Control parentControl, ActiveStatusTracker activeTracker)
+    internal ExistingSessionsVisuals(Control parentControl, ActiveStatusTracker activeTracker, LauncherSettings? settings = null)
     {
+        this._settings = settings ?? Program._settings;
         this.InitializeSessionGrid();
         var searchPanel = this.BuildSearchPanel();
-        this.GridVisuals = new SessionGridVisuals(this.SessionGrid, activeTracker);
+        this.GridVisuals = new SessionGridVisuals(this.SessionGrid, activeTracker, this._settings);
         this.BuildGridContextMenu();
 
         // Dynamic session tabs from settings — reduced padding keeps the "+" tab compact
@@ -159,12 +162,14 @@ internal class ExistingSessionsVisuals
             }
 
             // Move the grid to the newly selected tab
+            this._suppressColumnOrderSave = true;
             selectedTab.Controls.Add(this.SessionGrid);
+            this._suppressColumnOrderSave = false;
             this.OnTabChanged?.Invoke();
         };
         this.SessionTabs.TabReordered += (s, e) =>
         {
-            var tabs = Program._settings.SessionTabs;
+            var tabs = this._settings.SessionTabs;
             if (e.OldIndex < 0 || e.OldIndex >= tabs.Count || e.NewIndex < 0 || e.NewIndex >= tabs.Count)
             {
                 return;
@@ -173,7 +178,7 @@ internal class ExistingSessionsVisuals
             var tab = tabs[e.OldIndex];
             tabs.RemoveAt(e.OldIndex);
             tabs.Insert(e.NewIndex, tab);
-            Program._settings.Save();
+            this._settings.Save();
             this.BuildSessionTabs();
             this.OnTabChanged?.Invoke();
         };
@@ -266,7 +271,7 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["Session"]!.MinimumWidth = 100;
         this.SessionGrid.Columns["CWD"]!.Width = 100;
         this.SessionGrid.Columns["CWD"]!.MinimumWidth = 60;
-        var dateWidth = GetDateColumnWidth(Program._settings.DateFormat, this.SessionGrid.Font);
+        var dateWidth = GetDateColumnWidth(this._settings.DateFormat, this.SessionGrid.Font);
         this.SessionGrid.Columns["Date"]!.Width = dateWidth;
         this.SessionGrid.Columns["Date"]!.MinimumWidth = dateWidth;
         this.SessionGrid.Columns["Date"]!.Resizable = DataGridViewTriState.False;
@@ -275,7 +280,7 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
 
         // Restore saved column display order
-        var savedOrder = Program._settings.SessionColumnOrder;
+        var savedOrder = this._settings.SessionColumnOrder;
         if (savedOrder.Count > 0)
         {
             // Default column order (non-frozen) for inserting new columns at correct positions
@@ -318,7 +323,7 @@ internal class ExistingSessionsVisuals
         bool savingColumnOrder = false;
         this.SessionGrid.ColumnDisplayIndexChanged += (s, e) =>
         {
-            if (savingColumnOrder)
+            if (savingColumnOrder || this._suppressColumnOrderSave)
             {
                 return;
             }
@@ -331,8 +336,8 @@ internal class ExistingSessionsVisuals
                     .OrderBy(c => c.DisplayIndex)
                     .Select(c => c.Name)
                     .ToList();
-                Program._settings.SessionColumnOrder = order;
-                Program._settings.Save();
+                this._settings.SessionColumnOrder = order;
+                this._settings.Save();
                 savingColumnOrder = false;
             });
         };
@@ -542,6 +547,23 @@ internal class ExistingSessionsVisuals
         const string DragFormat = "CopilotBooster.SessionIds";
         Point dragStart = Point.Empty;
         bool dragInitiated = false;
+        List<int> preservedSelection = [];
+
+        // Capture multi-selection before the grid clears it on left-click
+        this.SessionGrid.CellMouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Left && e.RowIndex >= 0
+                && this.SessionGrid.SelectedRows.Count > 1
+                && this.SessionGrid.Rows[e.RowIndex].Selected)
+            {
+                preservedSelection = this.SessionGrid.SelectedRows
+                    .Cast<DataGridViewRow>().Select(r => r.Index).ToList();
+            }
+            else
+            {
+                preservedSelection = [];
+            }
+        };
 
         // Initiate drag from grid rows
         this.SessionGrid.MouseDown += (s, e) =>
@@ -569,6 +591,20 @@ internal class ExistingSessionsVisuals
                 return;
             }
 
+            // Restore multi-selection that the grid cleared on MouseDown
+            if (preservedSelection.Count > 1)
+            {
+                foreach (var idx in preservedSelection)
+                {
+                    if (idx >= 0 && idx < this.SessionGrid.Rows.Count)
+                    {
+                        this.SessionGrid.Rows[idx].Selected = true;
+                    }
+                }
+
+                preservedSelection = [];
+            }
+
             var ids = this.GridVisuals.GetSelectedSessionIds();
             if (ids.Count > 0)
             {
@@ -583,6 +619,7 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.MouseUp += (s, e) =>
         {
             dragStart = Point.Empty;
+            preservedSelection = [];
         };
 
         // Accept drop on session tabs
@@ -888,9 +925,9 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenCwdExplorer);
 
-        if (Program._settings.Ides.Count > 0)
+        if (this._settings.Ides.Count > 0)
         {
-            foreach (var ide in Program._settings.Ides)
+            foreach (var ide in this._settings.Ides)
             {
                 var capturedIde = ide;
                 var ideIcon = TryGetExeIcon(ide.Path);
@@ -1005,7 +1042,7 @@ internal class ExistingSessionsVisuals
             // "Move to" submenu — show all tabs except current
             menuMoveToTab.DropDownItems.Clear();
             var currentTab = this.SelectedTabName;
-            foreach (var tabName in Program._settings.SessionTabs)
+            foreach (var tabName in this._settings.SessionTabs)
             {
                 if (string.Equals(tabName, currentTab, StringComparison.OrdinalIgnoreCase))
                 {
@@ -1106,7 +1143,7 @@ internal class ExistingSessionsVisuals
 
     private void AddFileSearchResults(ToolStripMenuItem parentItem, IdeEntry ide, string directory, string sid, Image? icon)
     {
-        var files = IdeFileSearchService.Search(directory, ide.FilePattern, Program._settings.IdeSearchIgnoredDirs);
+        var files = IdeFileSearchService.Search(directory, ide.FilePattern, this._settings.IdeSearchIgnoredDirs);
         if (files.Count > 0)
         {
             parentItem.DropDownItems.Add(new ToolStripSeparator());
@@ -1143,14 +1180,14 @@ internal class ExistingSessionsVisuals
         var previousTab = this.SessionTabs.SelectedTab?.Tag as string;
         this.SessionTabs.TabPages.Clear();
 
-        foreach (var tabName in Program._settings.SessionTabs)
+        foreach (var tabName in this._settings.SessionTabs)
         {
             var page = new TabPage(tabName) { Tag = tabName, UseVisualStyleBackColor = true };
             this.SessionTabs.TabPages.Add(page);
         }
 
         // Add the "+" tab for quick tab creation
-        if (Program._settings.SessionTabs.Count < Program._settings.MaxSessionTabs)
+        if (this._settings.SessionTabs.Count < this._settings.MaxSessionTabs)
         {
             var addPage = new TabPage("+") { ToolTipText = "Add a new tab", UseVisualStyleBackColor = true };
             this.SessionTabs.TabPages.Add(addPage);
@@ -1174,15 +1211,17 @@ internal class ExistingSessionsVisuals
             (this.SessionTabs.TabPages.Count > 0 ? this.SessionTabs.TabPages[0] : null);
         if (targetTab != null && targetTab.Tag != null)
         {
+            this._suppressColumnOrderSave = true;
             targetTab.Controls.Add(this.SessionGrid);
+            this._suppressColumnOrderSave = false;
         }
     }
 
     private void PromptAddTab()
     {
-        if (Program._settings.SessionTabs.Count >= Program._settings.MaxSessionTabs)
+        if (this._settings.SessionTabs.Count >= this._settings.MaxSessionTabs)
         {
-            MessageBox.Show($"Maximum of {Program._settings.MaxSessionTabs} tabs allowed.", "Limit Reached", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show($"Maximum of {this._settings.MaxSessionTabs} tabs allowed.", "Limit Reached", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -1198,14 +1237,14 @@ internal class ExistingSessionsVisuals
             name = name[..20];
         }
 
-        if (Program._settings.SessionTabs.Any(t => string.Equals(t, name, StringComparison.OrdinalIgnoreCase)))
+        if (this._settings.SessionTabs.Any(t => string.Equals(t, name, StringComparison.OrdinalIgnoreCase)))
         {
             MessageBox.Show("A tab with that name already exists.", "Duplicate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        Program._settings.SessionTabs.Add(name);
-        Program._settings.Save();
+        this._settings.SessionTabs.Add(name);
+        this._settings.Save();
         this.SessionTabs.SuspendLayout();
         this.BuildSessionTabs();
 

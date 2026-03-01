@@ -192,13 +192,49 @@ internal class SessionService
     private static readonly Dictionary<string, bool> s_gitRepoCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Migrates sessions with workspace-deleted.yaml marker files to the cache-based soft-delete approach.
+    /// Runs once and sets <see cref="LauncherSettings.MigratedDeleteMarkers"/> to prevent re-running.
+    /// </summary>
+    internal static void MigrateDeleteMarkers(string sessionStateDir, string sessionStateFile, LauncherSettings settings)
+    {
+        if (!Directory.Exists(sessionStateDir))
+        {
+            return;
+        }
+
+        int migrated = 0;
+        foreach (var dir in Directory.GetDirectories(sessionStateDir))
+        {
+            var markerFile = Path.Combine(dir, "workspace-deleted.yaml");
+            if (File.Exists(markerFile))
+            {
+                var sessionId = Path.GetFileName(dir);
+                if (!SessionArchiveService.IsDeleted(sessionStateFile, sessionId))
+                {
+                    SessionArchiveService.SetDeleted(sessionStateFile, sessionId);
+                    migrated++;
+                }
+            }
+        }
+
+        if (migrated > 0)
+        {
+            Program.Logger.LogInformation("Migrated {Count} deleted session marker(s) to cache", migrated);
+        }
+
+        settings.MigratedDeleteMarkers = true;
+        settings.Save();
+    }
+
+    /// <summary>
     /// Loads named sessions from the session state directory, ordered by most recently modified.
     /// Automatically deletes empty sessions (no events.jsonl) that are not currently active.
     /// </summary>
     /// <param name="sessionStateDir">Path to the directory containing session state.</param>
     /// <param name="pidRegistryFile">Path to the PID registry JSON file for active session detection.</param>
+    /// <param name="sessionStateFile">Path to the session states JSON file for delete tracking.</param>
     /// <returns>A list of named sessions with summaries.</returns>
-    internal static List<NamedSession> LoadNamedSessions(string sessionStateDir, string? pidRegistryFile = null)
+    internal static List<NamedSession> LoadNamedSessions(string sessionStateDir, string? pidRegistryFile = null, string? sessionStateFile = null)
     {
         var profiling = Program.Logger.IsEnabled(LogLevel.Debug);
         var totalSw = profiling ? Stopwatch.StartNew() : null;
@@ -229,12 +265,15 @@ internal class SessionService
         long gitTotalMs = 0;
         int deletedCount = 0;
 
+        var deletedIds = SessionArchiveService.GetDeletedIds(sessionStateFile ?? Program.SessionStateFile);
+
         sw?.Restart();
         var sessions = sortedDirs
             .Select(d =>
             {
                 var wsFile = Path.Combine(d, "workspace.yaml");
-                if (!File.Exists(wsFile) || File.Exists(Path.Combine(d, "workspace-deleted.yaml")))
+                var sessionDirName = Path.GetFileName(d);
+                if (!File.Exists(wsFile) || deletedIds.Contains(sessionDirName))
                 {
                     return null;
                 }

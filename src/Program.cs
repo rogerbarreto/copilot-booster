@@ -233,6 +233,12 @@ internal class Program
         // Perform one-time migration of files from old location
         MigrateFromCopilotDir();
 
+        // Migrate workspace-deleted.yaml markers to cache-based soft-delete
+        if (!_settings.MigratedDeleteMarkers)
+        {
+            SessionService.MigrateDeleteMarkers(SessionStateDir, SessionStateFile, _settings);
+        }
+
         Logger.LogInformation("Launcher started");
 
         Application.EnableVisualStyles();

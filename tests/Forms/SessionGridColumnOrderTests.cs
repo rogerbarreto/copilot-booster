@@ -1,10 +1,5 @@
 ﻿public sealed class SessionGridColumnOrderTests
 {
-    public SessionGridColumnOrderTests()
-    {
-        Program._settings ??= LauncherSettings.CreateDefault();
-    }
-
     private static ActiveStatusSnapshot MakeSnapshot(params string[] runningIds)
     {
         var active = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -59,19 +54,22 @@
         return grid;
     }
 
+    private static LauncherSettings CreateTestSettings()
+    {
+        var settings = LauncherSettings.CreateDefault();
+        settings.SuppressSave = true;
+        return settings;
+    }
+
     [StaFact]
     public void Populate_WorksCorrectly_WhenColumnsHaveCustomDisplayIndex()
     {
         var grid = CreateSessionGrid();
-
-        // Rearrange columns: move CWD to after Date
-        // Default DisplayIndex: Status=0, Session=1, CWD=2, Date=3, RunningApps=4
-        // New:                  Status=0, Session=1, Date=2, CWD=3, RunningApps=4
         grid.Columns["Date"]!.DisplayIndex = 2;
         grid.Columns["CWD"]!.DisplayIndex = 3;
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         var sessions = MakeSessions(("s1", 0), ("s2", 1), ("s3", 2));
         var snapshot = MakeSnapshot();
@@ -117,7 +115,7 @@
         form.Show();
 
         var tracker = new ActiveStatusTracker();
-        var visuals = new SessionGridVisuals(grid, tracker);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
 
         var sessions = MakeSessions(("s1", 0), ("s2", 1), ("s3", 2));
         var snapshot = MakeSnapshot();
@@ -142,6 +140,73 @@
         // Column order should be preserved
         Assert.Equal(1, grid.Columns["RunningApps"]!.DisplayIndex);
 
+        form.Close();
+    }
+
+    [StaFact]
+    public void ColumnOrder_PreservedAcrossTabSwitch()
+    {
+        var settings = CreateTestSettings();
+        settings.SessionTabs = ["Active", "Done", "Archived"];
+        settings.SessionColumnOrder = ["CWD", "Session", "Date", "RunningApps"];
+
+        using var form = new Form { Width = 800, Height = 400 };
+        var panel = new Panel { Dock = DockStyle.Fill };
+        form.Controls.Add(panel);
+
+        var grid = CreateSessionGrid();
+        grid.Dock = DockStyle.Fill;
+        panel.Controls.Add(grid);
+        form.Show();
+
+        var tracker = new ActiveStatusTracker();
+        var visuals = new ExistingSessionsVisuals(panel, tracker, settings);
+
+        visuals.SessionGrid.Columns["CWD"]!.DisplayIndex = 1;
+        visuals.SessionGrid.Columns["Session"]!.DisplayIndex = 2;
+
+        int cwdBefore = visuals.SessionGrid.Columns["CWD"]!.DisplayIndex;
+        int sessionBefore = visuals.SessionGrid.Columns["Session"]!.DisplayIndex;
+
+        // Switch to "Done" tab (reparents grid)
+        visuals.SessionTabs.SelectedIndex = 1;
+
+        Assert.Equal(cwdBefore, visuals.SessionGrid.Columns["CWD"]!.DisplayIndex);
+        Assert.Equal(sessionBefore, visuals.SessionGrid.Columns["Session"]!.DisplayIndex);
+        form.Close();
+    }
+
+    [StaFact]
+    public void ColumnOrder_PreservedAcrossBuildSessionTabs()
+    {
+        var settings = CreateTestSettings();
+        settings.SessionTabs = ["Active", "Archived"];
+        settings.SessionColumnOrder = ["CWD", "Session", "Date", "RunningApps"];
+
+        using var form = new Form { Width = 800, Height = 400 };
+        var panel = new Panel { Dock = DockStyle.Fill };
+        form.Controls.Add(panel);
+
+        var grid = CreateSessionGrid();
+        grid.Dock = DockStyle.Fill;
+        panel.Controls.Add(grid);
+        form.Show();
+
+        var tracker = new ActiveStatusTracker();
+        var visuals = new ExistingSessionsVisuals(panel, tracker, settings);
+
+        visuals.SessionGrid.Columns["CWD"]!.DisplayIndex = 1;
+        visuals.SessionGrid.Columns["Session"]!.DisplayIndex = 2;
+
+        int cwdBefore = visuals.SessionGrid.Columns["CWD"]!.DisplayIndex;
+        int sessionBefore = visuals.SessionGrid.Columns["Session"]!.DisplayIndex;
+
+        // Rebuild tabs (adds a new tab, reparents grid)
+        settings.SessionTabs = ["Active", "Archived", "Work"];
+        visuals.BuildSessionTabs();
+
+        Assert.Equal(cwdBefore, visuals.SessionGrid.Columns["CWD"]!.DisplayIndex);
+        Assert.Equal(sessionBefore, visuals.SessionGrid.Columns["Session"]!.DisplayIndex);
         form.Close();
     }
 }

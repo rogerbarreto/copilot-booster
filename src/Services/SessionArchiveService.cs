@@ -25,6 +25,10 @@ internal static class SessionArchiveService
         [JsonPropertyName("IsPinned")]
         public bool IsPinned { get; set; }
 
+        [JsonPropertyName("IsDeleted")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool IsDeleted { get; set; }
+
         /// <summary>
         /// Legacy property for backward compatibility. Writing always uses <see cref="Tab"/>.
         /// </summary>
@@ -149,6 +153,44 @@ internal static class SessionArchiveService
     }
 
     /// <summary>
+    /// Marks a session as soft-deleted.
+    /// </summary>
+    internal static void SetDeleted(string stateFile, string sessionId)
+    {
+        var states = Load(stateFile);
+        var state = GetOrCreate(states, sessionId);
+        state.IsDeleted = true;
+        Save(stateFile, states);
+    }
+
+    /// <summary>
+    /// Returns whether a session is soft-deleted.
+    /// </summary>
+    internal static bool IsDeleted(string stateFile, string sessionId)
+    {
+        var states = Load(stateFile);
+        return states.TryGetValue(sessionId, out var state) && state.IsDeleted;
+    }
+
+    /// <summary>
+    /// Returns the set of all soft-deleted session IDs.
+    /// </summary>
+    internal static HashSet<string> GetDeletedIds(string stateFile)
+    {
+        var states = Load(stateFile);
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, state) in states)
+        {
+            if (state.IsDeleted)
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>
     /// Renames a tab across all session states.
     /// </summary>
     internal static void RenameTab(string stateFile, string oldName, string newName)
@@ -201,7 +243,8 @@ internal static class SessionArchiveService
     private static void CleanupIfDefault(Dictionary<string, SessionState> states, string sessionId, SessionState state, string defaultTab)
     {
         if ((string.IsNullOrEmpty(state.Tab) || string.Equals(state.Tab, defaultTab, StringComparison.OrdinalIgnoreCase))
-            && !state.IsPinned)
+            && !state.IsPinned
+            && !state.IsDeleted)
         {
             states.Remove(sessionId);
         }

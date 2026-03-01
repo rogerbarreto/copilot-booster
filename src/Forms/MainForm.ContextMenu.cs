@@ -390,7 +390,6 @@ internal partial class MainForm
                 {
                     if (this._interactionManager.DeleteSession(sid))
                     {
-                        SessionArchiveService.Remove(Program.SessionStateFile, sid);
                         this._cachedSessions.RemoveAll(x => x.Id == sid);
                         this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
                     }

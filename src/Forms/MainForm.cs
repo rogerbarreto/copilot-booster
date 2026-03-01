@@ -927,14 +927,24 @@ internal partial class MainForm : Form
     private void ApplySessionStates(List<NamedSession> sessions)
     {
         var states = SessionArchiveService.Load(Program.SessionStateFile);
-        ApplySessionStates(sessions, states, Program._settings.DefaultTab);
+        var tabCountBefore = Program._settings.SessionTabs.Count;
+        ApplySessionStates(sessions, states, Program._settings.DefaultTab, Program._settings);
+
+        // If missing tabs were auto-recovered, rebuild the tab UI
+        if (Program._settings.SessionTabs.Count > tabCountBefore)
+        {
+            this._sessionsVisuals.BuildSessionTabs();
+        }
     }
 
     /// <summary>
     /// Core logic for applying tab/pin states — extracted for testability.
     /// </summary>
-    internal static void ApplySessionStates(List<NamedSession> sessions, Dictionary<string, SessionArchiveService.SessionState> states, string defaultTab)
+    internal static void ApplySessionStates(List<NamedSession> sessions, Dictionary<string, SessionArchiveService.SessionState> states, string defaultTab, LauncherSettings settings, bool persistChanges = true)
     {
+        var tabSet = new HashSet<string>(settings.SessionTabs, StringComparer.OrdinalIgnoreCase);
+        bool tabsChanged = false;
+
         foreach (var session in sessions)
         {
             if (states.TryGetValue(session.Id, out var state))
@@ -946,6 +956,20 @@ internal partial class MainForm : Form
             {
                 session.Tab = defaultTab;
             }
+
+            // Auto-recover tabs referenced by sessions but missing from settings
+            if (!tabSet.Contains(session.Tab))
+            {
+                settings.SessionTabs.Add(session.Tab);
+                tabSet.Add(session.Tab);
+                tabsChanged = true;
+            }
+        }
+
+        if (tabsChanged && persistChanges)
+        {
+            Program.Logger.LogInformation("Auto-recovered missing session tabs from session state data");
+            settings.Save();
         }
     }
 

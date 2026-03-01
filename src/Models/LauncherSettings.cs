@@ -192,6 +192,13 @@ internal class LauncherSettings
     public bool SpotlightAutoHide { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets whether the workspace-deleted.yaml marker file migration has been completed.
+    /// When <c>true</c>, deleted sessions have been migrated to the cache-based soft-delete approach.
+    /// </summary>
+    [JsonPropertyName("migratedDeleteMarkers")]
+    public bool MigratedDeleteMarkers { get; set; }
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).
@@ -229,6 +236,11 @@ internal class LauncherSettings
     }
 
     /// <summary>
+    /// When true, <see cref="Save()"/> is a no-op. Used by tests to prevent writes to the real settings file.
+    /// </summary>
+    internal bool SuppressSave { get; set; }
+
+    /// <summary>
     /// Saves the current settings to the default settings file.
     /// </summary>
     public void Save() => this.Save(s_settingsFile);
@@ -239,6 +251,11 @@ internal class LauncherSettings
     /// <param name="settingsFile">The path to write the settings JSON file.</param>
     internal void Save(string settingsFile)
     {
+        if (this.SuppressSave)
+        {
+            return;
+        }
+
         try
         {
             var dir = Path.GetDirectoryName(settingsFile)!;

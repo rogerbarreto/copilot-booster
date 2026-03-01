@@ -35,6 +35,7 @@ internal class SessionGridVisuals
         : Color.FromArgb(240, 160, 160);
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
+    private readonly LauncherSettings _settings;
     private readonly Image[] _spinnerFrames;
     private readonly Image _bellImage;
     private readonly Image? _filesIcon;
@@ -57,10 +58,11 @@ internal class SessionGridVisuals
     /// <summary>Fired when the user clicks a file in the context files popup.</summary>
     internal event Action<string>? OnOpenFile;
 
-    internal SessionGridVisuals(DataGridView grid, ActiveStatusTracker activeTracker)
+    internal SessionGridVisuals(DataGridView grid, ActiveStatusTracker activeTracker, LauncherSettings? settings = null)
     {
         this._grid = grid;
         this._activeTracker = activeTracker;
+        this._settings = settings ?? Program._settings;
 
         var asm = typeof(SessionGridVisuals).Assembly;
         this._spinnerFrames = new Image[8];
@@ -318,7 +320,7 @@ internal class SessionGridVisuals
 
             foreach (var session in displayed)
             {
-                var dateText = session.LastModified.ToString(Program._settings.DateFormat);
+                var dateText = session.LastModified.ToString(this._settings.DateFormat);
                 var cwdText = session.Folder;
                 if (session.IsGitRepo)
                 {
