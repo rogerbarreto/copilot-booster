@@ -24,6 +24,22 @@ internal static class SettingsVisuals
     /// </summary>
     internal static string StripNotFoundPrefix(string path) =>
         path.StartsWith(NotFoundPrefix, StringComparison.Ordinal) ? path[NotFoundPrefix.Length..] : path;
+
+    /// <summary>
+    /// Returns a validated directory path for use as the initial directory in a folder browser dialog.
+    /// Returns an empty string if the path is null, empty, whitespace, or does not exist.
+    /// </summary>
+    internal static string GetBrowseInitialDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "";
+        }
+
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return Directory.Exists(trimmed) ? trimmed : "";
+    }
+
     /// <summary>
     /// Wraps a <see cref="TextBox"/> in a <see cref="Panel"/> that provides a themed border.
     /// The text box is set to <see cref="BorderStyle.None"/> and fills the panel interior.
@@ -89,13 +105,7 @@ internal static class SettingsVisuals
         {
             if (addBrowse)
             {
-                var initialDir = Program._settings.DefaultWorkDir;
-                if (!string.IsNullOrEmpty(initialDir) && !initialDir.EndsWith(Path.DirectorySeparatorChar))
-                {
-                    initialDir += Path.DirectorySeparatorChar;
-                }
-
-                using var fbd = new FolderBrowserDialog { SelectedPath = initialDir };
+                using var fbd = new FolderBrowserDialog { InitialDirectory = GetBrowseInitialDirectory(Program._settings.DefaultWorkDir) };
                 if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
                 {
                     if (!listBox.Items.Cast<string>().Any(x => string.Equals(x, fbd.SelectedPath, StringComparison.OrdinalIgnoreCase)))
