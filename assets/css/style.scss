@@ -1,0 +1,62 @@
+---
+---
+
+@import "jekyll-theme-slate";
+
+body {
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+}
+
+#main_content {
+  background-color: #252526;
+  color: #d4d4d4;
+  border-color: #3c3c3c;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: #e0e0e0;
+}
+
+a {
+  color: #4ec9b0;
+}
+
+a:hover {
+  color: #6ed7c0;
+}
+
+code, pre {
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+  border-color: #3c3c3c;
+}
+
+table {
+  border-color: #3c3c3c;
+}
+
+table th {
+  background-color: #333333;
+  color: #e0e0e0;
+  border-color: #3c3c3c;
+}
+
+table td {
+  background-color: #2d2d2d;
+  color: #d4d4d4;
+  border-color: #3c3c3c;
+}
+
+blockquote {
+  border-left-color: #4ec9b0;
+  color: #9a9a9a;
+}
+
+hr {
+  border-color: #3c3c3c;
+}
+
+strong {
+  color: #e0e0e0;
+}
