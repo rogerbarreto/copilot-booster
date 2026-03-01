@@ -257,7 +257,11 @@ Start a workspace directly from a GitHub PR number. Copilot Booster fetches the 
 
 #### From Issue #
 
-Start a workspace from a GitHub issue number. Copilot Booster creates a new branch based on a selected base branch, using the issue branch pattern configured in Settings (default: `issues/{number}-{alias}`). This lets you quickly spin up an isolated workspace to work on a specific issue.
+Start a workspace from a GitHub issue number. Enter the issue number, click **Check** to fetch the title, and optionally use it as the session name. Pick a base branch and Copilot Booster creates a new branch using the issue branch pattern configured in Settings (default: `issues/{number}-{alias}`).
+
+<p align="center">
+  <img src="images/create-workspace-from-issue.png" alt="Create workspace from a GitHub Issue" width="450">
+</p>
 
 ---
 
