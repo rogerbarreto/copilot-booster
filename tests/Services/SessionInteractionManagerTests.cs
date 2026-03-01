@@ -14,7 +14,7 @@
     }
 
     [Fact]
-    public void DeleteSession_RenamesWorkspaceFile_ReturnsTrue()
+    public void DeleteSession_CreatesMarkerFile_ReturnsTrue()
     {
         var sessionId = "session-1";
         var sessionDir = Path.Combine(this._tempDir, sessionId);
@@ -26,7 +26,7 @@
 
         Assert.True(result);
         Assert.True(File.Exists(Path.Combine(sessionDir, "workspace-deleted.yaml")));
-        Assert.False(File.Exists(Path.Combine(sessionDir, "workspace.yaml")));
+        Assert.True(File.Exists(Path.Combine(sessionDir, "workspace.yaml")));
     }
 
     [Fact]
@@ -39,7 +39,7 @@
     }
 
     [Fact]
-    public void DeleteSession_SessionWithoutWorkspaceYaml_ReturnsFalse()
+    public void DeleteSession_SessionWithoutWorkspaceYaml_StillCreatesMarker()
     {
         var sessionId = "session-no-yaml";
         var sessionDir = Path.Combine(this._tempDir, sessionId);
@@ -49,7 +49,45 @@
         var manager = new SessionInteractionManager(this._tempDir, "unused.json");
         var result = manager.DeleteSession(sessionId);
 
-        Assert.False(result);
+        Assert.True(result);
+        Assert.True(File.Exists(Path.Combine(sessionDir, "workspace-deleted.yaml")));
+    }
+
+    [Fact]
+    public void DeleteSession_AlreadyDeleted_ReturnsTrue()
+    {
+        var sessionId = "session-already-deleted";
+        var sessionDir = Path.Combine(this._tempDir, sessionId);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"), "cwd: /tmp");
+        File.WriteAllText(Path.Combine(sessionDir, "workspace-deleted.yaml"), "");
+
+        var manager = new SessionInteractionManager(this._tempDir, "unused.json");
+        var result = manager.DeleteSession(sessionId);
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void LoadSessions_ExcludesDeletedSessions()
+    {
+        // Active session — has workspace.yaml, no marker
+        var activeDir = Path.Combine(this._tempDir, "active-session");
+        Directory.CreateDirectory(activeDir);
+        File.WriteAllText(Path.Combine(activeDir, "workspace.yaml"), "id: active-session\ncwd: /tmp\nsummary: Active");
+        File.WriteAllText(Path.Combine(activeDir, "events.jsonl"), "{}");
+
+        // Deleted session — has both workspace.yaml and workspace-deleted.yaml
+        var deletedDir = Path.Combine(this._tempDir, "deleted-session");
+        Directory.CreateDirectory(deletedDir);
+        File.WriteAllText(Path.Combine(deletedDir, "workspace.yaml"), "id: deleted-session\ncwd: /tmp\nsummary: Deleted");
+        File.WriteAllText(Path.Combine(deletedDir, "events.jsonl"), "{}");
+        File.WriteAllText(Path.Combine(deletedDir, "workspace-deleted.yaml"), "");
+
+        var sessions = SessionService.LoadNamedSessions(this._tempDir);
+
+        Assert.Single(sessions);
+        Assert.Equal("active-session", sessions[0].Id);
     }
 
     [Fact]

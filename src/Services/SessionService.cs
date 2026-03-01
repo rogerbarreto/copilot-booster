@@ -234,7 +234,7 @@ internal class SessionService
             .Select(d =>
             {
                 var wsFile = Path.Combine(d, "workspace.yaml");
-                if (!File.Exists(wsFile))
+                if (!File.Exists(wsFile) || File.Exists(Path.Combine(d, "workspace-deleted.yaml")))
                 {
                     return null;
                 }
