@@ -178,6 +178,8 @@ internal class ExistingSessionsVisuals
             this.OnTabChanged?.Invoke();
         };
 
+        this.SetupDragToTab();
+
         this.LoadingOverlay = new Label
         {
             Text = "Loading sessions...",
@@ -241,6 +243,15 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns.Add("Session", "Session");
         this.SessionGrid.Columns.Add("CWD", "CWD");
         this.SessionGrid.Columns.Add("Date", "Date");
+        this.SessionGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Context",
+            HeaderText = "",
+            Width = 55,
+            MinimumWidth = 40,
+            SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
+        });
         var runningAppsCol = new DataGridViewTextBoxColumn
         {
             Name = "RunningApps",
@@ -250,12 +261,15 @@ internal class ExistingSessionsVisuals
         };
         runningAppsCol.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
         this.SessionGrid.Columns.Add(runningAppsCol);
-        this.SessionGrid.Columns["Session"]!.Width = 300;
+        this.SessionGrid.Columns["Session"]!.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         this.SessionGrid.Columns["Session"]!.MinimumWidth = 100;
-        this.SessionGrid.Columns["CWD"]!.Width = 110;
+        this.SessionGrid.Columns["CWD"]!.Width = 100;
         this.SessionGrid.Columns["CWD"]!.MinimumWidth = 60;
-        this.SessionGrid.Columns["Date"]!.Width = 160;
-        this.SessionGrid.Columns["Date"]!.MinimumWidth = 100;
+        var dateWidth = GetDateColumnWidth(Program._settings.DateFormat, this.SessionGrid.Font);
+        this.SessionGrid.Columns["Date"]!.Width = dateWidth;
+        this.SessionGrid.Columns["Date"]!.MinimumWidth = dateWidth;
+        this.SessionGrid.Columns["Date"]!.Resizable = DataGridViewTriState.False;
+        this.SessionGrid.Columns["Date"]!.HeaderCell.ToolTipText = "Date Created";
         this.SessionGrid.Columns["RunningApps"]!.Width = 110;
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
 
@@ -263,8 +277,34 @@ internal class ExistingSessionsVisuals
         var savedOrder = Program._settings.SessionColumnOrder;
         if (savedOrder.Count > 0)
         {
+            // Default column order (non-frozen) for inserting new columns at correct positions
+            var defaultOrder = new List<string> { "Session", "CWD", "Date", "Context", "RunningApps" };
+
+            // Build full order: start from saved, insert missing columns at their default position
+            var fullOrder = new List<string>(savedOrder);
+            foreach (var name in defaultOrder)
+            {
+                if (!fullOrder.Contains(name, StringComparer.OrdinalIgnoreCase)
+                    && this.SessionGrid.Columns[name] is { } missingCol && !missingCol.Frozen)
+                {
+                    // Find the best insertion point based on default order
+                    int defaultIdx = defaultOrder.IndexOf(name);
+                    int insertAt = fullOrder.Count;
+                    for (int i = defaultIdx + 1; i < defaultOrder.Count; i++)
+                    {
+                        int pos = fullOrder.FindIndex(n => string.Equals(n, defaultOrder[i], StringComparison.OrdinalIgnoreCase));
+                        if (pos >= 0)
+                        {
+                            insertAt = pos;
+                            break;
+                        }
+                    }
+                    fullOrder.Insert(insertAt, name);
+                }
+            }
+
             int displayIndex = 1; // 0 is Status (frozen)
-            foreach (var name in savedOrder)
+            foreach (var name in fullOrder)
             {
                 if (this.SessionGrid.Columns[name] is { } col && !col.Frozen)
                 {
@@ -481,13 +521,167 @@ internal class ExistingSessionsVisuals
         return searchPanel;
     }
 
+    /// <summary>
+    /// Computes the Date column width based on the configured date format.
+    /// Uses a sample date string to measure text width.
+    /// </summary>
+    private static int GetDateColumnWidth(string format, Font font)
+    {
+        var sample = new DateTime(2026, 12, 28, 23, 59, 0).ToString(format);
+        var padding = format.Contains("yyyy") ? 45 : format.Contains("tt") ? 40 : 30;
+        var width = TextRenderer.MeasureText(sample, font).Width + padding;
+        return Math.Max(width, 80);
+    }
+
+    /// <summary>
+    /// Sets up drag-from-grid to drop-on-tab for moving sessions between tabs.
+    /// </summary>
+    private void SetupDragToTab()
+    {
+        const string DragFormat = "CopilotBooster.SessionIds";
+        Point dragStart = Point.Empty;
+        bool dragInitiated = false;
+
+        // Initiate drag from grid rows
+        this.SessionGrid.MouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Left && e.Clicks == 1)
+            {
+                dragStart = e.Location;
+                dragInitiated = false;
+            }
+        };
+
+        this.SessionGrid.MouseMove += (s, e) =>
+        {
+            if (e.Button != MouseButtons.Left || dragInitiated || dragStart == Point.Empty)
+            {
+                return;
+            }
+
+            if (Math.Abs(e.X - dragStart.X) < 8 && Math.Abs(e.Y - dragStart.Y) < 8)
+            {
+                return;
+            }
+
+            var ids = this.GridVisuals.GetSelectedSessionIds();
+            if (ids.Count > 0)
+            {
+                dragInitiated = true;
+                var data = new DataObject(DragFormat, string.Join("|", ids));
+                this.SessionGrid.DoDragDrop(data, DragDropEffects.Move);
+                dragStart = Point.Empty;
+                dragInitiated = false;
+            }
+        };
+
+        this.SessionGrid.MouseUp += (s, e) =>
+        {
+            dragStart = Point.Empty;
+        };
+
+        // Accept drop on session tabs
+        this.SessionTabs.AllowDrop = true;
+
+        this.SessionTabs.DragEnter += (s, e) =>
+        {
+            e.Effect = e.Data?.GetDataPresent(DragFormat) == true
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+        };
+
+        int highlightTabIndex = -1;
+
+        this.SessionTabs.DragOver += (s, e) =>
+        {
+            if (e.Data?.GetDataPresent(DragFormat) != true)
+            {
+                return;
+            }
+
+            var pt = this.SessionTabs.PointToClient(new Point(e.X, e.Y));
+            int tabIndex = this.SessionTabs.GetTabIndexAtPoint(pt);
+
+            if (tabIndex >= 0 && tabIndex < this.SessionTabs.TabCount)
+            {
+                var page = this.SessionTabs.TabPages[tabIndex];
+                var tabName = page.Tag as string;
+                if (tabName != null && !string.Equals(tabName, this.SelectedTabName, StringComparison.OrdinalIgnoreCase))
+                {
+                    e.Effect = DragDropEffects.Move;
+                    if (tabIndex != highlightTabIndex)
+                    {
+                        highlightTabIndex = tabIndex;
+                        this.SessionTabs.Invalidate();
+                    }
+                    return;
+                }
+            }
+
+            e.Effect = DragDropEffects.None;
+            if (highlightTabIndex != -1)
+            {
+                highlightTabIndex = -1;
+                this.SessionTabs.Invalidate();
+            }
+        };
+
+        this.SessionTabs.DragLeave += (s, e) =>
+        {
+            if (highlightTabIndex != -1)
+            {
+                highlightTabIndex = -1;
+                this.SessionTabs.Invalidate();
+            }
+        };
+
+        this.SessionTabs.DragDrop += (s, e) =>
+        {
+            highlightTabIndex = -1;
+            this.SessionTabs.Invalidate();
+
+            if (e.Data?.GetDataPresent(DragFormat) != true)
+            {
+                return;
+            }
+
+            var pt = this.SessionTabs.PointToClient(new Point(e.X, e.Y));
+            int tabIndex = this.SessionTabs.GetTabIndexAtPoint(pt);
+
+            if (tabIndex < 0 || tabIndex >= this.SessionTabs.TabCount)
+            {
+                return;
+            }
+
+            var tabName = this.SessionTabs.TabPages[tabIndex].Tag as string;
+            if (tabName == null || string.Equals(tabName, this.SelectedTabName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var idsStr = e.Data.GetData(DragFormat) as string;
+            if (string.IsNullOrEmpty(idsStr))
+            {
+                return;
+            }
+
+            foreach (var sid in idsStr.Split('|'))
+            {
+                if (!string.IsNullOrEmpty(sid))
+                {
+                    this.OnMoveToTab?.Invoke(sid, tabName);
+                }
+            }
+        };
+    }
+
     [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern IntPtr ExtractIcon(IntPtr hInst, string lpszExeFileName, int nIconIndex);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
-    private static Bitmap? TryExtractIcon(string filePath, int index)
+    internal static Bitmap? TryExtractIcon(string filePath, int index)
     {
         try
         {
@@ -504,7 +698,7 @@ internal class ExistingSessionsVisuals
         return null;
     }
 
-    private static Bitmap? TryGetExeIcon(string exePath)
+    internal static Bitmap? TryGetExeIcon(string exePath)
     {
         try
         {

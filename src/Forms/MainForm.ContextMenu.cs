@@ -427,6 +427,76 @@ internal partial class MainForm
             return GetSessionFiles(Program.SessionStateDir, sid);
         };
 
+        // Wire context column callbacks on the grid visuals
+        this._sessionsVisuals.GridVisuals.GetSessionFileCount = (sid) =>
+        {
+            return GetSessionFiles(Program.SessionStateDir, sid).Count;
+        };
+
+        this._sessionsVisuals.GridVisuals.GetSessionFiles = (sid) =>
+        {
+            return GetSessionFiles(Program.SessionStateDir, sid);
+        };
+
+        this._sessionsVisuals.GridVisuals.OnOpenFile += (fullPath) =>
+        {
+            if (File.Exists(fullPath))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fullPath) { UseShellExecute = true });
+            }
+        };
+
+        this._sessionsVisuals.GridVisuals.OnContextEdgeClicked += async (sid) =>
+        {
+            if (this._activeTracker.TryGetEdge(sid, out var existing) && existing.IsOpen)
+            {
+                existing.Focus();
+                return;
+            }
+
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            var sessionName = !string.IsNullOrEmpty(session?.Alias) ? session.Alias : session?.Summary;
+
+            var workspace = SessionInteractionManager.CreateEdgeWorkspace(sid);
+            workspace.WindowClosed += () =>
+            {
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(() =>
+                    {
+                        this._activeTracker.RemoveEdge(sid);
+                        this.RefreshActiveStatusAsync();
+                    });
+                }
+                else
+                {
+                    this._activeTracker.RemoveEdge(sid);
+                    this.RefreshActiveStatusAsync();
+                }
+            };
+            this._activeTracker.TrackEdge(sid, workspace);
+
+            var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
+            await workspace.OpenAsync(sessionName, savedTabs.Count > 0).ConfigureAwait(true);
+
+            if (savedTabs.Count > 0)
+            {
+                workspace.RestoreTabs(savedTabs);
+            }
+
+            _ = Task.Factory.StartNew(() =>
+            {
+                Thread.Sleep(3000);
+                var hash = workspace.GetTabNameHash();
+                if (hash != null)
+                {
+                    EdgeTabPersistenceService.SaveTabTitleHash(sid, hash);
+                }
+            }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
+
+            this.RefreshActiveStatusAsync();
+        };
+
         this._sessionsVisuals.HasPlanFile = (sid) =>
         {
             return SessionInteractionManager.HasPlanFile(Program.SessionStateDir, sid);

@@ -178,6 +178,20 @@ internal class LauncherSettings
     public string PrBranchPattern { get; set; } = "prs/{number}-{alias}";
 
     /// <summary>
+    /// Gets or sets the date format used in the session grid's Date column.
+    /// Valid values: <c>"yyyy-MM-dd HH:mm"</c> (default), <c>"MM/dd hh:mm tt"</c>, <c>"dd/MM HH:mm"</c>.
+    /// </summary>
+    [JsonPropertyName("dateFormat")]
+    public string DateFormat { get; set; } = "yyyy-MM-dd HH:mm";
+
+    /// <summary>
+    /// Gets or sets whether the spotlight window auto-hides when it loses focus.
+    /// Independent of <see cref="ToastMode"/> — when false, the window stays visible after Win+Alt+X.
+    /// </summary>
+    [JsonPropertyName("spotlightAutoHide")]
+    public bool SpotlightAutoHide { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the minimum log level. Valid values match <see cref="Microsoft.Extensions.Logging.LogLevel"/> names:
     /// <c>"Trace"</c>, <c>"Debug"</c>, <c>"Information"</c>, <c>"Warning"</c>, <c>"Error"</c>, <c>"Critical"</c>, <c>"None"</c>.
     /// Defaults to <c>null</c> (uses Information in Release, Debug in DEBUG builds).

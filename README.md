@@ -28,15 +28,15 @@ Modern AI-assisted development isn't one task at a time — it's **multiple Copi
 | One shared browser for all research | Isolated Edge workspaces per session — tabs saved and restored automatically |
 | Context-switch between repos by cd-ing around | Git worktree workspaces give each agent its own branch and directory |
 | Lose track of parallel agents after a restart | Window handles, terminals, and Edge tabs all persist across restarts |
-| No idea when an agent finishes | 🔔 Bell notifications with toast popups when a session is ready |
+| No idea when an agent finishes | 🔔 Bell notifications with popups when a session is ready |
 
 ---
 
 ## ✨ Features at a Glance
 
-### 🍞 Quick Slide
+### 🔦 Spotlight
 
-Press **Win+Alt+X** from anywhere to slide the Booster window up from the taskbar like a toast notification. Click away to dismiss — no window management needed.
+Press **Win+Alt+X** from anywhere to slide the Booster window up from the taskbar. Click away to dismiss — no window management needed.
 
 <p align="center">
   <img src="images/QuickSlide.gif" alt="Quick Slide — window slides up from taskbar" width="700">
@@ -46,9 +46,9 @@ Press **Win+Alt+X** from anywhere to slide the Booster window up from the taskba
 - **Slide animation** — smooth slide-up from the bottom of the screen (configurable)
 - **Auto-hide on focus loss** — the window dismisses when you click elsewhere (stays visible for dialogs, context menus, and settings)
 - **6 position options** — Bottom Left, Bottom Center, Bottom Right, Top Left, Top Center, Top Right
-- **Per-monitor support** — choose which screen to show the toast on, or follow the cursor
-- **Tray/taskbar activation** — clicking the tray icon or taskbar button shows the toast on the cursor's screen
-- **Enabled by default** — toast mode is on out of the box; configure position and screen in Settings
+- **Per-monitor support** — choose which screen to show the spotlight on, or follow the cursor
+- **Tray/taskbar activation** — clicking the tray icon or taskbar button shows the spotlight on the cursor's screen
+- **Enabled by default** — spotlight mode is on out of the box; configure position and screen in Settings
 
 ---
 
@@ -118,7 +118,7 @@ Other session browser features:
 
 ---
 
-### 🔔 Session Status & Toast Notifications
+### 🔔 Session Status & Notifications
 
 The status column shows live session state with animated icons — a **spinning blue indicator** when Copilot CLI is working, and a **🔔 red bell** when it's idle and waiting for input. Bell rows are highlighted with a prominent red background for quick visual scanning.
 
@@ -126,10 +126,10 @@ The status column shows live session state with animated icons — a **spinning 
   <img src="images/session-state-notification.png" alt="Session status column showing bell and spinner icons with red notification rows" width="700">
 </p>
 
-When a session finishes work, a **Windows toast notification** pops up with the session name. Status detection is powered by content-based parsing of `events.jsonl` — it understands assistant turns, tool requests, and `ask_user` pauses.
+When a session finishes work, a **Windows notification** pops up with the session name. Status detection is powered by content-based parsing of `events.jsonl` — it understands assistant turns, tool requests, and `ask_user` pauses.
 
 <p align="center">
-  <img src="images/toast-notification.png" alt="Toast notification when session is ready" width="350">
+  <img src="images/toast-notification.png" alt="Notification when session is ready" width="350">
 </p>
 
 - **Content-based detection** — parses event types (assistant.turn_start, tool.execution_start, ask_user) for accurate status
@@ -265,14 +265,14 @@ All configuration lives in a tabbed UI with info labels and tooltips — no JSON
 </p>
 
 - **Theme** — choose between System (default), Light, or Dark theme; persisted across restarts
-- **Notify on bell** — toggle Windows toast notifications when sessions finish work
+- **Notify on bell** — toggle Windows notifications when sessions finish work
 - **Always on top** — keep the window above other windows
 - **Auto-hide on focus** — hide other session windows when focusing one
 - **Max active sessions** — configurable limit (0 = unlimited)
 - **Pinned order** — sort pinned sessions by last updated or alias name
 - **Default Work Dir** — set the default working directory for new sessions
 - **Workspace Dir** — set the directory where Git worktree workspaces are stored (default: `%APPDATA%\CopilotBooster\Workspaces\`)
-- **Toast mode** — enable/disable Quick Slide, configure position (6 options), target screen (per-monitor), and slide animation
+- **Spotlight** — enable/disable auto-hiding, configure position (6 options), target screen (per-monitor), and slide animation
 
 #### 🛠️ Allowed Tools
 
@@ -433,7 +433,7 @@ CopilotBooster.exe --settings             # Open settings
 ```
 CopilotBooster.exe (WinForms .NET 10, persistent taskbar window)
 ├── System tray icon (always visible, minimize-to-tray on close)
-├── Sets AppUserModelID for taskbar/JumpList/toast association
+├── Sets AppUserModelID for taskbar/JumpList/notification association
 ├── Registers PID → session mapping in %APPDATA%\CopilotBooster\active-pids.json
 ├── Launches copilot.exe with --allow-tool and --add-dir from settings
 ├── Creates session workspace.yaml + events.jsonl for new sessions
@@ -457,7 +457,7 @@ CopilotBooster.exe (WinForms .NET 10, persistent taskbar window)
 |---------|---------|
 | `ActiveStatusTracker` | Aggregates active status across all context types with HWND persistence |
 | `EventsJournalService` | Content-based Copilot CLI status detection via events.jsonl parsing |
-| `BellNotificationService` | Toast notifications and bell state management |
+| `BellNotificationService` | Notifications and bell state management |
 | `GlobalHotkeyService` | System-wide Win+Alt+X hotkey via Win32 `RegisterHotKey` |
 | `SessionDataService` | Unified session loading with Git detection caching |
 | `CopilotSessionCreatorService` | Creates new sessions with workspace.yaml and events.jsonl |

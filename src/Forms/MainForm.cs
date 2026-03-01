@@ -211,7 +211,7 @@ internal partial class MainForm : Form
         this._hotkeyService = new GlobalHotkeyService();
         if (!this._hotkeyService.Register())
         {
-            Program.Logger.LogWarning("Failed to register toast mode hotkey (Win+Alt+X)");
+            Program.Logger.LogWarning("Failed to register spotlight hotkey (Win+Alt+X)");
             this._hotkeyService = null;
             return;
         }
@@ -223,6 +223,49 @@ internal partial class MainForm : Form
 
         this.Deactivate += this.OnToastDeactivate;
         this._toastVisible = false;
+    }
+
+    private void TeardownToastMode()
+    {
+        if (this._hotkeyService != null)
+        {
+            this._hotkeyService.HotkeyPressed -= this.OnToastHotkeyPressed;
+            this._hotkeyService.Dispose();
+            this._hotkeyService = null;
+        }
+
+        if (this._toastAnimTimer != null)
+        {
+            this._toastAnimTimer.Stop();
+            this._toastAnimTimer.Tick -= this.OnToastAnimationTick;
+            this._toastAnimTimer.Dispose();
+            this._toastAnimTimer = null;
+        }
+
+        this.Deactivate -= this.OnToastDeactivate;
+        this._toastVisible = false;
+
+        // Restore normal window state if it was hidden
+        if (this.WindowState == FormWindowState.Minimized)
+        {
+            this.WindowState = FormWindowState.Normal;
+            this.Show();
+        }
+    }
+
+    /// <summary>
+    /// Applies spotlight settings at runtime without requiring a restart.
+    /// </summary>
+    internal void ApplySpotlightSettings()
+    {
+        if (Program._settings.ToastMode && this._hotkeyService == null)
+        {
+            this.SetupToastMode();
+        }
+        else if (!Program._settings.ToastMode && this._hotkeyService != null)
+        {
+            this.TeardownToastMode();
+        }
     }
 
     private void OnToastHotkeyPressed()
@@ -452,7 +495,7 @@ internal partial class MainForm : Form
 
     private void OnToastDeactivate(object? sender, EventArgs e)
     {
-        if (!Program._settings.ToastMode || !this._toastVisible || this._toastAnimating)
+        if (!Program._settings.ToastMode || !Program._settings.SpotlightAutoHide || !this._toastVisible || this._toastAnimating)
         {
             return;
         }
@@ -612,6 +655,7 @@ internal partial class MainForm : Form
             this._sessionsVisuals.BuildGridContextMenu();
             this.ApplySessionStates(this._cachedSessions);
             this.PopulateGridWithFilter(this._lastSnapshot);
+            this.ApplySpotlightSettings();
             this._toast.Show("✅ Settings saved successfully");
         }
     }
@@ -1490,7 +1534,7 @@ internal partial class MainForm : Form
         // Reserved Copilot CLI files and folders to exclude
         var reservedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "events.jsonl", "workspace.yaml", "session.db"
+            "events.jsonl", "workspace.yaml", "session.db", "vscode.metadata.json"
         };
         var reservedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {

@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -35,7 +37,25 @@ internal class SessionGridVisuals
     private readonly ActiveStatusTracker _activeTracker;
     private readonly Image[] _spinnerFrames;
     private readonly Image _bellImage;
+    private readonly Image? _filesIcon;
+    private readonly Image? _edgeIcon;
     private int _spinnerFrameIndex;
+
+    /// <summary>
+    /// Callback to get the number of context files for a session.
+    /// </summary>
+    internal Func<string, int>? GetSessionFileCount;
+
+    /// <summary>
+    /// Callback to get session files for the context menu popup.
+    /// </summary>
+    internal Func<string, List<(string Name, string FullPath)>>? GetSessionFiles;
+
+    /// <summary>Fired when the user clicks the Edge icon in the Context column.</summary>
+    internal event Action<string>? OnContextEdgeClicked;
+
+    /// <summary>Fired when the user clicks a file in the context files popup.</summary>
+    internal event Action<string>? OnOpenFile;
 
     internal SessionGridVisuals(DataGridView grid, ActiveStatusTracker activeTracker)
     {
@@ -51,6 +71,11 @@ internal class SessionGridVisuals
         }
         using var bellStream = asm.GetManifestResourceStream("CopilotBooster.Resources.bell.png")!;
         this._bellImage = Image.FromStream(bellStream);
+
+        var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
+        this._filesIcon = ExistingSessionsVisuals.TryExtractIcon(shell32, 250);
+        this._edgeIcon = ExistingSessionsVisuals.TryGetExeIcon(
+            EdgeWorkspaceService.FindEdgePath() ?? "");
 
         this.WireEvents();
     }
@@ -74,13 +99,27 @@ internal class SessionGridVisuals
 
         this._grid.CellMouseClick += (s, e) =>
         {
-            if (e.RowIndex < 0 || e.ColumnIndex != 4)
+            if (e.RowIndex < 0)
             {
                 return;
             }
 
             var row = this._grid.Rows[e.RowIndex];
-            var activeText = row.Cells[4].Value as string;
+
+            // Context column — handle file/edge icon clicks
+            if (e.ColumnIndex == 4 && row.Tag is string ctxSessionId)
+            {
+                this.HandleContextClick(row, ctxSessionId, e);
+                return;
+            }
+
+            // RunningApps column (5)
+            if (e.ColumnIndex != 5)
+            {
+                return;
+            }
+
+            var activeText = row.Cells[5].Value as string;
             if (!string.IsNullOrEmpty(activeText) && row.Tag is string sessionId)
             {
                 var clickedLine = this.HitTestLinkLine(row, e.Location);
@@ -106,8 +145,17 @@ internal class SessionGridVisuals
         {
             if (e.RowIndex >= 0 && e.ColumnIndex == 4)
             {
+                var contextValue = this._grid.Rows[e.RowIndex].Cells[4].Value as string;
+                if (!string.IsNullOrEmpty(contextValue))
+                {
+                    this._grid.Cursor = Cursors.Hand;
+                    return;
+                }
+            }
+            if (e.RowIndex >= 0 && e.ColumnIndex == 5)
+            {
                 var row = this._grid.Rows[e.RowIndex];
-                var activeText = row.Cells[4].Value as string;
+                var activeText = row.Cells[5].Value as string;
                 if (!string.IsNullOrEmpty(activeText))
                 {
                     var hit = this.HitTestLinkLine(row, e.Location);
@@ -155,8 +203,21 @@ internal class SessionGridVisuals
                 return;
             }
 
-            // Active column (4) — draw underlined links
-            if (e.ColumnIndex != 4 || e.Value is not string text || string.IsNullOrEmpty(text))
+            // Context column (4) — draw file/edge icons
+            if (e.ColumnIndex == 4)
+            {
+                e.PaintBackground(e.ClipBounds, true);
+                var contextValue = e.Value as string;
+                if (!string.IsNullOrEmpty(contextValue))
+                {
+                    this.PaintContextIcons(e, contextValue);
+                }
+                e.Handled = true;
+                return;
+            }
+
+            // Active column (5) — draw underlined links
+            if (e.ColumnIndex != 5 || e.Value is not string text || string.IsNullOrEmpty(text))
             {
                 return;
             }
@@ -196,16 +257,16 @@ internal class SessionGridVisuals
     /// </summary>
     private int HitTestLinkLine(DataGridViewRow row, Point location)
     {
-        var activeText = row.Cells[4].Value as string;
+        var activeText = row.Cells[5].Value as string;
         if (string.IsNullOrEmpty(activeText))
         {
             return -1;
         }
 
         var lines = activeText.Split('\n');
-        var font = row.Cells[4].InheritedStyle.Font ?? this._grid.Font;
+        var font = row.Cells[5].InheritedStyle.Font ?? this._grid.Font;
         var linkFont = new Font(font, FontStyle.Underline);
-        var cellBounds = this._grid.GetCellDisplayRectangle(4, row.Index, false);
+        var cellBounds = this._grid.GetCellDisplayRectangle(5, row.Index, false);
         const int LineSpacing = 2;
 
         var lineHeight = TextRenderer.MeasureText("X", linkFont).Height;
@@ -257,7 +318,7 @@ internal class SessionGridVisuals
 
             foreach (var session in displayed)
             {
-                var dateText = session.LastModified.ToString("yyyy-MM-dd HH:mm");
+                var dateText = session.LastModified.ToString(Program._settings.DateFormat);
                 var cwdText = session.Folder;
                 if (session.IsGitRepo)
                 {
@@ -271,9 +332,22 @@ internal class SessionGridVisuals
                 {
                     displayName = "\U0001F4CC " + displayName;
                 }
-                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, activeText);
+
+                // Build context indicator data
+                var fileCount = this.GetSessionFileCount?.Invoke(session.Id) ?? 0;
+                var hasTabs = EdgeTabPersistenceService.HasSavedTabs(session.Id);
+                var tabCount = hasTabs ? EdgeTabPersistenceService.LoadTabs(session.Id).Count : 0;
+                var contextValue = BuildContextValue(fileCount, tabCount);
+
+                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, contextValue, activeText);
                 var row = this._grid.Rows[rowIndex];
                 row.Tag = session.Id;
+
+                // Context column tooltip
+                if (!string.IsNullOrEmpty(contextValue))
+                {
+                    row.Cells[4].ToolTipText = BuildContextTooltip(fileCount, tabCount);
+                }
 
                 // Tooltip shows the current session name when alias is displayed
                 if (!string.IsNullOrEmpty(session.Alias) && !string.IsNullOrEmpty(session.Summary))
@@ -448,7 +522,7 @@ internal class SessionGridVisuals
             if (row.Tag is string id && string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase))
             {
                 row.Cells[0].Value = statusIcon;
-                var activeText = row.Cells[4].Value?.ToString() ?? "";
+                var activeText = row.Cells[5].Value?.ToString() ?? "";
 
                 if (statusIcon == "bell")
                 {
@@ -472,6 +546,205 @@ internal class SessionGridVisuals
                 break;
             }
         }
+    }
+
+    private static string BuildContextValue(int fileCount, int tabCount)
+    {
+        if (fileCount <= 0 && tabCount <= 0)
+        {
+            return "";
+        }
+
+        var parts = new List<string>(2);
+        if (fileCount > 0)
+        {
+            parts.Add($"files:{fileCount}");
+        }
+        if (tabCount > 0)
+        {
+            parts.Add($"tabs:{tabCount}");
+        }
+        return string.Join("|", parts);
+    }
+
+    private static string BuildContextTooltip(int fileCount, int tabCount)
+    {
+        var parts = new List<string>(2);
+        if (fileCount > 0)
+        {
+            parts.Add(fileCount == 1 ? "1 file" : $"{fileCount} files");
+        }
+        if (tabCount > 0)
+        {
+            parts.Add(tabCount == 1 ? "1 Edge tab" : $"{tabCount} Edge tabs");
+        }
+        return string.Join(", ", parts);
+    }
+
+    private static (int fileCount, int tabCount) ParseContextValue(string contextValue)
+    {
+        int fileCount = 0, tabCount = 0;
+        foreach (var part in contextValue.Split('|'))
+        {
+            if (part.StartsWith("files:") && int.TryParse(part.AsSpan(6), out var f))
+            {
+                fileCount = f;
+            }
+            else if (part.StartsWith("tabs:") && int.TryParse(part.AsSpan(5), out var t))
+            {
+                tabCount = t;
+            }
+        }
+        return (fileCount, tabCount);
+    }
+
+    private void PaintContextIcons(DataGridViewCellPaintingEventArgs e, string contextValue)
+    {
+        var (fileCount, tabCount) = ParseContextValue(contextValue);
+        var icons = new List<Image>(2);
+        if (fileCount > 0 && this._filesIcon != null)
+        {
+            icons.Add(this._filesIcon);
+        }
+        if (tabCount > 0 && this._edgeIcon != null)
+        {
+            icons.Add(this._edgeIcon);
+        }
+        if (icons.Count == 0)
+        {
+            return;
+        }
+
+        const int Spacing = 9;
+        const int LeftPad = 6;
+        int totalWidth = icons.Sum(i => i.Width) + ((icons.Count - 1) * Spacing);
+        int ix = e.CellBounds.X + ((e.CellBounds.Width - totalWidth) / 2) + LeftPad;
+        int iy = e.CellBounds.Y + ((e.CellBounds.Height - icons[0].Height) / 2);
+
+        using var countFont = new Font(this._grid.Font.FontFamily, 7f, FontStyle.Bold);
+        var countColor = Application.IsDarkModeEnabled ? Color.White : Color.Black;
+
+        foreach (var icon in icons)
+        {
+            // Determine count for this icon
+            int count = (icon == this._filesIcon) ? fileCount : (icon == this._edgeIcon) ? tabCount : 0;
+
+            // Draw count to the left of the icon
+            if (count > 0)
+            {
+                var countText = count.ToString();
+                var countSize = TextRenderer.MeasureText(countText, countFont);
+                int cx = ix - countSize.Width + 2;
+                int cy = iy + ((icon.Height - countSize.Height) / 2);
+                TextRenderer.DrawText(e.Graphics!, countText, countFont, new Point(cx, cy), countColor);
+            }
+
+            e.Graphics!.DrawImage(icon, ix, iy, icon.Width, icon.Height);
+            ix += icon.Width + Spacing;
+        }
+    }
+
+    private void HandleContextClick(DataGridViewRow row, string sessionId, DataGridViewCellMouseEventArgs e)
+    {
+        var contextValue = row.Cells[4].Value as string;
+        if (string.IsNullOrEmpty(contextValue))
+        {
+            return;
+        }
+
+        var (fileCount, tabCount) = ParseContextValue(contextValue);
+        if (fileCount <= 0 && tabCount <= 0)
+        {
+            return;
+        }
+
+        // Determine which icon was clicked based on x-position
+        var cellBounds = this._grid.GetCellDisplayRectangle(4, row.Index, false);
+        var icons = new List<(Image icon, string type)>();
+        if (fileCount > 0 && this._filesIcon != null)
+        {
+            icons.Add((this._filesIcon, "files"));
+        }
+        if (tabCount > 0 && this._edgeIcon != null)
+        {
+            icons.Add((this._edgeIcon, "tabs"));
+        }
+
+        const int Spacing = 4;
+        int totalWidth = icons.Sum(i => i.icon.Width) + ((icons.Count - 1) * Spacing);
+        int ix = (cellBounds.Width - totalWidth) / 2;
+
+        string? clickedType = null;
+        foreach (var (icon, type) in icons)
+        {
+            if (e.X >= ix && e.X < ix + icon.Width)
+            {
+                clickedType = type;
+                break;
+            }
+            ix += icon.Width + Spacing;
+        }
+
+        if (clickedType == "files")
+        {
+            this.ShowFilesContextMenu(sessionId, row.Index);
+        }
+        else if (clickedType == "tabs")
+        {
+            this.OnContextEdgeClicked?.Invoke(sessionId);
+        }
+    }
+
+    private void ShowFilesContextMenu(string sessionId, int rowIndex)
+    {
+        var files = this.GetSessionFiles?.Invoke(sessionId);
+        if (files is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var menu = new ContextMenuStrip();
+
+        // "Open folder" item at the top
+        var folderPath = files[0].FullPath;
+        var folderDir = Path.GetDirectoryName(folderPath);
+        if (folderDir != null && Directory.Exists(folderDir))
+        {
+            Image? folderIcon = null;
+            try
+            {
+                folderIcon = ExistingSessionsVisuals.TryExtractIcon("shell32.dll", 3);
+            }
+            catch { /* ignore */ }
+
+            var openFolderItem = new ToolStripMenuItem("Open Session Folder") { Image = folderIcon };
+            var capturedDir = folderDir;
+            openFolderItem.Click += (_, _) => Process.Start(new ProcessStartInfo("explorer.exe", capturedDir) { UseShellExecute = true });
+            menu.Items.Add(openFolderItem);
+            menu.Items.Add(new ToolStripSeparator());
+        }
+
+        foreach (var (name, fullPath) in files)
+        {
+            var capturedPath = fullPath;
+            Image? fileIcon = null;
+            try
+            {
+                var ico = Icon.ExtractAssociatedIcon(fullPath);
+                if (ico != null)
+                {
+                    fileIcon = new Bitmap(ico.ToBitmap(), 16, 16);
+                }
+            }
+            catch { /* ignore icon extraction failures */ }
+
+            var item = new ToolStripMenuItem(name) { Image = fileIcon };
+            item.Click += (_, _) => this.OnOpenFile?.Invoke(capturedPath);
+            menu.Items.Add(item);
+        }
+
+        var cellRect = this._grid.GetCellDisplayRectangle(4, rowIndex, false);
+        menu.Show(this._grid, new Point(cellRect.Left + cellRect.Width / 2, cellRect.Bottom));
     }
 
     [ExcludeFromCodeCoverage]

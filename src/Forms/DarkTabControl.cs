@@ -133,7 +133,7 @@ internal sealed class DarkTabControl : TabControl
         }
     }
 
-    private int GetTabIndexAtPoint(Point pt)
+    internal int GetTabIndexAtPoint(Point pt)
     {
         for (int i = 0; i < this.TabCount; i++)
         {

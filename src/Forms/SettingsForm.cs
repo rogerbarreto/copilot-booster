@@ -71,7 +71,7 @@ internal sealed class SettingsForm : Form
             Indent = 16
         };
 
-        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Toast", "Edge" };
+        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "Edge" };
         foreach (var name in categoryNames)
         {
             tree.Nodes.Add(name);
@@ -198,12 +198,30 @@ internal sealed class SettingsForm : Form
         };
         themeRow.Controls.AddRange([themeLabel, themeCombo]);
 
+        var dateFormatRow = new Panel { Dock = DockStyle.Top, Height = 35, Padding = new Padding(4, 4, 0, 4) };
+        var dateFormatLabel = new Label { Text = "Date format:", AutoSize = true, Location = new Point(4, 7) };
+        var dateFormatCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(150, 4),
+            Width = 200
+        };
+        dateFormatCombo.Items.AddRange(new object[] { "YYYY-MM-DD HH:mm", "MM/DD hh:mm AM/PM", "DD/MM HH:mm" });
+        dateFormatCombo.SelectedIndex = Program._settings.DateFormat switch
+        {
+            "MM/dd hh:mm tt" => 1,
+            "dd/MM HH:mm" => 2,
+            _ => 0
+        };
+        dateFormatRow.Controls.AddRange([dateFormatLabel, dateFormatCombo]);
+
         // Add to general body (reverse visual order for Dock.Top stacking)
         generalBody.Controls.Add(autoHideOnFocusCheck);
         generalBody.Controls.Add(notifyOnBellCheck);
         generalBody.Controls.Add(pinnedOrderRow);
         generalBody.Controls.Add(maxSessionsRow);
         generalBody.Controls.Add(alwaysOnTopCheck);
+        generalBody.Controls.Add(dateFormatRow);
         generalBody.Controls.Add(themeRow);
 
         // =====================================================================
@@ -556,7 +574,7 @@ internal sealed class SettingsForm : Form
         // =====================================================================
         // TOAST
         // =====================================================================
-        var (toastPanel, toastBody) = this.CreateCategoryPanel("Toast", "Toast mode shows the app as a popup overlay.", autoScroll: true, padding: new Padding(8));
+        var (toastPanel, toastBody) = this.CreateCategoryPanel("Spotlight", "Spotlight (Win+Alt+X) pop-in and out for quick session management.", autoScroll: true, padding: new Padding(8));
 
         var toastAnimateCheck = new CheckBox
         {
@@ -568,7 +586,7 @@ internal sealed class SettingsForm : Form
         };
 
         var toastScreenRow = new Panel { Dock = DockStyle.Top, Height = 35, Padding = new Padding(20, 4, 0, 4) };
-        var toastScreenLabel = new Label { Text = "Toast screen:", AutoSize = true, Location = new Point(4, 7) };
+        var toastScreenLabel = new Label { Text = "Screen:", AutoSize = true, Location = new Point(4, 7) };
         var toastScreenCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
@@ -600,7 +618,7 @@ internal sealed class SettingsForm : Form
         toastScreenRow.Controls.AddRange([toastScreenLabel, toastScreenCombo]);
 
         var toastPositionRow = new Panel { Dock = DockStyle.Top, Height = 35, Padding = new Padding(20, 4, 0, 4) };
-        var toastPositionLabel = new Label { Text = "Toast position:", AutoSize = true, Location = new Point(4, 7) };
+        var toastPositionLabel = new Label { Text = "Position:", AutoSize = true, Location = new Point(4, 7) };
         var toastPositionCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
@@ -621,14 +639,39 @@ internal sealed class SettingsForm : Form
 
         var toastModeCheck = new CheckBox
         {
-            Text = "Toast mode (Win+Alt+X to show)",
+            Text = "Enable Spotlight (Win+Alt+X)",
             Checked = Program._settings.ToastMode,
             AutoSize = true,
             Dock = DockStyle.Top,
             Padding = new Padding(4, 4, 0, 4)
         };
 
+        var autoHideCheck = new CheckBox
+        {
+            Text = "Auto-hide on deactivate",
+            Checked = Program._settings.SpotlightAutoHide,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(20, 4, 0, 4),
+            Enabled = Program._settings.ToastMode
+        };
+
+        // Disable sub-settings when spotlight is off
+        void updateSubSettings()
+        {
+            var enabled = toastModeCheck.Checked;
+            autoHideCheck.Enabled = enabled;
+            toastPositionRow.Enabled = enabled;
+            toastPositionCombo.Enabled = enabled;
+            toastScreenRow.Enabled = enabled;
+            toastScreenCombo.Enabled = enabled;
+            toastAnimateCheck.Enabled = enabled;
+        }
+        toastModeCheck.CheckedChanged += (s, e) => updateSubSettings();
+        updateSubSettings();
+
         toastBody.Controls.Add(toastAnimateCheck);
+        toastBody.Controls.Add(autoHideCheck);
         toastBody.Controls.Add(toastScreenRow);
         toastBody.Controls.Add(toastPositionRow);
         toastBody.Controls.Add(toastModeCheck);
@@ -672,7 +715,7 @@ internal sealed class SettingsForm : Form
             ["IDEs"] = idesPanel,
             ["Git && GitHub"] = gitPanel,
             ["Session Tabs"] = sessionTabsPanel,
-            ["Toast"] = toastPanel,
+            ["Spotlight"] = toastPanel,
             ["Edge"] = edgePanel
         };
 
@@ -731,6 +774,12 @@ internal sealed class SettingsForm : Form
             };
             Program._settings.NotifyOnBell = notifyOnBellCheck.Checked;
             Program._settings.AutoHideOnFocus = autoHideOnFocusCheck.Checked;
+            Program._settings.DateFormat = dateFormatCombo.SelectedIndex switch
+            {
+                1 => "MM/dd hh:mm tt",
+                2 => "dd/MM HH:mm",
+                _ => "yyyy-MM-dd HH:mm"
+            };
 
             // Directories
             Program._settings.DefaultWorkDir = workDirBox.Text.Trim();
@@ -764,8 +813,9 @@ internal sealed class SettingsForm : Form
             // Session Tabs
             Program._settings.SessionTabs = sessionTabsList.Items.Cast<string>().ToList();
 
-            // Toast
+            // Spotlight
             Program._settings.ToastMode = toastModeCheck.Checked;
+            Program._settings.SpotlightAutoHide = autoHideCheck.Checked;
             Program._settings.ToastPosition = toastPositionCombo.SelectedIndex switch
             {
                 1 => "bottom-left",
