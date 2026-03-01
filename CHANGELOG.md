@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.0] - 2026-03-01
+
+### Added
+
+- **Context column (Ctx.)** — new column showing file and Edge tab icons with count overlays for each session. Click the file icon for a context menu listing session files with "Open Session Folder" at the top. Click the Edge icon to open the associated browser workspace. (Closes #1)
+- **Configurable date format** — choose between three date formats in Settings: `yyyy-MM-dd HH:mm`, `MM/dd hh:mm AM/PM`, or `dd/MM HH:mm`. The Date column auto-sizes to fit the selected format.
+- **Drag-to-tab** — drag selected sessions from the grid onto a different tab header to move them, same behavior as the "Move to" context menu.
+- **Spotlight rename** — "Toast mode" has been renamed to "Spotlight" throughout the UI and documentation for clarity.
+- **Spotlight settings split** — Spotlight is now controlled by two independent settings: a master "Enable Spotlight" toggle and a separate "Auto-hide on deactivate" option. Enabling/disabling Spotlight applies at runtime without requiring a restart.
+- **GitHub Pages dark theme** — switched the project site to the Slate theme for better dark mode readability.
+
+### Changed
+
+- **Date column** — now non-resizable with a "Date Created" tooltip. Width adjusts automatically based on the configured date format.
+- **Session column** — uses fill mode to absorb remaining grid width, preventing horizontal overflow.
+
+### Fixed
+
+- **Column order restore** — saved column orders that predate the Context column are handled gracefully by inserting missing columns at their correct default position.
+- **vscode.metadata.json excluded** — no longer appears in session context file listings.
+
 ## [0.16.1] - 2026-02-28
 
 ### Fixed

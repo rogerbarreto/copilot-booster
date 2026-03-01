@@ -246,7 +246,8 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Context",
-            HeaderText = "",
+            HeaderText = "Ctx.",
+            ToolTipText = "Session Context Content",
             Width = 55,
             MinimumWidth = 40,
             SortMode = DataGridViewColumnSortMode.NotSortable,
@@ -547,8 +548,12 @@ internal class ExistingSessionsVisuals
         {
             if (e.Button == MouseButtons.Left && e.Clicks == 1)
             {
-                dragStart = e.Location;
-                dragInitiated = false;
+                var hitTest = this.SessionGrid.HitTest(e.X, e.Y);
+                if (hitTest.Type == DataGridViewHitTestType.Cell)
+                {
+                    dragStart = e.Location;
+                    dragInitiated = false;
+                }
             }
         };
 
