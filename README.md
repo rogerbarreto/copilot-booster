@@ -68,7 +68,7 @@ Right-click the pinned icon to access everything:
 
 ### 🔄 Session Browser & Active Context Tracking
 
-The session browser is the central hub. Each session shows **Session**, **CWD** (with ⎇ for Git repos), **Date**, and **Running** columns — giving you a live view of what's running where. Sessions with active processes are automatically sorted to the top.
+The session browser is the central hub. Each session shows **Session**, **CWD** (with ⎇ for Git repos), **Date**, **Running**, and **Ctx.** (context) columns — giving you a live view of what's running where. The **Ctx.** column displays file and Edge tab icons with counts, allowing quick access to session content. Sessions with active processes are automatically sorted to the top.
 
 <p align="center">
   <img src="images/session-browser-state.png" alt="Session browser with active tracking, bell notifications, and status indicators" width="700">
@@ -105,6 +105,7 @@ Organize your sessions into custom tabs — up to 10 tabs with full drag-and-dro
 
 - **Quick add (+) button** — create new tabs directly from the session tab strip without opening Settings
 - **Drag-and-drop columns** — reorder grid columns by dragging headers; column order is persisted across restarts (Status column stays pinned)
+- **Drag-to-tab** — drag selected sessions onto a different tab header to move them between tabs
 - **Move sessions between tabs** — right-click → "Move to" to reassign sessions to any tab
 
 Other session browser features:
@@ -261,10 +262,11 @@ Start a workspace directly from a GitHub PR number. Copilot Booster fetches the 
 All configuration lives in a tabbed UI with info labels and tooltips — no JSON editing required.
 
 <p align="center">
-  <img src="images/settings-tab.png" alt="Settings dialog with Allowed Tools, Allowed Directories, and IDEs tabs" width="700">
+  <img src="images/settings-tab.png" alt="Settings dialog with General, Copilot CLI, IDEs, Spotlight, and other tabs" width="700">
 </p>
 
 - **Theme** — choose between System (default), Light, or Dark theme; persisted across restarts
+- **Date format** — choose between `YYYY-MM-DD HH:mm`, `MM/DD hh:mm AM/PM`, or `DD/MM HH:mm`; the Date column auto-sizes to fit
 - **Notify on bell** — toggle Windows notifications when sessions finish work
 - **Always on top** — keep the window above other windows
 - **Auto-hide on focus** — hide other session windows when focusing one
@@ -272,7 +274,11 @@ All configuration lives in a tabbed UI with info labels and tooltips — no JSON
 - **Pinned order** — sort pinned sessions by last updated or alias name
 - **Default Work Dir** — set the default working directory for new sessions
 - **Workspace Dir** — set the directory where Git worktree workspaces are stored (default: `%APPDATA%\CopilotBooster\Workspaces\`)
-- **Spotlight** — enable/disable auto-hiding, configure position (6 options), target screen (per-monitor), and slide animation
+- **Spotlight** — enable/disable the spotlight feature and auto-hiding independently, configure position (6 options), target screen (per-monitor), and slide animation
+
+<p align="center">
+  <img src="images/settings-spotlight.png" alt="Spotlight settings with enable, position, screen, auto-hide, and animation options" width="700">
+</p>
 
 #### 🛠️ Allowed Tools
 
