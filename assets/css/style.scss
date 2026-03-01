@@ -21,6 +21,12 @@ body {
 
 .inner {
   color: #d4d4d4;
+  max-width: 900px;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
 }
 
 h1, h2, h3, h4, h5, h6 {
