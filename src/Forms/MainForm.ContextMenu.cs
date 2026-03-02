@@ -559,5 +559,10 @@ internal partial class MainForm
             var session = this._cachedSessions.Find(x => x.Id == sid);
             return session?.IsPinned ?? false;
         };
+
+        this._sessionsVisuals.OnCopySessionId += (sid) =>
+        {
+            this._toast.Show($"✅ Session ID copied: {sid}");
+        };
     }
 }

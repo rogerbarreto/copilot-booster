@@ -18,7 +18,7 @@
     {
         var result = GitService.SanitizeWorkspaceDirName("agent-framework", "issues/12312-fix-abcd");
 
-        Assert.Equal("agent-framework-issues-12312-fix-abcd", result);
+        Assert.Equal("agent-framework-issues-12312-fix", result);
     }
 
     [Fact]
@@ -185,6 +185,38 @@
     {
         var result = GitService.ParseGitHubOwnerRepo(url);
         Assert.Null(result);
+    }
+
+    [Fact]
+    public void SanitizeWorkspaceDirName_TruncatesLongBranchToThreeWords()
+    {
+        var result = GitService.SanitizeWorkspaceDirName("myrepo", "fix-the-very-long-branch-name-here");
+
+        Assert.Equal("myrepo-fix-the-very", result);
+    }
+
+    [Fact]
+    public void SanitizeWorkspaceDirName_ShortBranchUnchanged()
+    {
+        var result = GitService.SanitizeWorkspaceDirName("myrepo", "fix-bug");
+
+        Assert.Equal("myrepo-fix-bug", result);
+    }
+
+    [Fact]
+    public void SanitizeWorkspaceDirName_ExactlyThreeWordsUnchanged()
+    {
+        var result = GitService.SanitizeWorkspaceDirName("myrepo", "fix-the-bug");
+
+        Assert.Equal("myrepo-fix-the-bug", result);
+    }
+
+    [Fact]
+    public void SanitizeWorkspaceDirName_RepoNamePreservedFully()
+    {
+        var result = GitService.SanitizeWorkspaceDirName("agent-framework", "issues-12312-fix-abcd-extra-words");
+
+        Assert.Equal("agent-framework-issues-12312-fix", result);
     }
 
     [Fact]

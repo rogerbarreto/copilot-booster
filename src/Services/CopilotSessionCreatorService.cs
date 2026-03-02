@@ -12,6 +12,25 @@ namespace CopilotBooster.Services;
 internal static class CopilotSessionCreatorService
 {
     /// <summary>
+    /// Escapes a YAML value string so it is safe to write as a bare scalar.
+    /// Wraps the value in double quotes when it contains YAML-special characters.
+    /// </summary>
+    internal static string YamlEscape(string value)
+    {
+        if (value.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        if (value.IndexOfAny([':', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`', ',', '?']) >= 0)
+        {
+            return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        }
+
+        return value;
+    }
+
+    /// <summary>
     /// Creates a new Copilot session with the specified working directory and optional name.
     /// Copies workspace.yaml from an existing source session (if available) to get a valid
     /// template, then overrides id, cwd, and summary for the new session.
@@ -50,12 +69,12 @@ internal static class CopilotSessionCreatorService
                     else if (line.StartsWith("summary:"))
                     {
                         var val = sessionName ?? "";
-                        updatedLines.Add(string.IsNullOrEmpty(val) ? "summary: \"\"" : $"summary: {val}");
+                        updatedLines.Add(string.IsNullOrEmpty(val) ? "summary: \"\"" : $"summary: {YamlEscape(val)}");
                     }
                     else if (line.StartsWith("name:"))
                     {
                         var val = sessionName ?? "";
-                        updatedLines.Add(string.IsNullOrEmpty(val) ? "name: \"\"" : $"name: {val}");
+                        updatedLines.Add(string.IsNullOrEmpty(val) ? "name: \"\"" : $"name: {YamlEscape(val)}");
                         foundName = true;
                     }
                     else if (line.StartsWith("created_at:") || line.StartsWith("updated_at:"))
@@ -75,7 +94,7 @@ internal static class CopilotSessionCreatorService
                 // Ensure name: is always present
                 if (!foundName && !string.IsNullOrWhiteSpace(sessionName))
                 {
-                    updatedLines.Add($"name: {sessionName}");
+                    updatedLines.Add($"name: {YamlEscape(sessionName)}");
                 }
 
                 File.WriteAllLines(wsFile, updatedLines);
@@ -188,8 +207,8 @@ internal static class CopilotSessionCreatorService
 
         if (!string.IsNullOrWhiteSpace(sessionName))
         {
-            lines.Add($"summary: {sessionName}");
-            lines.Add($"name: {sessionName}");
+            lines.Add($"summary: {YamlEscape(sessionName)}");
+            lines.Add($"name: {YamlEscape(sessionName)}");
         }
 
         File.WriteAllLines(wsFile, lines);

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.1] - 2026-03-02
+
+### Fixed
+
+- **YAML escaping for session names** — session names containing YAML-special characters (`:`, `[`, `]`, `#`, etc.) no longer break the workspace.yaml parser. Values are now properly quoted when needed.
+- **Worktree folder name truncation** — workspace folder names are now truncated to the 3 leftmost words from the branch name after the repo prefix, preventing excessively long directory paths.
+
+### Added
+
+- **Session ID in context menu** — right-clicking a session now shows a header with the full session ID and a clipboard icon. Clicking it copies the session ID to the clipboard and displays a confirmation toast.
+
 ## [0.17.0] - 2026-03-01
 
 ### Added

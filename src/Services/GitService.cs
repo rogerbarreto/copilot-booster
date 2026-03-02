@@ -312,6 +312,21 @@ internal static class GitService
         combined = Regex.Replace(combined, @"[^a-zA-Z0-9\-_.]", "-");
         combined = Regex.Replace(combined, @"-{2,}", "-");
         combined = combined.Trim('-');
+
+        // Truncate branch portion to 3 words (segments separated by '-')
+        var repoSanitized = Regex.Replace(repoName, @"[^a-zA-Z0-9\-_.]", "-");
+        repoSanitized = Regex.Replace(repoSanitized, @"-{2,}", "-").Trim('-');
+        var prefix = repoSanitized + "-";
+        if (combined.StartsWith(prefix) && combined.Length > prefix.Length)
+        {
+            var branchPart = combined[prefix.Length..];
+            var segments = branchPart.Split('-');
+            if (segments.Length > 3)
+            {
+                combined = repoSanitized + "-" + string.Join("-", segments[..3]);
+            }
+        }
+
         return combined;
     }
 

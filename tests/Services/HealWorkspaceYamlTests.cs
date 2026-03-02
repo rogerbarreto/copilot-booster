@@ -101,4 +101,75 @@
         Assert.Equal("name: \"\"", lines[3]);
         Assert.Equal("branch: \"\"", lines[4]);
     }
+
+    [Fact]
+    public void YamlEscape_QuotesValueWithColonAndBrackets()
+    {
+        var input = ".NET: [Bug]: ChatClientAgent streaming responses missing MessageId";
+        var escaped = CopilotSessionCreatorService.YamlEscape(input);
+
+        Assert.StartsWith("\"", escaped);
+        Assert.EndsWith("\"", escaped);
+        Assert.Contains("[Bug]", escaped);
+    }
+
+    [Fact]
+    public void YamlEscape_QuotesValueWithHashSymbol()
+    {
+        var input = "Fix issue #42 in parser";
+        var escaped = CopilotSessionCreatorService.YamlEscape(input);
+
+        Assert.StartsWith("\"", escaped);
+        Assert.EndsWith("\"", escaped);
+    }
+
+    [Fact]
+    public void YamlEscape_EscapesInternalDoubleQuotes()
+    {
+        var input = "Session with \"quoted\" name";
+        var escaped = CopilotSessionCreatorService.YamlEscape(input);
+
+        Assert.StartsWith("\"", escaped);
+        Assert.EndsWith("\"", escaped);
+        Assert.Contains("\\\"quoted\\\"", escaped);
+    }
+
+    [Fact]
+    public void YamlEscape_SimpleNameRemainsUnchanged()
+    {
+        var input = "my simple session";
+        var escaped = CopilotSessionCreatorService.YamlEscape(input);
+
+        Assert.Equal("my simple session", escaped);
+    }
+
+    [Fact]
+    public void YamlEscape_EmptyStringReturnsQuotedEmpty()
+    {
+        var escaped = CopilotSessionCreatorService.YamlEscape("");
+
+        Assert.Equal("\"\"", escaped);
+    }
+
+    [Fact]
+    public void CreateSession_WithSpecialCharsInName_ProducesValidYaml()
+    {
+        var wsFile = Path.Combine(this._tempDir, "workspace.yaml");
+        var sessionName = ".NET: [Bug]: ChatClientAgent streaming responses missing MessageId";
+
+        // Simulate WriteNewWorkspaceYaml behavior
+        var lines = new List<string>
+        {
+            "id: test-123",
+            "cwd: C:\\work",
+            $"summary: {CopilotSessionCreatorService.YamlEscape(sessionName)}",
+            $"name: {CopilotSessionCreatorService.YamlEscape(sessionName)}"
+        };
+        File.WriteAllLines(wsFile, lines);
+
+        // Verify the file can be read back without issues
+        var content = File.ReadAllText(wsFile);
+        Assert.Contains("summary: \"", content);
+        Assert.DoesNotContain("summary: .NET:", content);
+    }
 }

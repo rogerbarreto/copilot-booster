@@ -80,6 +80,9 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnPinSession;
     internal event Action<string>? OnUnpinSession;
 
+    /// <summary>Fired when the user copies a session ID to clipboard.</summary>
+    internal event Action<string>? OnCopySessionId;
+
     /// <summary>Fired when the user clicks a column header to change sort order.</summary>
     internal event Action? OnSortChanged;
 
@@ -775,6 +778,20 @@ internal class ExistingSessionsVisuals
         var appIcon = Program.AppIcon != null ? new Bitmap(Program.AppIcon.ToBitmap(), 16, 16) : null;
         var copilotIcon = TryGetExeIcon(Program.CopilotExePath) ?? appIcon;
 
+        // --- Session ID header (copy to clipboard) ---
+        var menuSessionIdHeader = new ToolStripMenuItem("") { Enabled = true, Image = TryExtractIcon(shell32, 134) };
+        menuSessionIdHeader.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                Clipboard.SetText(sid);
+                this.OnCopySessionId?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuSessionIdHeader);
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
         // --- Session operations (top group) ---
         var menuOpenFiles = new ToolStripMenuItem("Open Files") { Image = TryExtractIcon(shell32, 250) };
         menuOpenFiles.DropDownItems.Add(new ToolStripMenuItem("Loading...") { Enabled = false });
@@ -997,6 +1014,19 @@ internal class ExistingSessionsVisuals
         {
             var selectedIds = this.GridVisuals.GetSelectedSessionIds();
             bool isMultiSelect = selectedIds.Count > 1;
+
+            // Update session ID header
+            var headerSid = this.GridVisuals.GetSelectedSessionId();
+            if (headerSid != null && !isMultiSelect)
+            {
+                menuSessionIdHeader.Text = $"#:{headerSid}";
+                menuSessionIdHeader.ToolTipText = headerSid;
+                menuSessionIdHeader.Visible = true;
+            }
+            else
+            {
+                menuSessionIdHeader.Visible = false;
+            }
 
             // Single-select only items — disabled in multi-select
             menuOpenSession.Enabled = !isMultiSelect;
