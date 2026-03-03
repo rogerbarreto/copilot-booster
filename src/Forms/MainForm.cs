@@ -723,6 +723,7 @@ internal partial class MainForm : Form
             this._visualRefreshTimer.Start();
 
             this.CheckForMissingAllowedDirs();
+            this.CheckForMissingSessionCwds();
             _ = this.CheckForUpdateInBackgroundAsync();
         };
 
@@ -791,6 +792,12 @@ internal partial class MainForm : Form
             // Focus existing Copilot CLI window if already running
             if (!this._activeTracker.TryFocusCopilotCli(this.SelectedSessionId))
             {
+                var cwd = this._interactionManager.GetSessionCwd(this.SelectedSessionId);
+                if (this.ValidateCwdOrPrompt(this.SelectedSessionId, cwd) == null)
+                {
+                    return;
+                }
+
                 this._interactionManager.LaunchSession(this.SelectedSessionId);
             }
         }
@@ -1292,6 +1299,79 @@ internal partial class MainForm : Form
             var names = string.Join(", ", missing.Select(d => Path.GetFileName(d.TrimEnd('\\')) ?? d));
             this._toast.ShowWarning($"⚠️ {missing.Count} allowed dir(s) not found: {names} — check Settings");
         }
+    }
+
+    private void CheckForMissingSessionCwds()
+    {
+        if (this._cachedSessions == null)
+        {
+            return;
+        }
+
+        var missing = this._cachedSessions
+            .Where(s => !string.IsNullOrEmpty(s.Cwd) && !Directory.Exists(s.Cwd))
+            .Select(s => s.Alias ?? s.Id)
+            .ToList();
+
+        if (missing.Count > 0)
+        {
+            var names = string.Join(", ", missing.Take(3));
+            var suffix = missing.Count > 3 ? $" (+{missing.Count - 3} more)" : "";
+            this._toast.ShowWarning($"⚠️ {missing.Count} session(s) have missing CWD: {names}{suffix} — edit session to fix");
+        }
+    }
+
+    /// <summary>
+    /// Validates the CWD for a session. If it doesn't exist, prompts the user to select a new folder.
+    /// Returns the valid CWD, or null if the user cancels.
+    /// </summary>
+    private string? ValidateCwdOrPrompt(string sessionId, string? cwd)
+    {
+        if (!string.IsNullOrEmpty(cwd) && Directory.Exists(cwd))
+        {
+            return cwd;
+        }
+
+        var displayCwd = cwd ?? "(not set)";
+        var result = MessageBox.Show(
+            $"The working directory for this session no longer exists:\n\n{displayCwd}\n\nWould you like to select a new directory?",
+            "Working Directory Not Found",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Warning);
+
+        if (result != DialogResult.OK)
+        {
+            return null;
+        }
+
+        var defaultDir = Program._settings.DefaultWorkDir;
+        var initialDir = !string.IsNullOrEmpty(defaultDir) && Directory.Exists(defaultDir) ? defaultDir : null;
+
+        using var fbd = new FolderBrowserDialog();
+        if (initialDir != null)
+        {
+            fbd.InitialDirectory = initialDir;
+        }
+
+        if (fbd.ShowDialog() != DialogResult.OK)
+        {
+            return null;
+        }
+
+        var newCwd = fbd.SelectedPath;
+
+        // Update the session's workspace.yaml with the new CWD
+        var sessionDir = Path.Combine(Program.SessionStateDir, sessionId);
+        SessionService.UpdateSessionCwd(sessionDir, newCwd);
+
+        // Update cached session
+        var session = this._cachedSessions?.Find(x => x.Id == sessionId);
+        if (session != null)
+        {
+            session.Cwd = newCwd;
+        }
+
+        return newCwd;
     }
 
     private async Task RefreshGridAsync()

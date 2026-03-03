@@ -52,6 +52,13 @@ internal static class IdePickerVisuals
             return;
         }
 
+        if (!Directory.Exists(cwd))
+        {
+            MessageBox.Show($"The working directory no longer exists:\n\n{cwd}\n\nEdit the session to set a new directory.",
+                "Open in IDE", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         var repoRoot = SessionService.FindGitRoot(cwd);
         bool hasRepo = repoRoot != null && !string.Equals(repoRoot, cwd, StringComparison.OrdinalIgnoreCase);
 

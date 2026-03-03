@@ -80,6 +80,9 @@ internal class ExistingSessionsVisuals
     internal event Action<string>? OnPinSession;
     internal event Action<string>? OnUnpinSession;
 
+    /// <summary>Fired when the user wants to open a session by entering its ID.</summary>
+    internal event Action<string>? OnOpenSessionById;
+
     /// <summary>Fired when the user copies a session ID to clipboard.</summary>
     internal event Action<string>? OnCopySessionId;
 
@@ -462,39 +465,152 @@ internal class ExistingSessionsVisuals
     {
         var searchPanel = new Panel { Dock = DockStyle.Top, Height = 34 };
 
+        var copilotIcon = TryGetExeIcon(Program.CopilotExePath);
+
         this.NewSessionButton = new Button
         {
-            Text = "New Session",
-            Width = 100,
+            Width = 32,
             Height = 27,
-            Location = new Point(5, 3)
+            Location = new Point(5, 3),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand,
+            ImageAlign = ContentAlignment.MiddleCenter
         };
-        this.NewSessionButton.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
+        this.NewSessionButton.FlatAppearance.BorderSize = 0;
+        this.NewSessionButton.FlatAppearance.BorderColor = this.NewSessionButton.BackColor;
+        this.NewSessionButton.FlatAppearance.MouseOverBackColor = Color.Transparent;
+        this.NewSessionButton.FlatAppearance.MouseDownBackColor = Color.Transparent;
+        if (copilotIcon != null)
+        {
+            this.NewSessionButton.Image = new Bitmap(copilotIcon, 20, 20);
+        }
+        else
+        {
+            this.NewSessionButton.Text = "+";
+            this.NewSessionButton.Font = new Font(SystemFonts.DefaultFont.FontFamily, 12f, FontStyle.Bold);
+        }
+
+        var newSessionTooltip = new ToolTip();
+        newSessionTooltip.SetToolTip(this.NewSessionButton, "Create new or open existing Copilot CLI sessions");
+
+        var newSessionMenu = new ContextMenuStrip();
+        var menuNew = new ToolStripMenuItem("New") { Image = copilotIcon?.Clone() as Image };
+        menuNew.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
+        var menuOpenExisting = new ToolStripMenuItem("Open Existing") { Image = copilotIcon?.Clone() as Image };
+        menuOpenExisting.Click += (s, e) =>
+        {
+            var inputForm = new Form
+            {
+                Text = "Open Session by Id",
+                Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                Width = 500,
+                Height = 170,
+                TopMost = Program._settings.AlwaysOnTop
+            };
+            if (Program.AppIcon != null)
+            {
+                inputForm.Icon = Program.AppIcon;
+            }
+
+            var lblId = new Label { Text = "Session Id", AutoSize = true, Location = new Point(14, 12) };
+            var txtId = new TextBox { PlaceholderText = "Paste or type the session Id", Location = new Point(14, 34), Width = 450 };
+            var btnOk = new Button { Text = "Open", Width = 80, Location = new Point(300, 70), DialogResult = DialogResult.None };
+            var btnCancel = new Button { Text = "Cancel", Width = 80, Location = new Point(390, 70), DialogResult = DialogResult.Cancel };
+            btnOk.Click += (_, _) =>
+            {
+                var id = txtId.Text.Trim();
+                if (!string.IsNullOrEmpty(id))
+                {
+                    inputForm.DialogResult = DialogResult.OK;
+                    inputForm.Close();
+                }
+            };
+            inputForm.Controls.AddRange([lblId, SettingsVisuals.WrapWithBorder(txtId), btnOk, btnCancel]);
+            inputForm.AcceptButton = btnOk;
+            inputForm.CancelButton = btnCancel;
+            if (inputForm.ShowDialog() == DialogResult.OK)
+            {
+                var sessionId = txtId.Text.Trim();
+                var sessionDir = Path.Combine(Program.SessionStateDir, sessionId);
+                if (!Directory.Exists(sessionDir) || !File.Exists(Path.Combine(sessionDir, "workspace.yaml")))
+                {
+                    MessageBox.Show($"Session not found:\n\n{sessionId}", "Open Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (SessionArchiveService.IsDeleted(Program.SessionStateFile, sessionId))
+                {
+                    MessageBox.Show($"This session has been deleted:\n\n{sessionId}", "Open Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                this.OnOpenSessionById?.Invoke(sessionId);
+            }
+        };
+        newSessionMenu.Items.Add(menuNew);
+        newSessionMenu.Items.Add(menuOpenExisting);
+
+        this.NewSessionButton.Click += (s, e) =>
+        {
+            newSessionMenu.Show(this.NewSessionButton, new Point(0, this.NewSessionButton.Height));
+        };
 
         var searchLabel = new Label
         {
             Text = "Search:",
             AutoSize = true,
-            Location = new Point(112, 9),
+            Location = new Point(44, 9),
             Margin = new Padding(0, 0, 8, 0)
         };
+        var shell32Path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
+        var settingsIcon = TryExtractIcon(shell32Path, 314);
+
         this.SettingsButton = new Button
         {
-            Text = "⚙",
             Width = 32,
             Height = 27,
             Anchor = AnchorStyles.Top | AnchorStyles.Right,
             Location = new Point(searchPanel.Width - 37, 3),
-            Font = new Font(SystemFonts.DefaultFont.FontFamily, 12f),
             FlatStyle = FlatStyle.Flat,
-            Cursor = Cursors.Hand
+            Cursor = Cursors.Hand,
+            ImageAlign = ContentAlignment.MiddleCenter,
+            TabStop = false
         };
         this.SettingsButton.FlatAppearance.BorderSize = 0;
+        this.SettingsButton.FlatAppearance.MouseOverBackColor = Color.Transparent;
+        this.SettingsButton.FlatAppearance.MouseDownBackColor = Color.Transparent;
+        this.SettingsButton.Paint += (s, e) =>
+        {
+            var btn = (Button)s!;
+            e.Graphics.Clear(btn.Parent?.BackColor ?? btn.BackColor);
+            if (btn.Image != null)
+            {
+                var x = (btn.Width - btn.Image.Width) / 2;
+                var y = (btn.Height - btn.Image.Height) / 2;
+                e.Graphics.DrawImage(btn.Image, x, y);
+            }
+        };
+        if (settingsIcon != null)
+        {
+            this.SettingsButton.Image = new Bitmap(settingsIcon, 20, 20);
+        }
+        else
+        {
+            this.SettingsButton.Text = "⚙";
+            this.SettingsButton.Font = new Font(SystemFonts.DefaultFont.FontFamily, 12f);
+        }
+
+        var settingsTooltip = new ToolTip();
+        settingsTooltip.SetToolTip(this.SettingsButton, "Settings");
         searchPanel.Resize += (s, e) => this.SettingsButton.Left = searchPanel.ClientSize.Width - 37;
         this.SettingsButton.Click += (s, e) => this.OnSettingsClicked?.Invoke();
         this.SearchBox = new TextBox
         {
-            Location = new Point(170, 4),
+            Location = new Point(102, 4),
             Width = 100,
             Height = 20,
             Multiline = true,
@@ -511,7 +627,7 @@ internal class ExistingSessionsVisuals
             }
         };
         var searchBorder = SettingsVisuals.WrapWithBorder(this.SearchBox);
-        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 210;
+        searchPanel.Resize += (s, e) => searchBorder.Width = searchPanel.ClientSize.Width - 142;
         var debounceTimer = new Timer { Interval = 500 };
         debounceTimer.Tick += (s, e) =>
         {
@@ -909,9 +1025,67 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenNewSessionWorkspace);
 
-        var menuStartNewSession = new ToolStripMenuItem("Start New Session") { Image = copilotIcon?.Clone() as Image };
-        menuStartNewSession.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
-        gridContextMenu.Items.Add(menuStartNewSession);
+        var menuOpen = new ToolStripMenuItem("Open") { Image = copilotIcon?.Clone() as Image };
+        var menuOpenNew = new ToolStripMenuItem("Open New") { Image = copilotIcon?.Clone() as Image };
+        menuOpenNew.Click += (s, e) => this.OnNewSessionClicked?.Invoke();
+        var menuOpenById = new ToolStripMenuItem("Open by Id") { Image = copilotIcon?.Clone() as Image };
+        menuOpenById.Click += (s, e) =>
+        {
+            var inputForm = new Form
+            {
+                Text = "Open Session by Id",
+                Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                Width = 500,
+                Height = 170,
+                TopMost = Program._settings.AlwaysOnTop
+            };
+            if (Program.AppIcon != null)
+            {
+                inputForm.Icon = Program.AppIcon;
+            }
+
+            var lblId = new Label { Text = "Session Id", AutoSize = true, Location = new Point(14, 12) };
+            var txtId = new TextBox { PlaceholderText = "Paste or type the session Id", Location = new Point(14, 34), Width = 450 };
+            var btnOk = new Button { Text = "Open", Width = 80, Location = new Point(300, 70), DialogResult = DialogResult.None };
+            var btnCancel = new Button { Text = "Cancel", Width = 80, Location = new Point(390, 70), DialogResult = DialogResult.Cancel };
+            btnOk.Click += (_, _) =>
+            {
+                var id = txtId.Text.Trim();
+                if (!string.IsNullOrEmpty(id))
+                {
+                    inputForm.DialogResult = DialogResult.OK;
+                    inputForm.Close();
+                }
+            };
+            inputForm.Controls.AddRange([lblId, SettingsVisuals.WrapWithBorder(txtId), btnOk, btnCancel]);
+            inputForm.AcceptButton = btnOk;
+            inputForm.CancelButton = btnCancel;
+            if (inputForm.ShowDialog() == DialogResult.OK)
+            {
+                var sessionId = txtId.Text.Trim();
+                var sessionDir = Path.Combine(Program.SessionStateDir, sessionId);
+                if (!Directory.Exists(sessionDir) || !File.Exists(Path.Combine(sessionDir, "workspace.yaml")))
+                {
+                    MessageBox.Show($"Session not found:\n\n{sessionId}", "Open Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (SessionArchiveService.IsDeleted(Program.SessionStateFile, sessionId))
+                {
+                    MessageBox.Show($"This session has been deleted:\n\n{sessionId}", "Open Session", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                this.OnOpenSessionById?.Invoke(sessionId);
+            }
+        };
+        menuOpen.DropDownItems.Add(menuOpenNew);
+        menuOpen.DropDownItems.Add(menuOpenById);
+        gridContextMenu.Items.Add(menuOpen);
 
         // --- Terminal ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
@@ -1013,13 +1187,19 @@ internal class ExistingSessionsVisuals
         gridContextMenu.Opening += (s, e) =>
         {
             var selectedIds = this.GridVisuals.GetSelectedSessionIds();
+            if (selectedIds.Count == 0)
+            {
+                e.Cancel = true;
+                return;
+            }
+
             bool isMultiSelect = selectedIds.Count > 1;
 
             // Update session ID header
             var headerSid = this.GridVisuals.GetSelectedSessionId();
             if (headerSid != null && !isMultiSelect)
             {
-                menuSessionIdHeader.Text = $"#:{headerSid}";
+                menuSessionIdHeader.Text = $"Id: {headerSid}";
                 menuSessionIdHeader.ToolTipText = headerSid;
                 menuSessionIdHeader.Visible = true;
             }
@@ -1116,6 +1296,22 @@ internal class ExistingSessionsVisuals
                     this.SessionGrid.ClearSelection();
                     this.SessionGrid.Rows[e.RowIndex].Selected = true;
                     this.SessionGrid.CurrentCell = this.SessionGrid.Rows[e.RowIndex].Cells[0];
+                }
+            }
+            else if (e.Button == MouseButtons.Right && e.RowIndex < 0)
+            {
+                this.SessionGrid.ClearSelection();
+            }
+        };
+
+        this.SessionGrid.MouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                var hitTest = this.SessionGrid.HitTest(e.X, e.Y);
+                if (hitTest.Type != DataGridViewHitTestType.Cell && hitTest.Type != DataGridViewHitTestType.RowHeader)
+                {
+                    this.SessionGrid.ClearSelection();
                 }
             }
         };

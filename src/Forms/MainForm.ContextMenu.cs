@@ -25,6 +25,12 @@ internal partial class MainForm
             this.LaunchSession();
         };
 
+        this._sessionsVisuals.OnOpenSessionById += (sid) =>
+        {
+            this.SelectedSessionId = sid;
+            this.LaunchSession();
+        };
+
         this._sessionsVisuals.OnEditSession += async (sid) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sid);
@@ -59,6 +65,7 @@ internal partial class MainForm
         this._sessionsVisuals.OnOpenAsNewSession += async (selectedSessionId) =>
         {
             var selectedCwd = this._interactionManager.GetSessionCwd(selectedSessionId);
+            selectedCwd = this.ValidateCwdOrPrompt(selectedSessionId, selectedCwd);
 
             if (!string.IsNullOrEmpty(selectedCwd))
             {
@@ -129,6 +136,7 @@ internal partial class MainForm
         this._sessionsVisuals.OnOpenAsNewSessionWorkspace += async (selectedSessionId) =>
         {
             var selectedCwd = this._interactionManager.GetSessionCwd(selectedSessionId);
+            selectedCwd = this.ValidateCwdOrPrompt(selectedSessionId, selectedCwd);
 
             if (!string.IsNullOrEmpty(selectedCwd))
             {
@@ -178,7 +186,13 @@ internal partial class MainForm
                 return;
             }
 
-            var proc = this._interactionManager.OpenTerminal(session.Cwd, sid);
+            var validCwd = this.ValidateCwdOrPrompt(sid, session.Cwd);
+            if (validCwd == null)
+            {
+                return;
+            }
+
+            var proc = this._interactionManager.OpenTerminal(validCwd, sid);
             if (proc != null)
             {
                 this.RefreshActiveStatusAsync();
@@ -198,7 +212,13 @@ internal partial class MainForm
                 return;
             }
 
-            var targetPath = useRepoRoot ? SessionService.FindGitRoot(session.Cwd) : session.Cwd;
+            var validCwd = this.ValidateCwdOrPrompt(sid, session.Cwd);
+            if (validCwd == null)
+            {
+                return;
+            }
+
+            var targetPath = useRepoRoot ? SessionService.FindGitRoot(validCwd) : validCwd;
             if (targetPath == null)
             {
                 return;
@@ -404,11 +424,17 @@ internal partial class MainForm
             var session = this._cachedSessions.Find(x => x.Id == sid);
             if (session != null && !string.IsNullOrEmpty(session.Cwd))
             {
-                SessionInteractionManager.OpenExplorer(session.Cwd);
+                var validCwd = this.ValidateCwdOrPrompt(sid, session.Cwd);
+                if (validCwd == null)
+                {
+                    return;
+                }
+
+                SessionInteractionManager.OpenExplorer(validCwd);
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(1500).ConfigureAwait(false);
-                    this._activeTracker.TrackExplorerWindow(sid, session.Cwd, "Explorer (CWD)");
+                    this._activeTracker.TrackExplorerWindow(sid, validCwd, "Explorer (CWD)");
                     this.BeginInvoke(this.RefreshActiveStatusAsync);
                 });
             }
