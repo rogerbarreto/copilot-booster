@@ -15,12 +15,15 @@ internal sealed class GlobalHotkeyService : IDisposable
     private const int WM_HOTKEY = 0x0312;
     private const int HOTKEY_ID = 0xB001;
 
+    private const uint MOD_NOREPEAT = 0x4000;
+#if DEBUG
+    private const uint VK_F1 = 0x70;
+#else
     // Modifier flags for RegisterHotKey
     private const uint MOD_ALT = 0x0001;
     private const uint MOD_WIN = 0x0008;
-    private const uint MOD_NOREPEAT = 0x4000;
-
     private const uint VK_X = 0x58;
+#endif
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -56,7 +59,12 @@ internal sealed class GlobalHotkeyService : IDisposable
             Parent = new IntPtr(-3)
         });
 
+#if DEBUG
+        // Use F1 with no modifiers in Debug to avoid stuck modifier keys when breaking in debugger
+        this._registered = RegisterHotKey(this._window.Handle, HOTKEY_ID, MOD_NOREPEAT, VK_F1);
+#else
         this._registered = RegisterHotKey(this._window.Handle, HOTKEY_ID, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_X);
+#endif
         if (!this._registered)
         {
             this._window.DestroyHandle();

@@ -51,9 +51,35 @@ internal partial class MainForm : Form
     private GlobalHotkeyService? _hotkeyService;
     private System.Windows.Forms.Timer? _toastAnimTimer;
     private int _toastTargetTop;
-    private bool _toastVisible;
     private bool _toastAnimating;
     private long _toastShownTicks;
+
+    /// <summary>
+    /// Determines whether the toast is actually visible on screen by checking window state
+    /// rather than tracking a flag, since external actions (Win+D, taskbar click) can change
+    /// visibility outside our control. A window whose area is less than 10% of its restore
+    /// bounds is considered minimized/invisible (e.g., Win+D shrinks to 160x28).
+    /// </summary>
+    private bool IsToastVisible
+    {
+        get
+        {
+            if (!this.Visible || this.WindowState == FormWindowState.Minimized)
+            {
+                return false;
+            }
+
+            var restore = this.RestoreBounds.Size;
+            if (restore.Width <= 0 || restore.Height <= 0)
+            {
+                return this.Visible;
+            }
+
+            var currentArea = (long)this.Size.Width * this.Size.Height;
+            var restoreArea = (long)restore.Width * restore.Height;
+            return currentArea > restoreArea / 10;
+        }
+    }
 
     /// <summary>
     /// Gets the identifier of the currently selected session.
@@ -222,7 +248,7 @@ internal partial class MainForm : Form
         this._toastAnimTimer.Tick += this.OnToastAnimationTick;
 
         this.Deactivate += this.OnToastDeactivate;
-        this._toastVisible = false;
+        this.ShowToast();
     }
 
     private void TeardownToastMode()
@@ -243,7 +269,6 @@ internal partial class MainForm : Form
         }
 
         this.Deactivate -= this.OnToastDeactivate;
-        this._toastVisible = false;
 
         // Restore normal window state if it was hidden
         if (this.WindowState == FormWindowState.Minimized)
@@ -276,7 +301,7 @@ internal partial class MainForm : Form
             return;
         }
 
-        if (this._toastVisible)
+        if (this.IsToastVisible)
         {
             this.HideToast();
         }
@@ -394,11 +419,15 @@ internal partial class MainForm : Form
     {
         var workArea = screen.WorkingArea;
         var pos = Program._settings.ToastPosition;
-        var (target, animStart, _) = CalculateToastPosition(workArea, this.Size, pos);
 
-        // Hide first to prevent flash when restoring from minimized
+        // When minimized (e.g., after Win+D), the form Size is the taskbar thumbnail
+        // (160x28). Use RestoreBounds to get the real size for position calculation.
         bool wasMinimized = this.WindowState == FormWindowState.Minimized;
-        if (wasMinimized)
+        var formSize = wasMinimized ? this.RestoreBounds.Size : this.Size;
+        var (target, animStart, _) = CalculateToastPosition(workArea, formSize, pos);
+
+        // Only hide if the window was visually present (not already shrunk by Win+D)
+        if (wasMinimized && this.RestoreBounds.Size.Width <= this.Size.Width)
         {
             this.Visible = false;
         }
@@ -423,10 +452,9 @@ internal partial class MainForm : Form
             this.Activate();
         }
 
-        this._toastVisible = true;
         this._toastShownTicks = Environment.TickCount64;
 
-        // Re-apply session states from disk before populating so that any tab
+        // Re-applysession states from disk before populating so that any tab
         // changes made while hidden are reflected immediately.
         this.ApplySessionStates(this._cachedSessions);
         this.PopulateGridWithFilter(this._lastSnapshot);
@@ -457,8 +485,6 @@ internal partial class MainForm : Form
             this.Hide();
             this.WindowState = FormWindowState.Minimized;
         }
-
-        this._toastVisible = false;
     }
 
     private void OnToastAnimationTick(object? sender, EventArgs e)
@@ -479,7 +505,8 @@ internal partial class MainForm : Form
             this._toastAnimating = false;
 
             // If we animated to off-screen, hide the form
-            if (!this._toastVisible)
+            var screen = GetToastScreen();
+            if (this.Top >= screen.WorkingArea.Bottom || this.Bottom <= screen.WorkingArea.Top)
             {
                 this.Hide();
                 this.WindowState = FormWindowState.Minimized;
@@ -495,15 +522,14 @@ internal partial class MainForm : Form
 
     private void OnToastDeactivate(object? sender, EventArgs e)
     {
-        if (!Program._settings.ToastMode || !Program._settings.SpotlightAutoHide || !this._toastVisible || this._toastAnimating)
+        if (!Program._settings.ToastMode || !Program._settings.SpotlightAutoHide || !this.IsToastVisible || this._toastAnimating)
         {
             return;
         }
 
-        // Ignore deactivation when being minimized by taskbar click
+        // Ignore deactivation when being minimized by taskbar click or Win+D
         if (this.WindowState == FormWindowState.Minimized)
         {
-            this._toastVisible = false;
             return;
         }
 
@@ -710,7 +736,7 @@ internal partial class MainForm : Form
         this.Shown += async (s, e) =>
         {
             // On first launch with toast mode, slide up instead of just hiding
-            if (Program._settings.ToastMode && !this._toastVisible)
+            if (Program._settings.ToastMode && !this.IsToastVisible)
             {
                 this.ShowToast();
             }

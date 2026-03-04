@@ -4,10 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.17.2] - 2026-03-03
+## [0.17.2] - 2026-03-04
 
 ### Fixed
 
+- **Toast hotkey after Win+D** — `Win+Alt+X` now correctly restores the window after `Win+D` (show desktop). Replaced stale `_toastVisible` flag with computed `IsToastVisible` property that checks actual window state (visibility, window state, and area ratio vs restore bounds).
+- **Toast position after minimize** — uses `RestoreBounds.Size` instead of the minimized taskbar thumbnail size (160x28) for position calculation, preventing shifted/wrong placement.
 - **CWD validation** — all session actions (launch, terminal, IDE, explorer) now check if the working directory exists before proceeding. If missing, prompts the user to select a new folder and updates the session automatically.
 - **Startup CWD warning** — shows a toast warning on app load when sessions have missing working directories.
 - **Context menu on empty area** — right-clicking empty grid space no longer opens the context menu.
@@ -19,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Context menu "Start New Session"** — replaced with "Open" submenu containing "Open New" and "Open by Id" options.
 - **Open by Id** — validates session exists and is not soft-deleted before opening.
 - **Toolbar buttons** — replaced text buttons with borderless icon buttons (Copilot CLI icon for sessions, shell32 gear for settings) with tooltips.
+- **CWD column** — persistent width, fixed Date/Ctx/Running columns, text truncation with `...` keeping icons visible.
+- **Debug hotkey** — uses F1 (no modifiers) in Debug builds to avoid stuck modifier keys when breaking in debugger.
 
 ### Added
 
@@ -27,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Branch/PR options in "Open as New Session"** — enhanced dialog with Same branch / Switch branch / From PR # modes.
 - **Allowed URLs settings** — new Settings tab for managing global Copilot CLI allowed URLs (`~/.copilot/config.json`).
 - **Current branch display** — shows current branch in dialogs and marks it with `*` prefix in branch dropdowns.
+- **CWD git icon** — embedded PNG git icon replaces the `⎇` text character, with warning icon for missing directories.
+- **CWD tooltip** — shows full path on hover.
 
 ## [0.17.1] - 2026-03-02
 
