@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.2] - 2026-03-03
+
+### Fixed
+
+- **CWD validation** — all session actions (launch, terminal, IDE, explorer) now check if the working directory exists before proceeding. If missing, prompts the user to select a new folder and updates the session automatically.
+- **Startup CWD warning** — shows a toast warning on app load when sessions have missing working directories.
+- **Context menu on empty area** — right-clicking empty grid space no longer opens the context menu.
+- **RunGit process deadlock** — fixed potential freeze when git commands produce large stderr output (e.g., `git fetch` progress) by reading stdout/stderr asynchronously.
+
+### Changed
+
+- **Session ID format** — context menu header changed from `#:{sid}` to `Id: {sid}`.
+- **Context menu "Start New Session"** — replaced with "Open" submenu containing "Open New" and "Open by Id" options.
+- **Open by Id** — validates session exists and is not soft-deleted before opening.
+- **Toolbar buttons** — replaced text buttons with borderless icon buttons (Copilot CLI icon for sessions, shell32 gear for settings) with tooltips.
+
+### Added
+
+- **PR-based workspace creation** — create workspaces from pull request numbers with platform auto-detection (GitHub, GitLab, Azure DevOps, Bitbucket).
+- **PR validation** — async validation via `git ls-remote` with GitHub API title fetch and "Use PR title as session name" option.
+- **Branch/PR options in "Open as New Session"** — enhanced dialog with Same branch / Switch branch / From PR # modes.
+- **Allowed URLs settings** — new Settings tab for managing global Copilot CLI allowed URLs (`~/.copilot/config.json`).
+- **Current branch display** — shows current branch in dialogs and marks it with `*` prefix in branch dropdowns.
+
 ## [0.17.1] - 2026-03-02
 
 ### Fixed

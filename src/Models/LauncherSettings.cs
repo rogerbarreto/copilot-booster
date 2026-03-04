@@ -136,6 +136,13 @@ internal class LauncherSettings
     public List<string> SessionColumnOrder { get; set; } = [];
 
     /// <summary>
+    /// Gets or sets the saved CWD column width. 0 means auto-fit.
+    /// </summary>
+    [JsonPropertyName("cwdColumnWidth")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int CwdColumnWidth { get; set; }
+
+    /// <summary>
     /// Gets or sets whether toast mode is enabled.
     /// When enabled, a global hotkey shows the window sliding up from the screen edge.
     /// </summary>

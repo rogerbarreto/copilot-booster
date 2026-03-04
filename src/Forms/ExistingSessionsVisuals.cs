@@ -20,6 +20,7 @@ internal class ExistingSessionsVisuals
 {
     private Image? _teamsIcon;
     private bool _suppressColumnOrderSave;
+    private bool _cwdWidthRestored;
     private readonly LauncherSettings _settings;
 
     internal TextBox SearchBox = null!;
@@ -145,6 +146,11 @@ internal class ExistingSessionsVisuals
         this.InitializeSessionGrid();
         var searchPanel = this.BuildSearchPanel();
         this.GridVisuals = new SessionGridVisuals(this.SessionGrid, activeTracker, this._settings);
+        if (this._cwdWidthRestored)
+        {
+            this.GridVisuals.CwdManuallyResized = true;
+        }
+
         this.BuildGridContextMenu();
 
         // Dynamic session tabs from settings — reduced padding keeps the "+" tab compact
@@ -274,16 +280,20 @@ internal class ExistingSessionsVisuals
         runningAppsCol.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
         this.SessionGrid.Columns.Add(runningAppsCol);
         this.SessionGrid.Columns["Session"]!.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        this.SessionGrid.Columns["Session"]!.MinimumWidth = 100;
-        this.SessionGrid.Columns["CWD"]!.Width = 100;
-        this.SessionGrid.Columns["CWD"]!.MinimumWidth = 60;
+        this.SessionGrid.Columns["Session"]!.MinimumWidth = 30;
+        var savedCwdWidth = this._settings.CwdColumnWidth;
+        this.SessionGrid.Columns["CWD"]!.Width = savedCwdWidth > 0 ? savedCwdWidth : 100;
+        this.SessionGrid.Columns["CWD"]!.MinimumWidth = 30;
+        this._cwdWidthRestored = savedCwdWidth > 0;
         var dateWidth = GetDateColumnWidth(this._settings.DateFormat, this.SessionGrid.Font);
         this.SessionGrid.Columns["Date"]!.Width = dateWidth;
         this.SessionGrid.Columns["Date"]!.MinimumWidth = dateWidth;
         this.SessionGrid.Columns["Date"]!.Resizable = DataGridViewTriState.False;
         this.SessionGrid.Columns["Date"]!.HeaderCell.ToolTipText = "Date Created";
+        this.SessionGrid.Columns["Context"]!.Resizable = DataGridViewTriState.False;
         this.SessionGrid.Columns["RunningApps"]!.Width = 110;
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
+        this.SessionGrid.Columns["RunningApps"]!.Resizable = DataGridViewTriState.False;
 
         // Restore saved column display order
         var savedOrder = this._settings.SessionColumnOrder;
@@ -392,9 +402,11 @@ internal class ExistingSessionsVisuals
             adjustingSessionWidth = true;
             try
             {
+                var ctxCol = this.SessionGrid.Columns["Context"]!;
                 var otherWidth = this.SessionGrid.Columns["Status"]!.Width
                     + this.SessionGrid.Columns["CWD"]!.Width
                     + this.SessionGrid.Columns["Date"]!.Width
+                    + ctxCol.Width
                     + this.SessionGrid.Columns["RunningApps"]!.Width
                     + (this.SessionGrid.RowHeadersVisible ? this.SessionGrid.RowHeadersWidth : 0)
                     + SystemInformation.VerticalScrollBarWidth + 2;
@@ -409,8 +421,11 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Resize += (s, e) => AdjustSessionColumnWidth();
         this.SessionGrid.ColumnWidthChanged += (s, e) =>
         {
-            if (e.Column.Name != "Session")
+            if (e.Column.Name == "CWD" && !adjustingSessionWidth)
             {
+                this.GridVisuals.CwdManuallyResized = true;
+                this._settings.CwdColumnWidth = e.Column.Width;
+                this._settings.Save();
                 AdjustSessionColumnWidth();
             }
         };

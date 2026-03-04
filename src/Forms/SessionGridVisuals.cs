@@ -38,6 +38,8 @@ internal class SessionGridVisuals
     private readonly LauncherSettings _settings;
     private readonly Image[] _spinnerFrames;
     private readonly Image _bellImage;
+    private readonly Image _gitIcon;
+    private readonly Image? _cwdWarningIcon;
     private readonly Image? _filesIcon;
     private readonly Image? _edgeIcon;
     private int _spinnerFrameIndex;
@@ -46,6 +48,11 @@ internal class SessionGridVisuals
     /// Callback to get the number of context files for a session.
     /// </summary>
     internal Func<string, int>? GetSessionFileCount;
+
+    /// <summary>
+    /// Set to true when the user manually resizes the CWD column, preventing auto-fit from overriding it.
+    /// </summary>
+    internal bool CwdManuallyResized;
 
     /// <summary>
     /// Callback to get session files for the context menu popup.
@@ -73,9 +80,13 @@ internal class SessionGridVisuals
         }
         using var bellStream = asm.GetManifestResourceStream("CopilotBooster.Resources.bell.png")!;
         this._bellImage = Image.FromStream(bellStream);
+        using var gitStream = asm.GetManifestResourceStream("CopilotBooster.Resources.git.png")!;
+        this._gitIcon = new Bitmap(Image.FromStream(gitStream), 14, 14);
 
         var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
         this._filesIcon = ExistingSessionsVisuals.TryExtractIcon(shell32, 250);
+        var warningIcon = ExistingSessionsVisuals.TryExtractIcon(shell32, 233);
+        this._cwdWarningIcon = warningIcon != null ? new Bitmap(warningIcon, 14, 14) : null;
         this._edgeIcon = ExistingSessionsVisuals.TryGetExeIcon(
             EdgeWorkspaceService.FindEdgePath() ?? "");
 
@@ -222,6 +233,69 @@ internal class SessionGridVisuals
                 return;
             }
 
+            // CWD column — truncate text and draw git/warning icon
+            if (this._grid.Columns[e.ColumnIndex].Name == "CWD")
+            {
+                e.PaintBackground(e.ClipBounds, true);
+                var cwdValue = e.Value as string;
+                if (!string.IsNullOrEmpty(cwdValue))
+                {
+                    var font = e.CellStyle!.Font ?? this._grid.Font;
+                    var foreColor = (e.State & DataGridViewElementStates.Selected) != 0
+                        ? e.CellStyle.SelectionForeColor
+                        : e.CellStyle.ForeColor;
+                    var cwdPadding = e.CellStyle.Padding;
+                    var cellTag = this._grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Tag as string;
+                    var icon = cellTag == "git" ? this._gitIcon
+                        : cellTag == "missing" ? this._cwdWarningIcon
+                        : null;
+                    var iconWidth = icon != null ? icon.Width + 4 : 0;
+                    var availableWidth = e.CellBounds.Width - cwdPadding.Left - cwdPadding.Right - 4;
+                    var textWidth = availableWidth - iconWidth;
+                    var ellipsisWidth = TextRenderer.MeasureText(e.Graphics!, "...", font).Width - 4;
+
+                    var fullTextWidth = TextRenderer.MeasureText(e.Graphics!, cwdValue, font).Width;
+                    string displayText;
+                    if (fullTextWidth <= textWidth)
+                    {
+                        displayText = cwdValue;
+                    }
+                    else if (textWidth > ellipsisWidth)
+                    {
+                        var truncated = cwdValue;
+                        while (truncated.Length > 1 && TextRenderer.MeasureText(e.Graphics!, truncated, font).Width > textWidth - ellipsisWidth)
+                        {
+                            truncated = truncated[..^1];
+                        }
+
+                        displayText = truncated + "...";
+                    }
+                    else
+                    {
+                        displayText = "";
+                    }
+
+                    var textBounds = new Rectangle(
+                        e.CellBounds.X + cwdPadding.Left + 2,
+                        e.CellBounds.Y,
+                        textWidth,
+                        e.CellBounds.Height);
+                    TextRenderer.DrawText(e.Graphics!, displayText, font, textBounds, foreColor,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+
+                    if (icon != null)
+                    {
+                        var actualTextWidth = string.IsNullOrEmpty(displayText) ? 0 : TextRenderer.MeasureText(e.Graphics!, displayText, font).Width;
+                        var iconX = e.CellBounds.X + cwdPadding.Left + 2 + actualTextWidth;
+                        var iconY = e.CellBounds.Y + (e.CellBounds.Height - icon.Height) / 2;
+                        e.Graphics!.DrawImage(icon, iconX, iconY);
+                    }
+                }
+
+                e.Handled = true;
+                return;
+            }
+
             // Active column (5) — draw underlined links
             if (e.ColumnIndex != 5 || e.Value is not string text || string.IsNullOrEmpty(text))
             {
@@ -326,10 +400,6 @@ internal class SessionGridVisuals
             {
                 var dateText = session.LastModified.ToString(this._settings.DateFormat);
                 var cwdText = session.Folder;
-                if (session.IsGitRepo)
-                {
-                    cwdText += " \u2387";
-                }
 
                 var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.Id, "");
                 var statusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(session.Id, "");
@@ -361,9 +431,21 @@ internal class SessionGridVisuals
                     row.Cells[1].ToolTipText = session.Summary;
                 }
 
-                if (session.IsGitRepo)
+                var cwdExists = !string.IsNullOrEmpty(session.Cwd) && Directory.Exists(session.Cwd);
+
+                if (!cwdExists && !string.IsNullOrEmpty(session.Cwd))
                 {
-                    row.Cells["CWD"].ToolTipText = "Git-enabled repository";
+                    row.Cells["CWD"].ToolTipText = $"{session.Cwd}\n⚠ Working directory not found";
+                    row.Cells["CWD"].Tag = "missing";
+                }
+                else if (session.IsGitRepo)
+                {
+                    row.Cells["CWD"].ToolTipText = $"{session.Cwd} (Git)";
+                    row.Cells["CWD"].Tag = "git";
+                }
+                else
+                {
+                    row.Cells["CWD"].ToolTipText = session.Cwd;
                 }
 
                 if (statusIcon == "bell")
@@ -439,6 +521,11 @@ internal class SessionGridVisuals
 
     internal void AutoFitCwdColumn()
     {
+        if (this.CwdManuallyResized)
+        {
+            return;
+        }
+
         var cwdCol = this._grid.Columns["CWD"]!;
         var font = this._grid.Font;
         int maxWidth = cwdCol.MinimumWidth;
