@@ -217,6 +217,18 @@ internal partial class TeamsWindowService
     }
 
     /// <summary>
+    /// Restores a cached HWND from the handle cache (app restart). Claims it to prevent cross-session theft.
+    /// </summary>
+    internal void RestoreCachedHwnd(IntPtr hwnd)
+    {
+        this.CachedHwnd = hwnd;
+        if (hwnd != IntPtr.Zero)
+        {
+            s_claimedHwnds.Add(hwnd);
+        }
+    }
+
+    /// <summary>
     /// Releases the claimed HWND when this service is no longer tracking a session.
     /// </summary>
     internal void Release()

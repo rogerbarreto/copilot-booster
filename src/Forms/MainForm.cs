@@ -303,7 +303,15 @@ internal partial class MainForm : Form
 
         if (this.IsToastVisible)
         {
-            this.HideToast();
+            // When not always-on-top, the window may be behind others — bring it forward instead of hiding
+            if (!Program._settings.AlwaysOnTop && GetForegroundWindow() != this.Handle)
+            {
+                this.Activate();
+            }
+            else
+            {
+                this.HideToast();
+            }
         }
         else
         {

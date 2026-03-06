@@ -1,5 +1,26 @@
 ﻿public sealed class TeamsWindowServiceTests
 {
+    /// <summary>
+    /// Claims all currently open Teams windows to prevent re-scan from picking them up.
+    /// Must be disposed (or Release called) to unclaim.
+    /// </summary>
+    private static List<TeamsWindowService> ClaimAllTeamsWindows()
+    {
+        var claimers = new List<TeamsWindowService>();
+        foreach (var hwnd in TeamsWindowService.FindAllTeamsWindows())
+        {
+            var c = new TeamsWindowService();
+            c.RestoreCachedHwnd(hwnd);
+            claimers.Add(c);
+        }
+
+        return claimers;
+    }
+
+    private static void ReleaseAll(List<TeamsWindowService> claimers)
+    {
+        foreach (var c in claimers) { c.Release(); }
+    }
     [Fact]
     public void TeamsUrl_IsCorrect()
     {
@@ -27,10 +48,15 @@
     [Fact]
     public void NewInstance_IsNotOpen()
     {
-        var service = new TeamsWindowService();
+        var claimers = ClaimAllTeamsWindows();
+        try
+        {
+            var service = new TeamsWindowService();
 
-        Assert.False(service.IsOpen);
-        Assert.Equal(IntPtr.Zero, service.CachedHwnd);
+            Assert.False(service.IsOpen);
+            Assert.Equal(IntPtr.Zero, service.CachedHwnd);
+        }
+        finally { ReleaseAll(claimers); }
     }
 
     [Fact]
@@ -44,9 +70,14 @@
     [Fact]
     public void Focus_ReturnsFalse_WhenNotOpen()
     {
-        var service = new TeamsWindowService();
+        var claimers = ClaimAllTeamsWindows();
+        try
+        {
+            var service = new TeamsWindowService();
 
-        Assert.False(service.Focus());
+            Assert.False(service.Focus());
+        }
+        finally { ReleaseAll(claimers); }
     }
 
     [Fact]
@@ -89,16 +120,7 @@
     [Fact]
     public void IsOpen_ReturnsFalse_WhenCachedHwndIsInvalid_AndNoUnclaimedWindows()
     {
-        // Claim all currently open Teams windows so re-scan finds nothing
-        var openWindows = TeamsWindowService.FindAllTeamsWindows();
-        var claimServices = new List<TeamsWindowService>();
-        foreach (var hwnd in openWindows)
-        {
-            var claimer = new TeamsWindowService { CachedHwnd = hwnd };
-            _ = claimer.IsOpen; // triggers claim in static set
-            claimServices.Add(claimer);
-        }
-
+        var claimers = ClaimAllTeamsWindows();
         try
         {
             var service = new TeamsWindowService();
@@ -106,34 +128,27 @@
 
             Assert.False(service.IsOpen);
         }
-        finally
-        {
-            foreach (var c in claimServices) { c.Release(); }
-        }
+        finally { ReleaseAll(claimers); }
     }
 
     [Fact]
     public void Focus_ReturnsFalse_WhenCachedHwndIsInvalid()
     {
-        var service = new TeamsWindowService();
-        service.CachedHwnd = 99999999;
+        var claimers = ClaimAllTeamsWindows();
+        try
+        {
+            var service = new TeamsWindowService();
+            service.CachedHwnd = 99999999;
 
-        Assert.False(service.Focus());
+            Assert.False(service.Focus());
+        }
+        finally { ReleaseAll(claimers); }
     }
 
     [Fact]
     public void CheckAlive_FiresWindowClosed_WhenNotOpen()
     {
-        // Claim all open windows so re-scan can't find any
-        var openWindows = TeamsWindowService.FindAllTeamsWindows();
-        var claimers = new List<TeamsWindowService>();
-        foreach (var h in openWindows)
-        {
-            var c = new TeamsWindowService { CachedHwnd = h };
-            _ = c.IsOpen;
-            claimers.Add(c);
-        }
-
+        var claimers = ClaimAllTeamsWindows();
         try
         {
             var service = new TeamsWindowService();
@@ -144,10 +159,7 @@
 
             Assert.True(closedFired);
         }
-        finally
-        {
-            foreach (var c in claimers) { c.Release(); }
-        }
+        finally { ReleaseAll(claimers); }
     }
 
     [Fact]
@@ -155,15 +167,7 @@
     {
         // IsPendingOpen is private set, so we can't test this directly.
         // But we can verify that a new service (not pending, not open) fires the event.
-        var openWindows = TeamsWindowService.FindAllTeamsWindows();
-        var claimers = new List<TeamsWindowService>();
-        foreach (var h in openWindows)
-        {
-            var c = new TeamsWindowService { CachedHwnd = h };
-            _ = c.IsOpen;
-            claimers.Add(c);
-        }
-
+        var claimers = ClaimAllTeamsWindows();
         try
         {
             var service = new TeamsWindowService();
@@ -173,10 +177,7 @@
             service.CheckAlive();
             Assert.True(closedFired);
         }
-        finally
-        {
-            foreach (var c in claimers) { c.Release(); }
-        }
+        finally { ReleaseAll(claimers); }
     }
 
     // --- Title matching tests ---

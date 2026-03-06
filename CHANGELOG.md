@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.3] - 2026-03-06
+
+### Fixed
+
+- **Toast hotkey focus behavior** — when Always on Top is disabled and the window is visible but not focused, `Win+Alt+X` now brings the window to focus instead of hiding it. Always on Top mode retains the toggle behavior.
+- **Session alias edit refresh** — editing a session alias no longer triggers a full list reload that resets the active tab. The cell is updated in-place and the background refresh picks up changes naturally.
+- **Session page alignment** — warning banner and unsaved-changes card in session.html are now properly centered.
+- **Teams handle persistence** — tracked Teams window handles are now cached across app restarts, matching the existing behavior for IDE, Explorer, and Edge windows.
+
+### Changed
+
+- **Bug report template** — simplified to require only a description. Steps to reproduce, expected behavior, version, and OS are now optional (empty sections auto-removed).
+
 ## [0.17.2] - 2026-03-04
 
 ### Fixed

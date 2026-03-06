@@ -22,7 +22,8 @@ internal static class WindowHandleCacheService
         string cacheFile,
         Dictionary<string, List<ActiveProcess>> trackedProcesses,
         Dictionary<string, List<(string Label, IntPtr Hwnd)>> explorerWindows,
-        Dictionary<string, EdgeWorkspaceService> edgeWorkspaces)
+        Dictionary<string, EdgeWorkspaceService> edgeWorkspaces,
+        Dictionary<string, TeamsWindowService> teamsWindows)
     {
         try
         {
@@ -58,6 +59,14 @@ internal static class WindowHandleCacheService
                 }
             }
 
+            foreach (var kvp in teamsWindows)
+            {
+                if (kvp.Value.CachedHwnd != IntPtr.Zero)
+                {
+                    entries.Add(new HandleEntry(kvp.Key, "teams", "Teams", null, kvp.Value.CachedHwnd.ToInt64()));
+                }
+            }
+
             var dir = Path.GetDirectoryName(cacheFile);
             if (dir != null && !Directory.Exists(dir))
             {
@@ -76,17 +85,19 @@ internal static class WindowHandleCacheService
     internal static (
         Dictionary<string, List<ActiveProcess>> Processes,
         Dictionary<string, List<(string Label, IntPtr Hwnd)>> Explorers,
-        Dictionary<string, IntPtr> Edges) Load(string cacheFile)
+        Dictionary<string, IntPtr> Edges,
+        Dictionary<string, IntPtr> Teams) Load(string cacheFile)
     {
         var processes = new Dictionary<string, List<ActiveProcess>>(StringComparer.OrdinalIgnoreCase);
         var explorers = new Dictionary<string, List<(string Label, IntPtr Hwnd)>>(StringComparer.OrdinalIgnoreCase);
         var edges = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+        var teams = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
             if (!File.Exists(cacheFile))
             {
-                return (processes, explorers, edges);
+                return (processes, explorers, edges, teams);
             }
 
             var entries = JsonSerializer.Deserialize<List<HandleEntry>>(File.ReadAllText(cacheFile)) ?? [];
@@ -122,11 +133,15 @@ internal static class WindowHandleCacheService
                     case "edge":
                         edges[entry.SessionId] = hwnd;
                         break;
+
+                    case "teams":
+                        teams[entry.SessionId] = hwnd;
+                        break;
                 }
             }
         }
         catch (Exception ex) { Program.Logger.LogWarning("Failed to load window handle cache: {Error}", ex.Message); }
 
-        return (processes, explorers, edges);
+        return (processes, explorers, edges, teams);
     }
 }

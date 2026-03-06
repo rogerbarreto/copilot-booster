@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -31,7 +30,7 @@ internal partial class MainForm
             this.LaunchSession();
         };
 
-        this._sessionsVisuals.OnEditSession += async (sid) =>
+        this._sessionsVisuals.OnEditSession += (sid) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sid);
             if (session == null)
@@ -55,10 +54,22 @@ internal partial class MainForm
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
                 SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd);
 
-                // Always reload and refresh after edit
-                this._cachedSessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-                var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
-                this.PopulateGridWithFilter(snapshot);
+                // Update the cached session and grid row in-place to avoid a full list refresh
+                // which resets the tab view. The natural background refresh will pick up the changes.
+                session.Alias = edited.Value.Alias;
+                session.Cwd = edited.Value.Cwd;
+                session.Folder = Path.GetFileName(edited.Value.Cwd.TrimEnd('\\')) ?? edited.Value.Cwd;
+
+                var gridName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
+                foreach (DataGridViewRow row in this._sessionsVisuals.SessionGrid.Rows)
+                {
+                    if (row.Tag as string == sid)
+                    {
+                        row.Cells["Session"].Value = session.IsPinned ? $"\U0001F4CC {gridName}" : gridName;
+                        row.Cells["CWD"].Value = session.Folder;
+                        break;
+                    }
+                }
             }
         };
 

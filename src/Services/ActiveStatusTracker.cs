@@ -508,7 +508,7 @@ internal class ActiveStatusTracker
         if (!this._handleCacheInitialLoadDone)
         {
             this._handleCacheInitialLoadDone = true;
-            var (cachedProcesses, cachedExplorers, cachedEdges) = WindowHandleCacheService.Load(Program.WindowHandleCacheFile);
+            var (cachedProcesses, cachedExplorers, cachedEdges, cachedTeams) = WindowHandleCacheService.Load(Program.WindowHandleCacheFile);
             foreach (var kvp in cachedProcesses)
             {
                 if (!this._trackedProcesses.ContainsKey(kvp.Key))
@@ -530,6 +530,16 @@ internal class ActiveStatusTracker
                 if (!this._edgeWorkspaces.ContainsKey(kvp.Key))
                 {
                     this._edgeWorkspaces[kvp.Key] = new EdgeWorkspaceService(kvp.Key) { CachedHwnd = kvp.Value };
+                }
+            }
+
+            foreach (var kvp in cachedTeams)
+            {
+                if (!this._teamsWindows.ContainsKey(kvp.Key))
+                {
+                    var teams = new TeamsWindowService();
+                    teams.RestoreCachedHwnd(kvp.Value);
+                    this._teamsWindows[kvp.Key] = teams;
                 }
             }
 
@@ -640,7 +650,7 @@ internal class ActiveStatusTracker
         }
 
         // Persist window handle cache so tracking survives app restarts
-        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces);
+        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces, this._teamsWindows);
 
         // Clean up closed Edge workspaces
         var closedEdge = new List<string>();
