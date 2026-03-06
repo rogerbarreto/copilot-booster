@@ -458,6 +458,7 @@ internal partial class EdgeWorkspaceService
     internal static Dictionary<string, IntPtr> ScanEdgeForSessionTabs()
     {
         var result = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+        var tabCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -480,14 +481,20 @@ internal partial class EdgeWorkspaceService
 
                     var tabCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem);
                     var tabs = AutomationElement.FromHandle(hwnd).FindAll(TreeScope.Descendants, tabCondition);
+                    int windowTabCount = tabs.Count;
 
                     foreach (AutomationElement tab in tabs)
                     {
                         var tabName = tab.Current.Name;
                         var sessionId = ExtractSessionId(tabName);
-                        if (sessionId != null && !result.ContainsKey(sessionId))
+                        if (sessionId != null)
                         {
-                            result[sessionId] = hwnd;
+                            // Prefer the window with more tabs (handles duplicate session tabs across windows)
+                            if (!result.ContainsKey(sessionId) || windowTabCount > tabCounts[sessionId])
+                            {
+                                result[sessionId] = hwnd;
+                                tabCounts[sessionId] = windowTabCount;
+                            }
                         }
                     }
                 }

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,44 +6,28 @@ using System.Threading.Tasks;
 namespace CopilotBooster.Services;
 
 /// <summary>
-/// A TaskScheduler that runs tasks on a dedicated STA thread.
-/// Required for COM-based APIs like UI Automation.
+/// A TaskScheduler that runs each task on a fresh STA thread.
+/// A fresh thread avoids stale COM proxy caches that accumulate on a persistent
+/// STA thread which doesn't pump Windows messages between tasks.
 /// </summary>
 internal sealed class StaTaskScheduler : TaskScheduler, IDisposable
 {
     internal static StaTaskScheduler Instance { get; } = new();
 
-    private readonly BlockingCollection<Task> _tasks = new();
-    private readonly Thread _staThread;
-
-    private StaTaskScheduler()
+    protected override void QueueTask(Task task)
     {
-        this._staThread = new Thread(this.RunTasks)
+        var thread = new Thread(() => this.TryExecuteTask(task))
         {
             IsBackground = true,
             Name = "STA Worker"
         };
-        this._staThread.SetApartmentState(ApartmentState.STA);
-        this._staThread.Start();
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
     }
-
-    protected override void QueueTask(Task task) => this._tasks.Add(task);
 
     protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
 
-    protected override IEnumerable<Task> GetScheduledTasks() => this._tasks;
+    protected override IEnumerable<Task> GetScheduledTasks() => [];
 
-    private void RunTasks()
-    {
-        foreach (var task in this._tasks.GetConsumingEnumerable())
-        {
-            this.TryExecuteTask(task);
-        }
-    }
-
-    public void Dispose()
-    {
-        this._tasks.CompleteAdding();
-        this._tasks.Dispose();
-    }
+    public void Dispose() { }
 }

@@ -960,6 +960,11 @@ internal class ActiveStatusTracker
                 this._edgeWorkspaces[kvp.Key] = ws;
                 changed = true;
             }
+            else if (this._edgeWorkspaces[kvp.Key].CachedHwnd != kvp.Value)
+            {
+                // Window handle changed (Edge moved the tab or a better window was found)
+                this._edgeWorkspaces[kvp.Key].CachedHwnd = kvp.Value;
+            }
         }
 
         return changed;
