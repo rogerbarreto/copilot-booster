@@ -207,4 +207,89 @@ public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
         var isGuardActive = await page.EvaluateAsync<bool>("beforeUnloadActive");
         Assert.True(isGuardActive);
     }
+
+    /// <summary>
+    /// Full E2E test: Playwright opens session.html in a headed Chromium window,
+    /// clicks save, WindowEventHookService detects the ::Save title change,
+    /// the detection logic extracts the session ID and writes session-signals.js,
+    /// then session.html polls and resets the save button.
+    /// </summary>
+    [StaFact]
+    public async Task SessionHtml_E2E_SaveDetectedByWindowHook_SignalWritten_ButtonResetsAsync()
+    {
+        const string SessionId = "e2e-save-hook-test";
+
+        var sessionHtml = FindSessionHtml();
+        var sessionDir = Path.GetDirectoryName(sessionHtml)!;
+        this._signalsFilePath = Path.Combine(sessionDir, "session-signals.js");
+
+        // Write initial empty signals
+        EdgeWorkspaceService.WriteSessionSignals([]);
+
+        // Set up WindowEventHookService to detect ::Save title change
+        using var hookService = new WindowEventHookService();
+        string? detectedSaveTitle = null;
+        using var saveDetected = new ManualResetEventSlim();
+
+        hookService.WindowTitleChanged += (hwnd, title) =>
+        {
+            if (title.Contains("::Save", StringComparison.OrdinalIgnoreCase)
+                && title.Contains(SessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                detectedSaveTitle = title;
+                saveDetected.Set();
+            }
+        };
+        hookService.Start();
+
+        // Launch Chromium HEADED so the window title is visible to SetWinEventHook
+        using var playwright = await Playwright.CreateAsync();
+        await using var browser = await playwright.Chromium.LaunchAsync(new()
+        {
+            Headless = false,
+            Args = ["--allow-file-access-from-files"],
+        });
+        var page = await browser.NewPageAsync();
+
+        await page.GotoAsync($"{ToFileUri(sessionHtml)}#{SessionId}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // Click save — JS changes document.title to "CB Session [e2e-save-hook-test]::Save"
+        await page.ClickAsync("#save-link");
+
+        // Pump messages to receive the WinEvent hook callback
+        var deadline = Environment.TickCount64 + 10000;
+        while (!saveDetected.IsSet && Environment.TickCount64 < deadline)
+        {
+            Application.DoEvents();
+            await Task.Delay(50);
+        }
+
+        // ASSERT: WindowEventHookService detected the ::Save title change
+        Assert.True(saveDetected.IsSet, "WindowEventHookService should detect ::Save in Chromium window title");
+        Assert.Contains("::Save", detectedSaveTitle);
+
+        // Now do what HandleEdgeSaveSignalAsync does: extract session ID, write signal
+        var extractedId = EdgeWorkspaceService.ExtractSessionId(detectedSaveTitle!);
+        Assert.Equal(SessionId, extractedId);
+
+        // Write lastSaved timestamp via the app code path
+        var requestedAt = await page.EvaluateAsync<long>("requestedAt");
+        var lastSaved = new Dictionary<string, long> { [SessionId] = requestedAt + 1000 };
+        EdgeWorkspaceService.WriteSessionSignals(lastSaved);
+
+        // Trigger pollSignals and verify session.html resets the button
+        await page.EvaluateAsync("pollSignals()");
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('save-link').textContent.includes('Save Tabs')",
+            null,
+            new() { Timeout = 10000 });
+
+        var buttonText = await page.TextContentAsync("#save-link");
+        Assert.Contains("Save Tabs", buttonText);
+
+        // Verify beforeunload guard deactivated
+        var isGuardActive = await page.EvaluateAsync<bool>("beforeUnloadActive");
+        Assert.False(isGuardActive, "beforeunload guard should be inactive after save completes");
+    }
 }
