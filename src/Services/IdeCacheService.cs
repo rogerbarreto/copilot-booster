@@ -74,12 +74,13 @@ internal static class IdeCacheService
                     Hwnd = hwnd
                 };
 
-                if (!result.ContainsKey(entry.SessionId))
+                if (!result.TryGetValue(entry.SessionId, out List<ActiveProcess>? value))
                 {
-                    result[entry.SessionId] = [];
+                    value = [];
+                    result[entry.SessionId] = value;
                 }
 
-                result[entry.SessionId].Add(proc);
+                value.Add(proc);
             }
         }
         catch (Exception ex) { Program.Logger.LogWarning("Failed to load IDE cache: {Error}", ex.Message); }

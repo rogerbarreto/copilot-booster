@@ -1,5 +1,4 @@
-using System.Diagnostics;
-using Xunit;
+﻿using System.Diagnostics;
 
 namespace CopilotBooster.IntegrationTests;
 
@@ -31,7 +30,10 @@ public class WindowEventHookIntegrationTests
             IntPtr cmdHwnd = IntPtr.Zero;
             hookService.WindowTitleChanged += (hwnd, title) =>
             {
-                if (title.Contains("CreatedTestWindow")) cmdHwnd = hwnd;
+                if (title.Contains("CreatedTestWindow"))
+                {
+                    cmdHwnd = hwnd;
+                }
             };
 
             PumpMessages(5000);

@@ -1,11 +1,6 @@
-using System;
-using System.IO;
-using System.Threading;
-using CopilotBooster.Services;
+﻿namespace CopilotBooster.IntegrationTests.Integration;
 
-namespace CopilotBooster.IntegrationTests.Integration;
-
-public class FileSystemWatcherIntegrationTests : IDisposable
+public sealed class FileSystemWatcherIntegrationTests : IDisposable
 {
     private readonly string _tempDir;
 
@@ -46,7 +41,7 @@ public class FileSystemWatcherIntegrationTests : IDisposable
         Directory.CreateDirectory(sessionDir);
         File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"), "id: test-session-abc");
 
-        Assert.True(fired.Wait(5000), "WorkspaceChanged should fire when workspace.yaml is created");
+        Assert.True(fired.Wait(5000, TestContext.Current.CancellationToken), "WorkspaceChanged should fire when workspace.yaml is created");
         Assert.Equal("test-session-abc", changedSessionId);
     }
 
@@ -69,7 +64,7 @@ public class FileSystemWatcherIntegrationTests : IDisposable
 
         File.AppendAllText(filePath, "\nmodified: true");
 
-        Assert.True(fired.Wait(5000), "WorkspaceChanged should fire when workspace.yaml is modified");
+        Assert.True(fired.Wait(5000, TestContext.Current.CancellationToken), "WorkspaceChanged should fire when workspace.yaml is modified");
         Assert.Equal("test-session-mod", changedSessionId);
     }
 
@@ -92,7 +87,7 @@ public class FileSystemWatcherIntegrationTests : IDisposable
 
         File.Delete(filePath);
 
-        Assert.True(fired.Wait(5000), "WorkspaceDeleted should fire when workspace.yaml is deleted");
+        Assert.True(fired.Wait(5000, TestContext.Current.CancellationToken), "WorkspaceDeleted should fire when workspace.yaml is deleted");
         Assert.Equal("test-session-del", deletedSessionId);
     }
 
@@ -114,7 +109,7 @@ public class FileSystemWatcherIntegrationTests : IDisposable
 
         File.WriteAllText(Path.Combine(sessionDir, "plan.md"), "# Plan");
 
-        Assert.True(fired.Wait(5000), "CountsChanged should fire for non-reserved file creation");
+        Assert.True(fired.Wait(5000, TestContext.Current.CancellationToken), "CountsChanged should fire for non-reserved file creation");
         Assert.Equal("test-session-xyz", changedId);
 
         var counts = watcher.GetCounts("test-session-xyz");
@@ -136,7 +131,7 @@ public class FileSystemWatcherIntegrationTests : IDisposable
         // Create a reserved file — should be filtered
         File.WriteAllText(Path.Combine(sessionDir, "events.jsonl"), "{}");
 
-        Assert.False(fired.Wait(1000), "CountsChanged should NOT fire for reserved file creation");
+        Assert.False(fired.Wait(1000, TestContext.Current.CancellationToken), "CountsChanged should NOT fire for reserved file creation");
     }
 
     [Fact]

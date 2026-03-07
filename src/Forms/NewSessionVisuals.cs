@@ -17,7 +17,7 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal class NewSessionVisuals
 {
-    private static readonly string[] s_cwdColumnBaseNames = { "Directory", "# Sessions created", "Git" };
+    private static readonly string[] s_cwdColumnBaseNames = ["Directory", "# Sessions created", "Git"];
 
     internal ListView CwdListView = null!;
     internal Label LoadingOverlay = null!;
@@ -25,7 +25,7 @@ internal class NewSessionVisuals
     /// <summary>
     /// Gets the column sorter to assign as <see cref="ListView.ListViewItemSorter"/>.
     /// </summary>
-    internal ListViewColumnSorter Sorter { get; } = new(column: 1, order: SortOrder.Descending, numericColumns: new HashSet<int> { 1 });
+    internal ListViewColumnSorter Sorter { get; } = new(column: 1, order: SortOrder.Descending, numericColumns: [1]);
 
     // Context menu events — arg is always the selected CWD path.
     internal event Func<string, Task>? OnNewSession;
@@ -132,10 +132,7 @@ internal class NewSessionVisuals
             if (e.Button == MouseButtons.Right)
             {
                 var item = this.CwdListView.GetItemAt(e.X, e.Y);
-                if (item != null)
-                {
-                    item.Selected = true;
-                }
+                item?.Selected = true;
             }
         };
 

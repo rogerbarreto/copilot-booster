@@ -75,7 +75,7 @@ internal class ActiveStatusTracker
         return this._startedSessionIds.Contains(sessionId);
     }
 
-    internal HashSet<string> LoadActiveSessionIds()
+    internal static HashSet<string> LoadActiveSessionIds()
     {
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
@@ -94,7 +94,7 @@ internal class ActiveStatusTracker
     /// Syncs the terminal cache file with the set of actually open terminal windows.
     /// Adds newly discovered terminals and removes stale entries.
     /// </summary>
-    internal void SyncTerminalCache(HashSet<string> openTerminalSessionIds)
+    internal static void SyncTerminalCache(HashSet<string> openTerminalSessionIds)
     {
         try
         {
@@ -495,7 +495,7 @@ internal class ActiveStatusTracker
     {
         // Snapshot to avoid concurrent modification from UI thread
         var sessionSnapshot = sessions.ToList();
-        this._activeSessionIds = this.LoadActiveSessionIds();
+        this._activeSessionIds = LoadActiveSessionIds();
 
         // Scan for open tracked windows by title (including session-summary matching)
         // Pass previously tracked HWNDs as fallback for Copilot CLI windows whose titles change dynamically
@@ -503,7 +503,7 @@ internal class ActiveStatusTracker
 
         // Sync terminal cache with actual open windows
         var openTerminalIds = new HashSet<string>(this._activeTrackedWindows.Keys, StringComparer.OrdinalIgnoreCase);
-        this.SyncTerminalCache(openTerminalIds);
+        SyncTerminalCache(openTerminalIds);
 
         // Load cached window handles on first refresh (restores IDE/Explorer/Edge tracking across app restarts)
         if (!this._handleCacheInitialLoadDone)
@@ -808,15 +808,16 @@ internal class ActiveStatusTracker
         if (match != null)
         {
             var (sessionId, label) = match.Value;
-            if (!this._activeTrackedWindows.ContainsKey(sessionId))
+            if (!this._activeTrackedWindows.TryGetValue(sessionId, out List<(string Label, string Title, nint Hwnd)>? value))
             {
-                this._activeTrackedWindows[sessionId] = new List<(string Label, string Title, IntPtr Hwnd)>();
+                value = [];
+                this._activeTrackedWindows[sessionId] = value;
             }
 
             // Avoid duplicate HWND entries
-            if (!this._activeTrackedWindows[sessionId].Any(t => t.Hwnd == hwnd))
+            if (!value.Any(t => t.Hwnd == hwnd))
             {
-                this._activeTrackedWindows[sessionId].Add((label, title, hwnd));
+                value.Add((label, title, hwnd));
             }
 
             affected.Add(sessionId);
@@ -946,11 +947,13 @@ internal class ActiveStatusTracker
     /// </summary>
     internal void TrackProcess(string sessionId, ActiveProcess process)
     {
-        if (!this._trackedProcesses.ContainsKey(sessionId))
+        if (!this._trackedProcesses.TryGetValue(sessionId, out List<ActiveProcess>? value))
         {
-            this._trackedProcesses[sessionId] = new List<ActiveProcess>();
+            value = [];
+            this._trackedProcesses[sessionId] = value;
         }
-        this._trackedProcesses[sessionId].Add(process);
+
+        value.Add(process);
     }
 
     /// <summary>
@@ -963,13 +966,12 @@ internal class ActiveStatusTracker
         var hwnd = FindExplorerByPath(folderPath);
         if (hwnd != IntPtr.Zero)
         {
-            if (!this._explorerWindows.ContainsKey(sessionId))
+            if (!this._explorerWindows.TryGetValue(sessionId, out List<(string Label, nint Hwnd)>? list))
             {
-                this._explorerWindows[sessionId] = [];
+                list = [];
+                this._explorerWindows[sessionId] = list;
             }
 
-            // Replace existing entry with same label, or add new
-            var list = this._explorerWindows[sessionId];
             var idx = list.FindIndex(e => string.Equals(e.Label, label, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0)
             {
@@ -1020,7 +1022,7 @@ internal class ActiveStatusTracker
                         string path = new Uri(url).LocalPath.TrimEnd('\\');
                         if (string.Equals(path, targetPath, StringComparison.OrdinalIgnoreCase))
                         {
-                            return (IntPtr)(long)window.HWND;
+                            return checked((IntPtr)(long)window.HWND);
                         }
                     }
                 }
@@ -1159,18 +1161,19 @@ internal class ActiveStatusTracker
         bool changed = false;
         foreach (var kvp in edgeMatches)
         {
-            if (!this._edgeWorkspaces.ContainsKey(kvp.Key))
+            if (!this._edgeWorkspaces.TryGetValue(kvp.Key, out EdgeWorkspaceService? value))
             {
-                var ws = new EdgeWorkspaceService(kvp.Key);
-                ws.CachedHwnd = kvp.Value;
+                var ws = new EdgeWorkspaceService(kvp.Key)
+                {
+                    CachedHwnd = kvp.Value
+                };
                 ws.WindowClosed += () => this.OnEdgeWorkspaceClosed?.Invoke(kvp.Key);
                 this._edgeWorkspaces[kvp.Key] = ws;
                 changed = true;
             }
-            else if (this._edgeWorkspaces[kvp.Key].CachedHwnd != kvp.Value)
+            else if (value.CachedHwnd != kvp.Value)
             {
-                // Window handle changed (Edge moved the tab or a better window was found)
-                this._edgeWorkspaces[kvp.Key].CachedHwnd = kvp.Value;
+                value.CachedHwnd = kvp.Value;
             }
         }
 

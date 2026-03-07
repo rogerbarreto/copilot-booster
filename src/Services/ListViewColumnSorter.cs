@@ -16,7 +16,7 @@ internal class ListViewColumnSorter : IComparer
     {
         this.SortColumn = column;
         this.Order = order;
-        this._numericColumns = numericColumns ?? new HashSet<int> { 1 };
+        this._numericColumns = numericColumns ?? [1];
     }
 
     public int Compare(object? x, object? y)
@@ -32,8 +32,8 @@ internal class ListViewColumnSorter : IComparer
         int result;
         if (this._numericColumns.Contains(this.SortColumn))
         {
-            int.TryParse(textX, out int numX);
-            int.TryParse(textY, out int numY);
+            _ = int.TryParse(textX, out int numX);
+            _ = int.TryParse(textY, out int numY);
             result = numX.CompareTo(numY);
         }
         else

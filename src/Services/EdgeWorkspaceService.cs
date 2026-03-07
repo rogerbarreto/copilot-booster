@@ -740,5 +740,4 @@ internal partial class EdgeWorkspaceService
 
         Program.Logger.LogInformation("Restored {Count} Edge tabs for workspace {Id}", urls.Count, this.WorkspaceId);
     }
-
 }

@@ -7,7 +7,7 @@
         return settings;
     }
 
-    private string CreateTempFile()
+    private static string CreateTempFile()
     {
         var path = Path.Combine(Path.GetTempPath(), $"archive-test-{Guid.NewGuid()}.json");
         return path;
@@ -23,7 +23,7 @@
     [Fact]
     public void Load_ValidFile_DeserializesCorrectly()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             File.WriteAllText(file, """
@@ -50,7 +50,7 @@
     [Fact]
     public void Load_LegacyIsArchived_MigratesToTab()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             File.WriteAllText(file, """
@@ -75,7 +75,7 @@
     [Fact]
     public void Load_CorruptedJson_ReturnsEmptyDictionary()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             File.WriteAllText(file, "not valid json {{{");
@@ -91,7 +91,7 @@
     [Fact]
     public void SetTab_CreatesFileAndSetsState()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetTab(file, "session-1", "Archived");
@@ -108,7 +108,7 @@
     [Fact]
     public void SetTab_ToDefault_CleansUpState()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetTab(file, "session-1", "Archived");
@@ -126,7 +126,7 @@
     [Fact]
     public void GetTab_WithNonExistent_ReturnsDefaultTab()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             var tab = SessionArchiveService.GetTab(file, "nonexistent");
@@ -144,7 +144,7 @@
     [Fact]
     public void SetPinned_CreatesFileAndSetsState()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
@@ -161,7 +161,7 @@
     [Fact]
     public void SetPinned_ToFalse_CleansUpDefaultState()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
@@ -179,7 +179,7 @@
     [Fact]
     public void IsPinned_WithPinnedSession_ReturnsTrue()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
@@ -194,7 +194,7 @@
     [Fact]
     public void IsPinned_WithNonExistent_ReturnsFalse()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             Assert.False(SessionArchiveService.IsPinned(file, "nonexistent"));
@@ -211,7 +211,7 @@
     [Fact]
     public void SetTab_PreservesPinState()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
@@ -229,7 +229,7 @@
     [Fact]
     public void Remove_DeletesSessionState()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetTab(file, "session-1", "Archived");
@@ -248,7 +248,7 @@
     [Fact]
     public void Remove_NonExistent_DoesNotThrow()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetTab(file, "session-1", "Archived");
@@ -265,7 +265,7 @@
     [Fact]
     public void CleanupIfDefault_KeepsPinnedSession()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetPinned(file, "session-1", true);
@@ -287,7 +287,7 @@
     [Fact]
     public void RenameTab_UpdatesAllSessionStates()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionArchiveService.SetTab(file, "session-1", "Work");
@@ -456,9 +456,9 @@
         MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
         // Verify initial assignment
-        Assert.All(sessions.Where(s => s.Id.StartsWith("a")), s => Assert.Equal("Active", s.Tab));
-        Assert.All(sessions.Where(s => s.Id.StartsWith("w")), s => Assert.Equal("Work", s.Tab));
-        Assert.All(sessions.Where(s => s.Id.StartsWith("p")), s => Assert.Equal("Personal", s.Tab));
+        Assert.All(sessions.Where(s => s.Id.StartsWith('a')), s => Assert.Equal("Active", s.Tab));
+        Assert.All(sessions.Where(s => s.Id.StartsWith('w')), s => Assert.Equal("Work", s.Tab));
+        Assert.All(sessions.Where(s => s.Id.StartsWith('p')), s => Assert.Equal("Personal", s.Tab));
 
         // Scramble: Personal first, Work second, Active third
         // Re-apply — tabs should NOT change because sessions have explicit state
@@ -469,9 +469,9 @@
 
         MainForm.ApplySessionStates(sessions, states, "Active", CreateTestSettings());
 
-        Assert.All(sessions.Where(s => s.Id.StartsWith("a")), s => Assert.Equal("Active", s.Tab));
-        Assert.All(sessions.Where(s => s.Id.StartsWith("w")), s => Assert.Equal("Work", s.Tab));
-        Assert.All(sessions.Where(s => s.Id.StartsWith("p")), s => Assert.Equal("Personal", s.Tab));
+        Assert.All(sessions.Where(s => s.Id.StartsWith('a')), s => Assert.Equal("Active", s.Tab));
+        Assert.All(sessions.Where(s => s.Id.StartsWith('w')), s => Assert.Equal("Work", s.Tab));
+        Assert.All(sessions.Where(s => s.Id.StartsWith('p')), s => Assert.Equal("Personal", s.Tab));
     }
 
     public static IEnumerable<object[]> TabOrderPermutations =>

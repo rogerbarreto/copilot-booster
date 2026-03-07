@@ -111,7 +111,7 @@
 
         var (target, _, _) = MainForm.CalculateToastPosition(secondaryWorkArea, s_windowSize, "bottom-center");
 
-        int expectedLeft = 1920 + (2560 - s_windowSize.Width) / 2;
+        int expectedLeft = 1920 + ((2560 - s_windowSize.Width) / 2);
         Assert.Equal(expectedLeft, target.X);
         Assert.Equal(1400 - s_windowSize.Height, target.Y);
     }

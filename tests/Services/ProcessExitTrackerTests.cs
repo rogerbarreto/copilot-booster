@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 public sealed class ProcessExitTrackerTests : IDisposable
 {
@@ -23,7 +23,7 @@ public sealed class ProcessExitTrackerTests : IDisposable
 
         this._tracker.Watch(int.MaxValue);
 
-        Assert.True(fired.Wait(TimeSpan.FromSeconds(5)), "ProcessExited should fire for non-existent PID");
+        Assert.True(fired.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "ProcessExited should fire for non-existent PID");
         Assert.Equal(int.MaxValue, exitedPid);
     }
 
@@ -51,7 +51,7 @@ public sealed class ProcessExitTrackerTests : IDisposable
         this._tracker.ProcessExited += _ => fired.Set();
         this._tracker.Watch(Environment.ProcessId);
 
-        Assert.False(fired.Wait(TimeSpan.FromSeconds(1)), "ProcessExited should not fire for a running process");
+        Assert.False(fired.Wait(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken), "ProcessExited should not fire for a running process");
         this._tracker.Unwatch(Environment.ProcessId);
     }
 
@@ -75,7 +75,7 @@ public sealed class ProcessExitTrackerTests : IDisposable
 
         this._tracker.Watch(process.Id);
 
-        Assert.True(fired.Wait(TimeSpan.FromSeconds(5)), "ProcessExited should fire when the process exits");
+        Assert.True(fired.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "ProcessExited should fire when the process exits");
         Assert.Equal(process.Id, exitedPid);
     }
 }

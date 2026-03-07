@@ -1,12 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Drawing;
-using System.Windows.Forms;
-using CopilotBooster.Forms;
-using CopilotBooster.Models;
-using CopilotBooster.Services;
-using Xunit;
-
-public sealed class IncrementalGridUpdateTests
+﻿public sealed class IncrementalGridUpdateTests
 {
     private static LauncherSettings CreateTestSettings()
     {
@@ -36,9 +28,9 @@ public sealed class IncrementalGridUpdateTests
         Dictionary<string, string>? statusIcons = null)
     {
         return new ActiveStatusSnapshot(
-            activeText ?? new Dictionary<string, string>(),
-            new Dictionary<string, string>(),
-            statusIcons ?? new Dictionary<string, string>()
+            activeText ?? [],
+            [],
+            statusIcons ?? []
         );
     }
 

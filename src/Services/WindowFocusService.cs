@@ -165,7 +165,7 @@ internal static partial class WindowFocusService
             }
 
             var sb = new System.Text.StringBuilder(len + 1);
-            GetWindowText(hwnd, sb, sb.Capacity);
+            _ = GetWindowText(hwnd, sb, sb.Capacity);
             var title = sb.ToString();
             if (title.Contains(titleSubstring, StringComparison.OrdinalIgnoreCase)
                 && (secondarySubstring == null || title.Contains(secondarySubstring, StringComparison.OrdinalIgnoreCase)))
@@ -213,7 +213,7 @@ internal static partial class WindowFocusService
             }
 
             var sb = new System.Text.StringBuilder(len + 1);
-            GetWindowText(hwnd, sb, sb.Capacity);
+            _ = GetWindowText(hwnd, sb, sb.Capacity);
             var title = sb.ToString();
             if (title.Contains(titleSubstring, StringComparison.OrdinalIgnoreCase)
                 && (secondarySubstring == null || title.Contains(secondarySubstring, StringComparison.OrdinalIgnoreCase)))
@@ -261,12 +261,12 @@ internal static partial class WindowFocusService
             }
 
             var sb = new System.Text.StringBuilder(len + 1);
-            GetWindowText(hwnd, sb, sb.Capacity);
+            _ = GetWindowText(hwnd, sb, sb.Capacity);
             var title = sb.ToString();
             if (title.Contains(titleSubstring, StringComparison.OrdinalIgnoreCase)
                 && (secondarySubstring == null || title.Contains(secondarySubstring, StringComparison.OrdinalIgnoreCase)))
             {
-                GetWindowThreadProcessId(hwnd, out uint pid);
+                _ = GetWindowThreadProcessId(hwnd, out uint pid);
                 resultPid = (int)pid;
                 return false;
             }
@@ -307,18 +307,20 @@ internal static partial class WindowFocusService
             }
 
             var sb = new System.Text.StringBuilder(len + 1);
-            GetWindowText(hwnd, sb, sb.Capacity);
+            _ = GetWindowText(hwnd, sb, sb.Capacity);
             var title = sb.ToString();
 
             var match = MatchTrackedWindowTitle(title, sessionSummaries);
 
             if (match is { SessionId.Length: > 0 } m)
             {
-                if (!results.ContainsKey(m.SessionId))
+                if (!results.TryGetValue(m.SessionId, out List<(string, string, nint)>? value))
                 {
-                    results[m.SessionId] = new List<(string, string, IntPtr)>();
+                    value = [];
+                    results[m.SessionId] = value;
                 }
-                results[m.SessionId].Add((m.Label, title, hwnd));
+
+                value.Add((m.Label, title, hwnd));
                 matchedHwnds.Add(hwnd);
             }
 
@@ -346,15 +348,17 @@ internal static partial class WindowFocusService
                         if (len > 0)
                         {
                             var sb = new System.Text.StringBuilder(len + 1);
-                            GetWindowText(prevHwnd, sb, sb.Capacity);
+                            _ = GetWindowText(prevHwnd, sb, sb.Capacity);
                             currentTitle = sb.ToString();
                         }
 
-                        if (!results.ContainsKey(kvp.Key))
+                        if (!results.TryGetValue(kvp.Key, out List<(string, string, nint)>? value))
                         {
-                            results[kvp.Key] = new List<(string, string, IntPtr)>();
+                            value = [];
+                            results[kvp.Key] = value;
                         }
-                        results[kvp.Key].Add((label, currentTitle, prevHwnd));
+
+                        value.Add((label, currentTitle, prevHwnd));
                     }
                 }
             }
@@ -471,7 +475,7 @@ internal static partial class WindowFocusService
         }
 
         var sb = new System.Text.StringBuilder(len + 1);
-        GetWindowText(hwnd, sb, sb.Capacity);
+        _ = GetWindowText(hwnd, sb, sb.Capacity);
         return sb.ToString();
     }
 

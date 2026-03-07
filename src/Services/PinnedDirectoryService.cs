@@ -15,6 +15,8 @@ internal static class PinnedDirectoryService
     private static readonly string s_pinnedFile = Path.Combine(
         Program.AppDataDir, "pinned-directories.json");
 
+    private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
+
     /// <summary>
     /// Loads the list of pinned directories from disk.
     /// </summary>
@@ -44,7 +46,7 @@ internal static class PinnedDirectoryService
             {
                 Directory.CreateDirectory(dir);
             }
-            File.WriteAllText(s_pinnedFile, JsonSerializer.Serialize(directories, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(s_pinnedFile, JsonSerializer.Serialize(directories, s_writeOptions));
         }
         catch (Exception ex) { Program.Logger.LogError("Failed to save pinned directories: {Error}", ex.Message); }
     }

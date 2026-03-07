@@ -1,15 +1,10 @@
-using System;
-using System.Diagnostics;
-using System.Threading;
-using CopilotBooster.Models;
-using CopilotBooster.Services;
-using Xunit;
+﻿using System.Diagnostics;
 
 namespace CopilotBooster.IntegrationTests.Integration;
 
-public class ProcessTrackingIntegrationTests : IDisposable
+public sealed class ProcessTrackingIntegrationTests : IDisposable
 {
-    private readonly List<Process> _startedProcesses = new();
+    private readonly List<Process> _startedProcesses = [];
 
     public void Dispose()
     {
@@ -52,7 +47,7 @@ public class ProcessTrackingIntegrationTests : IDisposable
 
         proc.Kill();
 
-        Assert.True(fired.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(fired.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
         Assert.Equal(proc.Id, exitedPid);
     }
 
@@ -68,7 +63,7 @@ public class ProcessTrackingIntegrationTests : IDisposable
         tracker.ProcessExited += pid => { exitedPid = pid; fired.Set(); };
         tracker.Watch(proc.Id);
 
-        Assert.True(fired.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(fired.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
         Assert.Equal(proc.Id, exitedPid);
     }
 
@@ -88,7 +83,7 @@ public class ProcessTrackingIntegrationTests : IDisposable
 
         proc.Kill();
 
-        Assert.True(fired.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(fired.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
 
         statusTracker.OnProcessExited(proc.Id);
 
@@ -118,9 +113,9 @@ public class ProcessTrackingIntegrationTests : IDisposable
 
         proc1.Kill();
 
-        Assert.True(fired1.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(fired1.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
         Assert.Equal(proc1.Id, exitedPid);
-        Assert.False(fired2.Wait(TimeSpan.FromMilliseconds(500)));
+        Assert.False(fired2.Wait(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken));
 
         tracker.Unwatch(proc2.Id);
     }

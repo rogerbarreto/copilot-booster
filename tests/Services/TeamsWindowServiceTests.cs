@@ -83,8 +83,10 @@
     [Fact]
     public void Release_ClearsHwnd()
     {
-        var service = new TeamsWindowService();
-        service.CachedHwnd = 12345;
+        var service = new TeamsWindowService
+        {
+            CachedHwnd = 12345
+        };
 
         service.Release();
 
@@ -123,8 +125,10 @@
         var claimers = ClaimAllTeamsWindows();
         try
         {
-            var service = new TeamsWindowService();
-            service.CachedHwnd = 99999999;
+            var service = new TeamsWindowService
+            {
+                CachedHwnd = 99999999
+            };
 
             Assert.False(service.IsOpen);
         }
@@ -137,8 +141,10 @@
         var claimers = ClaimAllTeamsWindows();
         try
         {
-            var service = new TeamsWindowService();
-            service.CachedHwnd = 99999999;
+            var service = new TeamsWindowService
+            {
+                CachedHwnd = 99999999
+            };
 
             Assert.False(service.Focus());
         }

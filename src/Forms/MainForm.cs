@@ -24,7 +24,7 @@ internal partial class MainForm : Form
 
     // Sessions tab controls
     private readonly ExistingSessionsVisuals _sessionsVisuals = null!;
-    private List<NamedSession> _cachedSessions = new();
+    private List<NamedSession> _cachedSessions = [];
     private ActiveStatusSnapshot _lastSnapshot = new([], [], []);
     private readonly ActiveStatusTracker _activeTracker = new();
     private readonly SessionRefreshCoordinator _refreshCoordinator;
@@ -449,7 +449,7 @@ internal partial class MainForm : Form
         {
             "bottom-left" or "top-left" => workArea.Left,
             "bottom-right" or "top-right" => workArea.Right - windowSize.Width,
-            _ => workArea.Left + (workArea.Width - windowSize.Width) / 2
+            _ => workArea.Left + ((workArea.Width - windowSize.Width) / 2)
         };
 
         bool fromBottom = position.StartsWith("bottom", StringComparison.OrdinalIgnoreCase);
@@ -587,7 +587,7 @@ internal partial class MainForm : Form
         var foreground = GetForegroundWindow();
         if (foreground != IntPtr.Zero)
         {
-            GetWindowThreadProcessId(foreground, out uint pid);
+            _ = GetWindowThreadProcessId(foreground, out uint pid);
             if (pid == (uint)Environment.ProcessId)
             {
                 return;
@@ -771,7 +771,7 @@ internal partial class MainForm : Form
         };
 
         this._refreshDebounceTimer = new System.Windows.Forms.Timer { Interval = 300 };
-        this._refreshDebounceTimer.Tick += this.OnDebouncedRefresh;
+        this._refreshDebounceTimer.Tick += this.OnDebouncedRefreshAsync;
 
         this._fullRefreshTimer = new System.Windows.Forms.Timer { Interval = 45000 };
         this._fullRefreshTimer.Tick += (s, e) => this.RequestRefresh(fullRefresh: true);
@@ -1256,7 +1256,7 @@ internal partial class MainForm : Form
         this._refreshDebounceTimer.Start();
     }
 
-    private async void OnDebouncedRefresh(object? sender, EventArgs e)
+    private async void OnDebouncedRefreshAsync(object? sender, EventArgs e)
     {
         this._refreshDebounceTimer!.Stop();
 
@@ -1481,10 +1481,7 @@ internal partial class MainForm : Form
 
         // Update cached session
         var session = this._cachedSessions?.Find(x => x.Id == sessionId);
-        if (session != null)
-        {
-            session.Cwd = newCwd;
-        }
+        session?.Cwd = newCwd;
 
         return newCwd;
     }

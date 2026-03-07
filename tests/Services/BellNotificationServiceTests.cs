@@ -24,10 +24,10 @@
     public void SeedStartupSessions_PreventsFalseNotifications()
     {
         var service = new BellNotificationService(this._trayIcon, () => true);
-        service.SeedStartupSessions(new[] { "session-a", "session-b" });
+        service.SeedStartupSessions(["session-a", "session-b"]);
 
         var snapshot = new ActiveStatusSnapshot(
-            new Dictionary<string, string>(),
+            [],
             new Dictionary<string, string>
             {
                 ["session-a"] = "Session A",
@@ -49,10 +49,10 @@
     public void SeedStartupSessions_NewSessionStillNotifies()
     {
         var service = new BellNotificationService(this._trayIcon, () => true);
-        service.SeedStartupSessions(new[] { "session-a" });
+        service.SeedStartupSessions(["session-a"]);
 
         var snapshot = new ActiveStatusSnapshot(
-            new Dictionary<string, string>(),
+            [],
             new Dictionary<string, string>
             {
                 ["session-a"] = "Session A",

@@ -89,8 +89,8 @@ internal class Program
         try
         {
             // List of files to migrate from old location to new location
-            string[] filesToMigrate = new[]
-            {
+            string[] filesToMigrate =
+            [
                 "active-pids.json",
                 "terminal-cache.json",
                 "ide-cache.json",
@@ -99,7 +99,7 @@ internal class Program
                 "launcher.log",
                 "launcher-settings.json",
                 "pinned-directories.json"
-            };
+            ];
 
             bool migrationOccurred = false;
 
@@ -194,7 +194,7 @@ internal class Program
     private static void Main(string[] args)
     {
         // Set AppUserModelID so Windows associates our JumpList with the correct taskbar button
-        SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+        _ = SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
 
         // Ensure AppDataDir exists before any file operations
         Directory.CreateDirectory(AppDataDir);
@@ -322,7 +322,6 @@ internal class Program
         var defaultWorkDir = !string.IsNullOrEmpty(_settings.DefaultWorkDir) ? _settings.DefaultWorkDir
             : Environment.GetEnvironmentVariable("COPILOT_WORK_DIR")
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
 
         // If resuming a session that is already running, focus its terminal window
         if (resumeSessionId != null)

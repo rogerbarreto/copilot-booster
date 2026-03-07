@@ -7,9 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <NoWarn>CA1861</NoWarn>
-    <BaseOutputPath>bin-integration</BaseOutputPath>
-    <BaseIntermediateOutputPath>obj-integration\</BaseIntermediateOutputPath>
+    <NoWarn>CA1861;CA2007</NoWarn>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyName>CopilotBooster.IntegrationTests</AssemblyName>
   </PropertyGroup>
 

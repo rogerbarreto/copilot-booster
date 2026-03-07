@@ -62,7 +62,7 @@ internal partial class MainForm
                 var gridName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
                 foreach (DataGridViewRow row in this._sessionsVisuals.SessionGrid.Rows)
                 {
-                    if (row.Tag as string == sid)
+                    if ((row.Tag as string) == sid)
                     {
                         row.Cells["Session"].Value = session.IsPinned ? $"\U0001F4CC {gridName}" : gridName;
                         row.Cells["CWD"].Value = session.Folder;
@@ -535,10 +535,7 @@ internal partial class MainForm
         {
             SessionArchiveService.SetTab(Program.SessionStateFile, sid, tabName);
             var session = this._cachedSessions.Find(x => x.Id == sid);
-            if (session != null)
-            {
-                session.Tab = tabName;
-            }
+            session?.Tab = tabName;
 
             this._sessionsVisuals.GridVisuals.RemoveRowBySessionId(sid);
             this.UpdateTabCounts();
@@ -548,10 +545,7 @@ internal partial class MainForm
         {
             SessionArchiveService.SetPinned(Program.SessionStateFile, sid, true);
             var session = this._cachedSessions.Find(x => x.Id == sid);
-            if (session != null)
-            {
-                session.IsPinned = true;
-            }
+            session?.IsPinned = true;
 
             this.PopulateGridWithFilter(this._lastSnapshot);
         };
@@ -560,10 +554,7 @@ internal partial class MainForm
         {
             SessionArchiveService.SetPinned(Program.SessionStateFile, sid, false);
             var session = this._cachedSessions.Find(x => x.Id == sid);
-            if (session != null)
-            {
-                session.IsPinned = false;
-            }
+            session?.IsPinned = false;
 
             this.PopulateGridWithFilter(this._lastSnapshot);
         };

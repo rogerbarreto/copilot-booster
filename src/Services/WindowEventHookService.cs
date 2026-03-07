@@ -21,7 +21,7 @@ internal partial class WindowEventHookService : IDisposable
     private const int OBJID_WINDOW = 0x00000000;
     private const uint GA_ROOT = 2;
 
-    private readonly List<IntPtr> _hookHandles = new();
+    private readonly List<IntPtr> _hookHandles = [];
     private WinEventProc? _callback;
 
     /// <summary>Fires when a new visible top-level window is created.</summary>
@@ -142,7 +142,7 @@ internal partial class WindowEventHookService : IDisposable
         }
 
         var sb = new System.Text.StringBuilder(len + 1);
-        GetWindowText(hwnd, sb, sb.Capacity);
+        _ = GetWindowText(hwnd, sb, sb.Capacity);
         return sb.ToString();
     }
 

@@ -113,21 +113,23 @@ internal static class WindowHandleCacheService
                 {
                     case "ide":
                         var proc = new ActiveProcess(entry.Name, 0, entry.FolderPath) { Hwnd = hwnd };
-                        if (!processes.ContainsKey(entry.SessionId))
+                        if (!processes.TryGetValue(entry.SessionId, out List<ActiveProcess>? value))
                         {
-                            processes[entry.SessionId] = [];
+                            value = [];
+                            processes[entry.SessionId] = value;
                         }
 
-                        processes[entry.SessionId].Add(proc);
+                        value.Add(proc);
                         break;
 
                     case "explorer":
-                        if (!explorers.ContainsKey(entry.SessionId))
+                        if (!explorers.TryGetValue(entry.SessionId, out List<(string Label, nint Hwnd)>? explorerValue))
                         {
-                            explorers[entry.SessionId] = [];
+                            explorerValue = [];
+                            explorers[entry.SessionId] = explorerValue;
                         }
 
-                        explorers[entry.SessionId].Add((entry.Name, hwnd));
+                        explorerValue.Add((entry.Name, hwnd));
                         break;
 
                     case "edge":

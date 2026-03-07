@@ -1,6 +1,6 @@
 ﻿public sealed class SessionAliasServiceTests
 {
-    private string CreateTempFile()
+    private static string CreateTempFile()
     {
         var path = Path.Combine(Path.GetTempPath(), $"alias-test-{Guid.NewGuid()}.json");
         return path;
@@ -16,7 +16,7 @@
     [Fact]
     public void SetAlias_CreatesFileAndStoresAlias()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.SetAlias(file, "session-1", "My Alias");
@@ -32,7 +32,7 @@
     [Fact]
     public void SetAlias_EmptyAlias_RemovesEntry()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.SetAlias(file, "session-1", "My Alias");
@@ -49,7 +49,7 @@
     [Fact]
     public void GetAlias_UnknownId_ReturnsNull()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.SetAlias(file, "session-1", "Alias");
@@ -65,7 +65,7 @@
     [Fact]
     public void RemoveAlias_RemovesEntry()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.SetAlias(file, "session-1", "Alias");
@@ -82,7 +82,7 @@
     [Fact]
     public void RemoveAlias_NonExistentId_DoesNotThrow()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.RemoveAlias(file, "nonexistent");
@@ -96,7 +96,7 @@
     [Fact]
     public void Load_MultipleSessions_ReturnsAll()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.SetAlias(file, "s1", "Alias 1");
@@ -115,7 +115,7 @@
     [Fact]
     public void SetAlias_OverwritesExisting()
     {
-        var file = this.CreateTempFile();
+        var file = CreateTempFile();
         try
         {
             SessionAliasService.SetAlias(file, "s1", "Original");

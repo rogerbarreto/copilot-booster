@@ -10,7 +10,7 @@ namespace CopilotBooster.Services;
 /// <summary>
 /// Provides Git-related operations such as branch listing, worktree creation, and repository detection.
 /// </summary>
-internal static class GitService
+internal static partial class GitService
 {
     /// <summary>
     /// Returns <c>true</c> if the given path is inside a Git repository.
@@ -32,7 +32,7 @@ internal static class GitService
         var (exitCode, stdout, _) = RunGit(repoPath, "branch -a --no-color");
         if (exitCode != 0)
         {
-            return new List<string>();
+            return [];
         }
 
         var localBranches = new List<string>();
@@ -309,13 +309,13 @@ internal static class GitService
     internal static string SanitizeWorkspaceDirName(string repoName, string branchName)
     {
         var combined = $"{repoName}-{branchName}";
-        combined = Regex.Replace(combined, @"[^a-zA-Z0-9\-_.]", "-");
-        combined = Regex.Replace(combined, @"-{2,}", "-");
+        combined = MyRegex().Replace(combined, "-");
+        combined = ConsecutiveHyphensRegex().Replace(combined, "-");
         combined = combined.Trim('-');
 
         // Truncate branch portion to 3 words (segments separated by '-')
-        var repoSanitized = Regex.Replace(repoName, @"[^a-zA-Z0-9\-_.]", "-");
-        repoSanitized = Regex.Replace(repoSanitized, @"-{2,}", "-").Trim('-');
+        var repoSanitized = MyRegex().Replace(repoName, "-");
+        repoSanitized = ConsecutiveHyphensRegex().Replace(repoSanitized, "-").Trim('-');
         var prefix = repoSanitized + "-";
         if (combined.StartsWith(prefix) && combined.Length > prefix.Length)
         {
@@ -538,4 +538,10 @@ internal static class GitService
             return (-1, "", ex.Message);
         }
     }
+
+    [GeneratedRegex(@"[^a-zA-Z0-9\-_.]")]
+    private static partial Regex MyRegex();
+
+    [GeneratedRegex(@"-{2,}")]
+    private static partial Regex ConsecutiveHyphensRegex();
 }

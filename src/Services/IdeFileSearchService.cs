@@ -74,7 +74,7 @@ internal static class IdeFileSearchService
             var files = output
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Where(f => !string.IsNullOrEmpty(f))
-                .OrderBy(f => f.Count(c => c == '/' || c == '\\'))
+                .OrderBy(f => f.Count(c => c is '/' or '\\'))
                 .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
                 .Take(MaxResults)
                 .Select(f => f.Replace('/', '\\'))

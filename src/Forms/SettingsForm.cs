@@ -52,9 +52,9 @@ internal sealed class SettingsForm : Form
             Dock = DockStyle.Fill,
             SplitterDistance = 240,
             FixedPanel = FixedPanel.Panel1,
-            SplitterWidth = 1
+            SplitterWidth = 1,
+            Panel1MinSize = 160
         };
-        split.Panel1MinSize = 160;
 
         // === TreeView (left panel) ===
         var tree = new TreeView
@@ -120,7 +120,7 @@ internal sealed class SettingsForm : Form
             Location = new Point(150, 4),
             Width = 180
         };
-        pinnedOrderCombo.Items.AddRange(new object[] { "Running first (default)", "Last updated", "Alias / Name" });
+        pinnedOrderCombo.Items.AddRange(["Running first (default)", "Last updated", "Alias / Name"]);
         pinnedOrderCombo.SelectedIndex = string.Equals(Program._settings.PinnedOrder, "alias", StringComparison.OrdinalIgnoreCase) ? 2
             : string.Equals(Program._settings.PinnedOrder, "created", StringComparison.OrdinalIgnoreCase) ? 1
             : 0;
@@ -162,7 +162,7 @@ internal sealed class SettingsForm : Form
             Location = new Point(150, 4),
             Width = 150
         };
-        themeCombo.Items.AddRange(new object[] { "System (default)", "Light", "Dark" });
+        themeCombo.Items.AddRange(["System (default)", "Light", "Dark"]);
         themeCombo.SelectedIndex = ThemeService.ThemeToIndex(Program._settings.Theme);
         themeCombo.SelectedIndexChanged += (s, e) =>
         {
@@ -206,7 +206,7 @@ internal sealed class SettingsForm : Form
             Location = new Point(150, 4),
             Width = 200
         };
-        dateFormatCombo.Items.AddRange(new object[] { "YYYY-MM-DD HH:mm", "MM/DD hh:mm AM/PM", "DD/MM HH:mm" });
+        dateFormatCombo.Items.AddRange(["YYYY-MM-DD HH:mm", "MM/DD hh:mm AM/PM", "DD/MM HH:mm"]);
         dateFormatCombo.SelectedIndex = Program._settings.DateFormat switch
         {
             "MM/dd hh:mm tt" => 1,
@@ -625,7 +625,7 @@ internal sealed class SettingsForm : Form
             Location = new Point(150, 4),
             Width = 180
         };
-        toastPositionCombo.Items.AddRange(new object[] { "Bottom Center", "Bottom Left", "Bottom Right", "Top Center", "Top Left", "Top Right" });
+        toastPositionCombo.Items.AddRange(["Bottom Center", "Bottom Left", "Bottom Right", "Top Center", "Top Left", "Top Right"]);
         toastPositionCombo.SelectedIndex = Program._settings.ToastPosition switch
         {
             "bottom-left" => 1,

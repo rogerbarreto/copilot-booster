@@ -403,7 +403,7 @@ internal static class SettingsVisuals
         if (parent != null && parent != dialog)
         {
             dialog.Location = new Point(
-                parent.Left + (parent.Width - dialog.Width) / 2,
+                parent.Left + ((parent.Width - dialog.Width) / 2),
                 parent.Top);
         }
     }
@@ -590,14 +590,11 @@ internal static class SettingsVisuals
 
         workDirBox.Text = fresh.DefaultWorkDir;
 
-        if (themeCombo != null)
+        themeCombo?.SelectedIndex = fresh.Theme switch
         {
-            themeCombo.SelectedIndex = fresh.Theme switch
-            {
-                "light" => 1,
-                "dark" => 2,
-                _ => 0
-            };
-        }
+            "light" => 1,
+            "dark" => 2,
+            _ => 0
+        };
     }
 }

@@ -15,7 +15,7 @@ internal class SessionRefreshCoordinator
     private readonly string _sessionStateDir;
     private readonly string _pidRegistryFile;
     private readonly ActiveStatusTracker _activeTracker;
-    private List<NamedSession> _cachedSessions = new();
+    private List<NamedSession> _cachedSessions = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionRefreshCoordinator"/> class.

@@ -1,5 +1,4 @@
-using System.Diagnostics;
-using Xunit.v3;
+﻿using System.Diagnostics;
 
 namespace CopilotBooster.IntegrationTests;
 

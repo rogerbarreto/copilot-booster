@@ -461,7 +461,7 @@ internal class ExistingSessionsVisuals
             if (col.HeaderCell.SortGlyphDirection != SortOrder.None)
             {
                 var glyphX = e.CellBounds.Right - 16;
-                var glyphY = e.CellBounds.Top + (e.CellBounds.Height - 8) / 2;
+                var glyphY = e.CellBounds.Top + ((e.CellBounds.Height - 8) / 2);
                 using var brush = new SolidBrush(textColor);
                 if (col.HeaderCell.SortGlyphDirection == SortOrder.Ascending)
                 {
@@ -1161,8 +1161,10 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenEdge);
 
-        var menuSaveEdgeTabs = new ToolStripMenuItem("Save Edge State") { Image = TryExtractIcon(shell32, 258) };
-        menuSaveEdgeTabs.ToolTipText = "Saves all open Edge tab URLs so they can be restored next time you open Edge for this session";
+        var menuSaveEdgeTabs = new ToolStripMenuItem("Save Edge State")
+        {
+            Image = TryExtractIcon(shell32, 258), ToolTipText = "Saves all open Edge tab URLs so they can be restored next time you open Edge for this session"
+        };
         menuSaveEdgeTabs.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();
@@ -1324,7 +1326,7 @@ internal class ExistingSessionsVisuals
             if (e.Button == MouseButtons.Right)
             {
                 var hitTest = this.SessionGrid.HitTest(e.X, e.Y);
-                if (hitTest.Type != DataGridViewHitTestType.Cell && hitTest.Type != DataGridViewHitTestType.RowHeader)
+                if (hitTest.Type is not DataGridViewHitTestType.Cell and not DataGridViewHitTestType.RowHeader)
                 {
                     this.SessionGrid.ClearSelection();
                 }

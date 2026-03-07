@@ -218,8 +218,8 @@ internal class SessionGridVisuals
                 e.PaintBackground(e.ClipBounds, true);
                 if (img != null)
                 {
-                    int x = e.CellBounds.X + (e.CellBounds.Width - img.Width) / 2;
-                    int y = e.CellBounds.Y + (e.CellBounds.Height - img.Height) / 2;
+                    int x = e.CellBounds.X + ((e.CellBounds.Width - img.Width) / 2);
+                    int y = e.CellBounds.Y + ((e.CellBounds.Height - img.Height) / 2);
                     e.Graphics!.DrawImage(img, x, y, img.Width, img.Height);
                 }
                 e.Handled = true;
@@ -293,7 +293,7 @@ internal class SessionGridVisuals
                     {
                         var actualTextWidth = string.IsNullOrEmpty(displayText) ? 0 : TextRenderer.MeasureText(e.Graphics!, displayText, font).Width;
                         var iconX = e.CellBounds.X + cwdPadding.Left + 2 + actualTextWidth;
-                        var iconY = e.CellBounds.Y + (e.CellBounds.Height - icon.Height) / 2;
+                        var iconY = e.CellBounds.Y + ((e.CellBounds.Height - icon.Height) / 2);
                         e.Graphics!.DrawImage(icon, iconX, iconY);
                     }
                 }
@@ -887,7 +887,7 @@ internal class SessionGridVisuals
         }
 
         var cellRect = this._grid.GetCellDisplayRectangle(4, rowIndex, false);
-        menu.Show(this._grid, new Point(cellRect.Left + cellRect.Width / 2, cellRect.Bottom));
+        menu.Show(this._grid, new Point(cellRect.Left + (cellRect.Width / 2), cellRect.Bottom));
     }
 
     [ExcludeFromCodeCoverage]

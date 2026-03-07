@@ -1,8 +1,8 @@
-using Microsoft.Playwright;
+﻿using Microsoft.Playwright;
 
 namespace CopilotBooster.IntegrationTests.Integration;
 
-public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
+public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
 {
     private string? _signalsFilePath;
 
@@ -32,7 +32,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
         $"file:///{path.Replace('\\', '/')}";
 
     [Fact]
-    public async Task SessionHtml_LoadsWithCorrectTitle()
+    public async Task SessionHtml_LoadsWithCorrectTitleAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
@@ -48,7 +48,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SessionHtml_SaveButtonClick_ChangesTitle()
+    public async Task SessionHtml_SaveButtonClick_ChangesTitleAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
@@ -65,7 +65,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SessionHtml_SaveButtonClick_ShowsSavingState()
+    public async Task SessionHtml_SaveButtonClick_ShowsSavingStateAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
@@ -82,7 +82,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SessionHtml_SaveCompletes_WhenSignalProvided()
+    public async Task SessionHtml_SaveCompletes_WhenSignalProvidedAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new()
@@ -125,7 +125,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SessionHtml_LoadsWithSessionName()
+    public async Task SessionHtml_LoadsWithSessionNameAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
@@ -143,7 +143,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SessionHtml_SaveCompletesViaAppCodePath_WriteSessionSignals()
+    public async Task SessionHtml_SaveCompletesViaAppCodePath_WriteSessionSignalsAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new()
@@ -158,7 +158,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
         this._signalsFilePath = Path.Combine(sessionDir, "session-signals.js");
 
         // Write initial empty signals
-        EdgeWorkspaceService.WriteSessionSignals(new Dictionary<string, long>());
+        EdgeWorkspaceService.WriteSessionSignals([]);
 
         await page.GotoAsync($"{ToFileUri(sessionHtml)}#test-app-path-id");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
@@ -192,7 +192,7 @@ public class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SessionHtml_BeforeUnloadGuard_ActiveDuringSaving()
+    public async Task SessionHtml_BeforeUnloadGuard_ActiveDuringSavingAsync()
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
