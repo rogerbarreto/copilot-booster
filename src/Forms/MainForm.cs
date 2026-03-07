@@ -41,6 +41,7 @@ internal partial class MainForm : Form
     private readonly WorkspaceYamlWatcherService? _workspaceWatcher;
     private readonly SessionContextWatcherService? _contextWatcher;
     private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
 
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
@@ -1252,6 +1253,13 @@ internal partial class MainForm : Form
             return;
         }
 
+        // Debounce: skip if a save is already in progress for this session
+        if (!this._saveInProgress.Add(sessionId))
+        {
+            Program.Logger.LogDebug("[SaveSignal] Save already in progress for {SessionId}, skipping duplicate", sessionId);
+            return;
+        }
+
         Program.Logger.LogInformation("[SaveSignal] Detected ::Save for session {SessionId}", sessionId);
 
         try
@@ -1261,7 +1269,7 @@ internal partial class MainForm : Form
             {
                 if (!this._activeTracker.TryGetEdge(sessionId, out var ws))
                 {
-                    return new List<string>();
+                    return [];
                 }
 
                 return ws.GetTabUrls();
@@ -1281,6 +1289,10 @@ internal partial class MainForm : Form
         catch (Exception ex)
         {
             Program.Logger.LogWarning("[SaveSignal] Failed to save tabs for {SessionId}: {Error}", sessionId, ex.Message);
+        }
+        finally
+        {
+            this._saveInProgress.Remove(sessionId);
         }
     }
 

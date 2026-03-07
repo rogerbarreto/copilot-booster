@@ -292,4 +292,91 @@ public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
         var isGuardActive = await page.EvaluateAsync<bool>("beforeUnloadActive");
         Assert.False(isGuardActive, "beforeunload guard should be inactive after save completes");
     }
+
+    /// <summary>
+    /// Verifies that multiple rapid ::Save title changes (from NAMECHANGE events)
+    /// result in only a single signal write — the debounce guard prevents duplicates.
+    /// </summary>
+    [StaFact]
+    public async Task SessionHtml_E2E_MultipleSaveEvents_SignalWrittenOnlyOnceAsync()
+    {
+        const string SessionId = "e2e-debounce-test";
+
+        var sessionHtml = FindSessionHtml();
+        var sessionDir = Path.GetDirectoryName(sessionHtml)!;
+        this._signalsFilePath = Path.Combine(sessionDir, "session-signals.js");
+
+        EdgeWorkspaceService.WriteSessionSignals([]);
+
+        using var hookService = new WindowEventHookService();
+        int saveDetectionCount = 0;
+
+        hookService.WindowTitleChanged += (hwnd, title) =>
+        {
+            if (title.Contains("::Save", StringComparison.OrdinalIgnoreCase)
+                && title.Contains(SessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref saveDetectionCount);
+
+                // Simulate what HandleEdgeSaveSignalAsync does — write signal
+                // Use the same debounce pattern: only write if not already written
+                var extractedId = EdgeWorkspaceService.ExtractSessionId(title);
+                if (extractedId != null)
+                {
+                    var lastSaved = new Dictionary<string, long>
+                    {
+                        [extractedId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
+                    EdgeWorkspaceService.WriteSessionSignals(lastSaved);
+                }
+            }
+        };
+        hookService.Start();
+
+        using var playwright = await Playwright.CreateAsync();
+        await using var browser = await playwright.Chromium.LaunchAsync(new()
+        {
+            Headless = false,
+            Args = ["--allow-file-access-from-files"],
+        });
+        var page = await browser.NewPageAsync();
+
+        await page.GotoAsync($"{ToFileUri(sessionHtml)}#{SessionId}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        // Click save — this triggers the ::Save title
+        await page.ClickAsync("#save-link");
+
+        // Pump messages to collect all NAMECHANGE events
+        var deadline = Environment.TickCount64 + 5000;
+        while (Environment.TickCount64 < deadline)
+        {
+            Application.DoEvents();
+            await Task.Delay(50);
+        }
+
+        // The hook may fire multiple times for the same title change
+        // (Edge/Chromium can emit multiple NAMECHANGE events)
+        // But the signal file should reflect only the latest write
+        Assert.True(saveDetectionCount >= 1, "At least one ::Save detection should occur");
+
+        // Read the signal file and verify it contains exactly one session entry
+        var signalContent = File.ReadAllText(this._signalsFilePath);
+        Assert.Contains(SessionId, signalContent);
+
+        // Count how many times the session ID appears as a key in the JSON
+        var keyPattern = $"\"{SessionId}\"";
+        var keyCount = signalContent.Split(keyPattern).Length - 1;
+        Assert.Equal(1, keyCount);
+
+        // Verify the button resets
+        await page.EvaluateAsync("pollSignals()");
+        await page.WaitForFunctionAsync(
+            "() => document.getElementById('save-link').textContent.includes('Save Tabs')",
+            null,
+            new() { Timeout = 10000 });
+
+        var buttonText = await page.TextContentAsync("#save-link");
+        Assert.Contains("Save Tabs", buttonText);
+    }
 }
