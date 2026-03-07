@@ -43,17 +43,15 @@ jobs:
       - name: Integration Tests
         run: dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release
 
-  dispatch-signing:
+  signing-info:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger code signing workflow
-        env:
-          PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+      - name: Signing info
         run: |
-          if [ -z "$PAT" ]; then echo "::error::PRIVATE_REPO_PAT secret is not set"; exit 1; fi
-          curl -X POST --fail-with-body \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $PAT" \
-            https://api.github.com/repos/rogerbarreto/copilot-booster-signing/dispatches \
-            -d '{"event_type":"release-sign","client_payload":{"tag":"${{ github.ref_name }}","sha":"${{ github.sha }}"}}'
+          echo "## Ready for signing" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **SHA** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
