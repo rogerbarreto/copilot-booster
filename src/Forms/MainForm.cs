@@ -40,6 +40,7 @@ internal partial class MainForm : Form
     private BellNotificationService? _bellService;
     private readonly WorkspaceYamlWatcherService? _workspaceWatcher;
     private readonly SessionContextWatcherService? _contextWatcher;
+    private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
 
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
@@ -799,6 +800,12 @@ internal partial class MainForm : Form
         };
         this._windowHookService.WindowTitleChanged += (hwnd, title) =>
         {
+            // Detect Edge save signal: title contains "::Save"
+            if (title.Contains("::Save", StringComparison.OrdinalIgnoreCase))
+            {
+                this.HandleEdgeSaveSignalAsync(hwnd, title);
+            }
+
             var affected = this._activeTracker.OnWindowTitleChanged(hwnd, title, this.BuildSessionSummaryMap());
             foreach (var id in affected)
             {
@@ -1230,6 +1237,51 @@ internal partial class MainForm : Form
     {
         await this.RefreshBackgroundCoreAsync().ConfigureAwait(true);
         this.PopulateGridWithFilter(this._lastSnapshot);
+    }
+
+    /// <summary>
+    /// Handles the Edge save signal detected via WindowTitleChanged event.
+    /// Extracts the session ID from the title, reads tab URLs via UI Automation,
+    /// saves them, and writes the lastSaved timestamp to session-signals.js.
+    /// </summary>
+    private async void HandleEdgeSaveSignalAsync(IntPtr hwnd, string title)
+    {
+        var sessionId = EdgeWorkspaceService.ExtractSessionId(title);
+        if (sessionId == null)
+        {
+            return;
+        }
+
+        Program.Logger.LogInformation("[SaveSignal] Detected ::Save for session {SessionId}", sessionId);
+
+        try
+        {
+            // GetTabUrls requires STA thread for UI Automation
+            var urls = await Task.Factory.StartNew(() =>
+            {
+                if (!this._activeTracker.TryGetEdge(sessionId, out var ws))
+                {
+                    return new List<string>();
+                }
+
+                return ws.GetTabUrls();
+            }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance).ConfigureAwait(true);
+
+            if (urls.Count > 0)
+            {
+                EdgeTabPersistenceService.SaveTabs(sessionId, urls);
+                Program.Logger.LogInformation("[SaveSignal] Saved {Count} tabs for session {SessionId}", urls.Count, sessionId);
+                this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored");
+            }
+
+            // Write lastSaved timestamp so session.html can confirm the save
+            this._lastSavedBySession[sessionId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            EdgeWorkspaceService.WriteSessionSignals(this._lastSavedBySession);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogWarning("[SaveSignal] Failed to save tabs for {SessionId}: {Error}", sessionId, ex.Message);
+        }
     }
 
     private void RequestRefresh(string? sessionId = null, bool trackingChanged = false, bool dataChanged = false, bool fullRefresh = false)
