@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.0] - 2026-03-07
+
+### Added
+
+- **Reactive window tracking architecture** — replaced the 3-second polling loop with event-driven monitoring using `SetWinEventHook`. Window title changes, visibility, and destruction events are now detected instantly via OS-level callbacks, dramatically reducing CPU usage.
+- **Process exit watcher** — tracks terminal and IDE process lifecycles via exit callbacks instead of periodic liveness checks.
+- **FileSystemWatcher for session discovery** — `workspace.yaml` changes are detected in real time, eliminating the need to poll for new or removed sessions.
+- **FileSystemWatcher for session file counts** — file additions and deletions within session directories are tracked reactively.
+- **Edge save detection via title hook** — clicking Save in the session page triggers a `::Save` title signal detected by the window event hook, replacing the previous polling-based approach.
+- **Save signal debounce** — prevents duplicate save processing when title change events fire multiple times within a 2-second window.
+- **Integration test project** — new xUnit v3 + Playwright test suite covering FileSystemWatcher events, terminal title detection, process tracking, and full E2E save-button flow.
+- **Automated code signing pipeline** — private self-hosted runner workflow that signs both the portable EXE and installer with Certum code signing certificate, with automated TOTP authentication for SimplySign Desktop.
+
+### Fixed
+
+- **Save preserves previously saved tabs** — when only the session tab is open, clicking Save no longer clears previously saved Edge tabs from `edge-tabs.json`.
+- **Edge tab detection** — fresh STA threads for COM, prefer best window match, update stale window handles.
+
+### Changed
+
+- **Root `.editorconfig`** — added comprehensive analyzer rules (IDE and CA diagnostics) enforced across all projects.
+- **Release pipeline** — split into public CI (build, format, tests) and private signing workflow (code sign, installer, GitHub Release).
+
 ## [0.17.3] - 2026-03-06
 
 ### Fixed
