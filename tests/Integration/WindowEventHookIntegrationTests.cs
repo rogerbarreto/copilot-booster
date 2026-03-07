@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace CopilotBooster.IntegrationTests;
 
@@ -25,6 +25,7 @@ public class WindowEventHookIntegrationTests
             proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title CreatedTestWindow")
             {
                 UseShellExecute = true,
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             })!;
 
             IntPtr cmdHwnd = IntPtr.Zero;
@@ -79,6 +80,7 @@ public class WindowEventHookIntegrationTests
                 "/k \"title InitialTitle & ping -n 2 127.0.0.1 >nul & title ChangedTitle\"")
             {
                 UseShellExecute = true,
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             })!;
 
             PumpMessages(5000);
@@ -132,6 +134,7 @@ public class WindowEventHookIntegrationTests
                 "/c \"title DestroyTest & ping -n 4 127.0.0.1 >nul\"")
             {
                 UseShellExecute = true,
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             })!;
 
             // Pump long enough for both title change and process exit
@@ -168,6 +171,7 @@ public class WindowEventHookIntegrationTests
             proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title Terminal - test-session-id")
             {
                 UseShellExecute = true,
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             })!;
 
             PumpMessages(5000);
