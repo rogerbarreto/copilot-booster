@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -25,51 +25,27 @@ jobs:
       - name: Format check
         run: dotnet format copilot-booster.sln --verify-no-changes --verbosity normal
 
-      - name: Test
+      - name: Unit Tests
         run: dotnet test tests/CopilotBooster.Tests.csproj -c Release --nologo --verbosity normal
 
-  release:
-    needs: test
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Publish
-        run: dotnet publish src/CopilotBooster.csproj -c Release -r win-x64 -o publish --nologo
-
-      - name: Create release archive
-        run: Compress-Archive -Path publish/* -DestinationPath CopilotBooster-win-x64.zip
-
-      - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
-
-      - name: Build installer
-        run: iscc installer.iss
-
-      - name: Extract release notes
+      - name: Install Playwright browsers
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}" -replace '^v', ''
-          $lines = Get-Content CHANGELOG.md
-          $capture = $false
-          $notes = @()
-          foreach ($line in $lines) {
-            if ($line -match "^## \[$tag\]") { $capture = $true; continue }
-            if ($capture -and $line -match "^## \[") { break }
-            if ($capture) { $notes += $line }
-          }
-          ($notes -join "`n").Trim() | Out-File release-notes.md -Encoding utf8
+          dotnet build tests/CopilotBooster.IntegrationTests.csproj -c Release --nologo
+          $pw = Get-ChildItem -Path tests/bin-integration -Recurse -Filter "playwright.ps1" | Select-Object -First 1
+          if ($pw) { & pwsh $pw.FullName install chromium }
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            CopilotBooster-win-x64.zip
-            installer-output/CopilotBooster-Setup.exe
-          body_path: release-notes.md
-          generate_release_notes: false
+      - name: Integration Tests
+        run: dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release
+
+  dispatch-signing:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger code signing workflow
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.PRIVATE_REPO_PAT }}" \
+            https://api.github.com/repos/rogerbarreto/copilot-booster-release/dispatches \
+            -d '{"event_type":"release-sign","client_payload":{"tag":"${{ github.ref_name }}","sha":"${{ github.sha }}"}}'
