@@ -36,8 +36,9 @@ jobs:
         shell: pwsh
         run: |
           dotnet build tests/CopilotBooster.IntegrationTests.csproj -c Release --nologo
-          $pw = Get-ChildItem -Path tests/bin-integration -Recurse -Filter "playwright.ps1" | Select-Object -First 1
+          $pw = Get-ChildItem -Path tests/bin -Recurse -Filter "playwright.ps1" | Select-Object -First 1
           if ($pw) { & pwsh $pw.FullName install chromium }
+          else { Write-Error "playwright.ps1 not found"; exit 1 }
 
       - name: Integration Tests
         run: dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release

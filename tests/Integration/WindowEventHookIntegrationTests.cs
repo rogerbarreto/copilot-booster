@@ -85,7 +85,7 @@ public class WindowEventHookIntegrationTests
 
             PumpMessages(5000);
 
-            Assert.Equal("ChangedTitle", detectedTitle);
+            Assert.Contains("ChangedTitle", detectedTitle);
         }
         finally
         {

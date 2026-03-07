@@ -378,6 +378,15 @@ internal static partial class WindowFocusService
     /// <returns>A tuple of (sessionId, label) if matched, or null.</returns>
     internal static (string SessionId, string Label)? MatchTrackedWindowTitle(string title, Dictionary<string, string>? sessionSummaries = null)
     {
+        // Strip Windows "Administrator:  " prefix (localized) that gets prepended
+        // to window titles when running with elevated privileges.
+        // Format is always a single word followed by colon and two spaces.
+        var colonIdx = title.IndexOf(":  ", StringComparison.Ordinal);
+        if (colonIdx > 0 && colonIdx < title.Length - 3 && !title.AsSpan(0, colonIdx).Contains(' '))
+        {
+            title = title[(colonIdx + 3)..];
+        }
+
         // Match "Copilot CLI - {sessionId}"
         if (title.StartsWith("Copilot CLI - ", StringComparison.OrdinalIgnoreCase))
         {

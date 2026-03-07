@@ -97,4 +97,57 @@ public class MatchTrackedWindowTitleTests
 
         Assert.Null(result);
     }
+
+    [Fact]
+    public void AdminPrefix_CopilotCliPattern_StripsPrefix()
+    {
+        var result = WindowFocusService.MatchTrackedWindowTitle("Administrator:  Copilot CLI - abc-123", null);
+
+        Assert.NotNull(result);
+        Assert.Equal("abc-123", result.Value.SessionId);
+        Assert.Equal("Copilot CLI", result.Value.Label);
+    }
+
+    [Fact]
+    public void AdminPrefix_TerminalPattern_StripsPrefix()
+    {
+        var result = WindowFocusService.MatchTrackedWindowTitle("Administrator:  Terminal - abc-123", null);
+
+        Assert.NotNull(result);
+        Assert.Equal("abc-123", result.Value.SessionId);
+        Assert.Equal("Terminal", result.Value.Label);
+    }
+
+    [Fact]
+    public void AdminPrefix_LocalizedPrefix_StripsPrefix()
+    {
+        // Portuguese: "Administrador"
+        var result = WindowFocusService.MatchTrackedWindowTitle("Administrador:  Terminal - abc-123", null);
+
+        Assert.NotNull(result);
+        Assert.Equal("abc-123", result.Value.SessionId);
+        Assert.Equal("Terminal", result.Value.Label);
+    }
+
+    [Fact]
+    public void AdminPrefix_SessionSummary_StripsPrefix()
+    {
+        var summaries = new Dictionary<string, string> { { "Fix auth bug", "session-1" } };
+
+        var result = WindowFocusService.MatchTrackedWindowTitle("Administrator:  Fix auth bug", summaries);
+
+        Assert.NotNull(result);
+        Assert.Equal("session-1", result.Value.SessionId);
+    }
+
+    [Fact]
+    public void TitleWithColonInContent_DoesNotFalseStrip()
+    {
+        // A title like "Terminal - session:  with colon" should NOT strip "Terminal - session" as admin prefix
+        // because "Terminal - session" contains spaces
+        var result = WindowFocusService.MatchTrackedWindowTitle("Terminal - session:  with colon", null);
+
+        Assert.NotNull(result);
+        Assert.Equal("session:  with colon", result.Value.SessionId);
+    }
 }

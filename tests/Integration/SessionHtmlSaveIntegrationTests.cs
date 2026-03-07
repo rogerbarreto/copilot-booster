@@ -1,6 +1,4 @@
-﻿using Microsoft.Playwright;
-
-namespace CopilotBooster.IntegrationTests.Integration;
+﻿namespace CopilotBooster.IntegrationTests.Integration;
 
 public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
 {
