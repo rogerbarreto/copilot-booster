@@ -35,6 +35,7 @@
     <Using Include="CopilotBooster.Forms" />
     <Using Include="CopilotBooster.Models" />
     <Using Include="CopilotBooster.Services" />
+    <Using Include="Microsoft.Playwright" />
   </ItemGroup>
 
 </Project>
