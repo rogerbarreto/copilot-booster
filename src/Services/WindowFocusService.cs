@@ -127,7 +127,22 @@ internal static partial class WindowFocusService
     }
 
     /// <summary>
-    /// Finds a visible window handle whose title contains all specified substrings.
+    /// Gets the process ID that owns the specified window handle.
+    /// </summary>
+    /// <param name="hwnd">The window handle.</param>
+    /// <returns>The process ID, or 0 if the handle is invalid.</returns>
+    internal static int GetWindowProcessId(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return 0;
+        }
+
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        return (int)pid;
+    }
+
+    /// <summary>
     /// </summary>
     /// <param name="titleSubstring">Primary text to search for in window titles (case-insensitive).</param>
     /// <param name="secondarySubstring">Optional secondary text that must also be present (case-insensitive).</param>
@@ -295,50 +310,15 @@ internal static partial class WindowFocusService
             GetWindowText(hwnd, sb, sb.Capacity);
             var title = sb.ToString();
 
-            string? sessionId = null;
-            string? label = null;
+            var match = MatchTrackedWindowTitle(title, sessionSummaries);
 
-            // Match "Copilot CLI - {sessionId}"
-            if (title.StartsWith("Copilot CLI - ", StringComparison.OrdinalIgnoreCase))
+            if (match is { SessionId.Length: > 0 } m)
             {
-                sessionId = title.Substring("Copilot CLI - ".Length);
-                label = "Copilot CLI";
-            }
-            // Match "Terminal - {sessionId}"
-            else if (title.StartsWith("Terminal - ", StringComparison.OrdinalIgnoreCase))
-            {
-                sessionId = title.Substring("Terminal - ".Length);
-                label = "Terminal";
-            }
-            // Match "Terminal #N - {sessionId}"
-            else if (title.StartsWith("Terminal #", StringComparison.OrdinalIgnoreCase))
-            {
-                var dashIdx = title.IndexOf(" - ", "Terminal #".Length, StringComparison.Ordinal);
-                if (dashIdx > 0)
+                if (!results.ContainsKey(m.SessionId))
                 {
-                    sessionId = title.Substring(dashIdx + 3);
-                    label = title.Substring(0, dashIdx);
+                    results[m.SessionId] = new List<(string, string, IntPtr)>();
                 }
-            }
-            // Match window title equal to a known session summary (Copilot CLI sets title to session name)
-            // Strip leading emoji/symbol prefixes (e.g. "🤖 " when Copilot is working)
-            else if (sessionSummaries != null)
-            {
-                var stripped = StripLeadingEmoji(title);
-                if (sessionSummaries.TryGetValue(stripped, out var matchedId))
-                {
-                    sessionId = matchedId;
-                    label = "Copilot CLI";
-                }
-            }
-
-            if (sessionId != null && sessionId.Length > 0 && label != null)
-            {
-                if (!results.ContainsKey(sessionId))
-                {
-                    results[sessionId] = new List<(string, string, IntPtr)>();
-                }
-                results[sessionId].Add((label, title, hwnd));
+                results[m.SessionId].Add((m.Label, title, hwnd));
                 matchedHwnds.Add(hwnd);
             }
 
@@ -381,6 +361,53 @@ internal static partial class WindowFocusService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Matches a window title against tracked session patterns.
+    /// Returns the session ID and label if the title matches, or null if no match.
+    /// Patterns: "Copilot CLI - {sessionId}", "Terminal - {sessionId}", "Terminal #N - {sessionId}",
+    /// and optionally session summaries (after emoji stripping).
+    /// </summary>
+    /// <param name="title">The window title to match.</param>
+    /// <param name="sessionSummaries">Optional mapping of session summary to session ID for title matching.</param>
+    /// <returns>A tuple of (sessionId, label) if matched, or null.</returns>
+    internal static (string SessionId, string Label)? MatchTrackedWindowTitle(string title, Dictionary<string, string>? sessionSummaries = null)
+    {
+        // Match "Copilot CLI - {sessionId}"
+        if (title.StartsWith("Copilot CLI - ", StringComparison.OrdinalIgnoreCase))
+        {
+            return (title.Substring("Copilot CLI - ".Length), "Copilot CLI");
+        }
+
+        // Match "Terminal - {sessionId}"
+        if (title.StartsWith("Terminal - ", StringComparison.OrdinalIgnoreCase))
+        {
+            return (title.Substring("Terminal - ".Length), "Terminal");
+        }
+
+        // Match "Terminal #N - {sessionId}"
+        if (title.StartsWith("Terminal #", StringComparison.OrdinalIgnoreCase))
+        {
+            var dashIdx = title.IndexOf(" - ", "Terminal #".Length, StringComparison.Ordinal);
+            if (dashIdx > 0)
+            {
+                return (title.Substring(dashIdx + 3), title.Substring(0, dashIdx));
+            }
+        }
+
+        // Match window title equal to a known session summary (Copilot CLI sets title to session name)
+        // Strip leading emoji/symbol prefixes (e.g. "🤖 " when Copilot is working)
+        if (sessionSummaries != null)
+        {
+            var stripped = StripLeadingEmoji(title);
+            if (sessionSummaries.TryGetValue(stripped, out var matchedId))
+            {
+                return (matchedId, "Copilot CLI");
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

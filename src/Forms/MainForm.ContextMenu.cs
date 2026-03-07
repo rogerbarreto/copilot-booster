@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
-using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Forms;
 
@@ -304,18 +303,6 @@ internal partial class MainForm
                 workspace.RestoreTabs(savedTabs);
             }
 
-            // Save initial title hash baseline after tabs have loaded
-            _ = Task.Factory.StartNew(() =>
-            {
-                Thread.Sleep(3000); // Let tabs load their titles
-                var hash = workspace.GetTabNameHash();
-                if (hash != null)
-                {
-                    EdgeTabPersistenceService.SaveTabTitleHash(sid, hash);
-                    Program.Logger.LogInformation("[Baseline] Saved initial title hash for {Sid}: {Hash}", sid, hash);
-                }
-            }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
-
             this.RefreshActiveStatusAsync();
         };
 
@@ -332,11 +319,6 @@ internal partial class MainForm
                 if (urls.Count > 0)
                 {
                     EdgeTabPersistenceService.SaveTabs(sid, urls);
-                    var titleHash = ws.GetTabNameHash();
-                    if (titleHash != null)
-                    {
-                        EdgeTabPersistenceService.SaveTabTitleHash(sid, titleHash);
-                    }
                     this.BeginInvoke(() => this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored"));
                 }
                 else
@@ -485,6 +467,11 @@ internal partial class MainForm
             return GetSessionFiles(Program.SessionStateDir, sid).Count;
         };
 
+        this._sessionsVisuals.GridVisuals.GetContextCounts = (sid) =>
+        {
+            return this._contextWatcher?.GetCounts(sid) ?? (0, 0);
+        };
+
         this._sessionsVisuals.GridVisuals.GetSessionFiles = (sid) =>
         {
             return GetSessionFiles(Program.SessionStateDir, sid);
@@ -535,16 +522,6 @@ internal partial class MainForm
             {
                 workspace.RestoreTabs(savedTabs);
             }
-
-            _ = Task.Factory.StartNew(() =>
-            {
-                Thread.Sleep(3000);
-                var hash = workspace.GetTabNameHash();
-                if (hash != null)
-                {
-                    EdgeTabPersistenceService.SaveTabTitleHash(sid, hash);
-                }
-            }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
 
             this.RefreshActiveStatusAsync();
         };

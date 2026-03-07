@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <script>
         let savePending = false;
+        let requestedAt = 0;
         let metadataTimer = null;
         let signalTimer = null;
 
@@ -29,29 +30,24 @@
 
         let beforeUnloadActive = false;
 
-        function toggleCard(status) {
-            const card = document.getElementById('unsaved-card');
+        function updateSaveButton(state) {
             const saveBtn = document.getElementById('save-link');
-            if (status === 'unsaved') {
-                card.style.display = 'block';
-                saveBtn.textContent = '💾 Save Tabs';
-                saveBtn.style.pointerEvents = 'auto';
-                saveBtn.style.opacity = '1';
-            } else if (status === 'processing') {
-                card.style.display = 'block';
+            if (state === 'saving') {
                 saveBtn.textContent = '⏳ Saving...';
                 saveBtn.style.pointerEvents = 'none';
                 saveBtn.style.opacity = '0.6';
+                if (!beforeUnloadActive) {
+                    window.addEventListener('beforeunload', handleBeforeUnload);
+                    beforeUnloadActive = true;
+                }
             } else {
-                card.style.display = 'none';
-            }
-            const needGuard = status === 'unsaved' || status === 'processing';
-            if (needGuard && !beforeUnloadActive) {
-                window.addEventListener('beforeunload', handleBeforeUnload);
-                beforeUnloadActive = true;
-            } else if (!needGuard && beforeUnloadActive) {
-                window.removeEventListener('beforeunload', handleBeforeUnload);
-                beforeUnloadActive = false;
+                saveBtn.textContent = '💾 Save Tabs';
+                saveBtn.style.pointerEvents = 'auto';
+                saveBtn.style.opacity = '1';
+                if (beforeUnloadActive) {
+                    window.removeEventListener('beforeunload', handleBeforeUnload);
+                    beforeUnloadActive = false;
+                }
             }
         }
 
@@ -59,13 +55,9 @@
             e.preventDefault();
             const { id } = parseHash();
             savePending = true;
-            toggleCard('processing');
+            requestedAt = Date.now();
+            updateSaveButton('saving');
             document.title = `CB Session [${id}]::Save`;
-            if (window._saveInterval) clearInterval(window._saveInterval);
-            window._saveInterval = setInterval(() => {
-                if (!savePending) { clearInterval(window._saveInterval); return; }
-                document.title = `CB Session [${id}]::Save`;
-            }, 500);
         }
 
         function loadScript(id, src, onSuccess, fallbackMs) {
@@ -103,11 +95,9 @@
             window.__signalInterval = undefined;
             loadScript('signal-script', './session-signals.js', () => {
                 const signals = window.__sessionSignals;
-                const status = (signals && typeof signals === 'object') ? signals[id] : undefined;
-                toggleCard(status || null);
-                if (!status && savePending) {
+                if (savePending && signals && typeof signals === 'object' && signals[id] > requestedAt) {
                     savePending = false;
-                    if (window._saveInterval) clearInterval(window._saveInterval);
+                    updateSaveButton('ready');
                     const name = window.__sessionName || parseHash().name;
                     setTitle(id, name);
                 }
@@ -196,7 +186,6 @@
             max-width: 400px;
         }
         #unsaved-card {
-            display: none;
             background: var(--banner-bg);
             border: 1px solid var(--banner-border);
             color: var(--banner-fg);
@@ -233,7 +222,6 @@
         <div class="session-id" id="session-id"></div>
         <div class="session-id" id="version"></div>
         <div id="unsaved-card">
-            ⚠️ You have unsaved tab changes in this session.<br>
             Click below to save your current tabs.
             <br>
             <a id="save-link" class="save-btn" href="#">💾 Save Tabs</a>

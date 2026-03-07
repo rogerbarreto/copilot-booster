@@ -8,15 +8,13 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <NoWarn>CA1861</NoWarn>
+    <BaseOutputPath>bin-integration</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj-integration\</BaseIntermediateOutputPath>
+    <AssemblyName>CopilotBooster.IntegrationTests</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Integration\**" />
-    <Compile Remove="bin-integration\**" />
-    <Compile Remove="obj-integration\**" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" Version="1.52.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -27,6 +25,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\CopilotBooster.csproj" />
+    <!-- Exclude unit test files — only compile Integration/ subfolder -->
+    <Compile Remove="**\*.cs" />
+    <Compile Include="Integration\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

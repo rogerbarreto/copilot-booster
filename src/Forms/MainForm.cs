@@ -29,10 +29,17 @@ internal partial class MainForm : Form
     private readonly ActiveStatusTracker _activeTracker = new();
     private readonly SessionRefreshCoordinator _refreshCoordinator;
     private readonly SessionInteractionManager _interactionManager;
-    private System.Windows.Forms.Timer? _backgroundPollTimer;
-    private System.Windows.Forms.Timer? _visualRefreshTimer;
     private System.Windows.Forms.Timer? _spinnerTimer;
+    private System.Windows.Forms.Timer? _refreshDebounceTimer;
+    private System.Windows.Forms.Timer? _fullRefreshTimer;
+    private WindowEventHookService? _windowHookService;
+    private ProcessExitTracker? _processExitTracker;
+    private readonly HashSet<string> _dirtyTrackingSessionIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _dirtyDataSessionIds = new(StringComparer.OrdinalIgnoreCase);
+    private bool _dirtyFullRefresh;
     private BellNotificationService? _bellService;
+    private readonly WorkspaceYamlWatcherService? _workspaceWatcher;
+    private readonly SessionContextWatcherService? _contextWatcher;
 
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
@@ -98,6 +105,38 @@ internal partial class MainForm : Form
         this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
         this._activeTracker.EventsJournal.StartWatching();
+
+        this._workspaceWatcher = new WorkspaceYamlWatcherService();
+        this._workspaceWatcher.WorkspaceChanged += sid =>
+        {
+            if (this.IsHandleCreated)
+            {
+                this.BeginInvoke(() =>
+                {
+                    this.WriteSessionMetadata(sid);
+                    this.RequestRefresh(sessionId: sid, dataChanged: true);
+                });
+            }
+        };
+        this._workspaceWatcher.WorkspaceDeleted += sid =>
+        {
+            if (this.IsHandleCreated)
+            {
+                this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, dataChanged: true));
+            }
+        };
+        this._workspaceWatcher.StartWatching();
+
+        this._contextWatcher = new SessionContextWatcherService();
+        this._contextWatcher.PrimeCache();
+        this._contextWatcher.CountsChanged += sid =>
+        {
+            if (this.IsHandleCreated)
+            {
+                this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
+            }
+        };
+        this._contextWatcher.StartWatching();
 
         this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
@@ -466,7 +505,6 @@ internal partial class MainForm : Form
         // changes made while hidden are reflected immediately.
         this.ApplySessionStates(this._cachedSessions);
         this.PopulateGridWithFilter(this._lastSnapshot);
-        this._visualRefreshTimer?.Start();
     }
 
     private void HideToast()
@@ -476,8 +514,6 @@ internal partial class MainForm : Form
             this._toastAnimTimer?.Stop();
             this._toastAnimating = false;
         }
-
-        this._visualRefreshTimer?.Stop();
 
         if (Program._settings.ToastAnimate)
         {
@@ -635,6 +671,9 @@ internal partial class MainForm : Form
 
         this._activeTracker.EventsJournal.SaveCache();
         this._activeTracker.EventsJournal.Dispose();
+        this._workspaceWatcher?.Dispose();
+        this._contextWatcher?.Dispose();
+        this._activeTracker.SaveWindowHandleCache();
 
         base.OnFormClosing(e);
     }
@@ -731,15 +770,54 @@ internal partial class MainForm : Form
             }
         };
 
-        this._backgroundPollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        this._backgroundPollTimer.Tick += (s, e) => this.RefreshBackgroundAsync();
+        this._refreshDebounceTimer = new System.Windows.Forms.Timer { Interval = 300 };
+        this._refreshDebounceTimer.Tick += this.OnDebouncedRefresh;
 
-        this._visualRefreshTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        this._visualRefreshTimer.Tick += (s, e) => this.RefreshVisualsAsync();
+        this._fullRefreshTimer = new System.Windows.Forms.Timer { Interval = 45000 };
+        this._fullRefreshTimer.Tick += (s, e) => this.RequestRefresh(fullRefresh: true);
 
         this._spinnerTimer = new System.Windows.Forms.Timer { Interval = 100 };
         this._spinnerTimer.Tick += (s, e) => this._sessionsVisuals.GridVisuals.AdvanceSpinnerFrame();
         this._spinnerTimer.Start();
+
+        this._windowHookService = new WindowEventHookService();
+        this._windowHookService.WindowCreated += hwnd =>
+        {
+            var sessionId = this._activeTracker.OnWindowCreated(hwnd);
+            if (sessionId != null)
+            {
+                this.RequestRefresh(sessionId: sessionId, trackingChanged: true);
+            }
+        };
+        this._windowHookService.WindowDestroyed += hwnd =>
+        {
+            var affected = this._activeTracker.OnWindowDestroyed(hwnd);
+            foreach (var id in affected)
+            {
+                this.RequestRefresh(sessionId: id, trackingChanged: true);
+            }
+        };
+        this._windowHookService.WindowTitleChanged += (hwnd, title) =>
+        {
+            var affected = this._activeTracker.OnWindowTitleChanged(hwnd, title, this.BuildSessionSummaryMap());
+            foreach (var id in affected)
+            {
+                this.RequestRefresh(sessionId: id, trackingChanged: true);
+            }
+        };
+
+        this._processExitTracker = new ProcessExitTracker();
+        this._processExitTracker.ProcessExited += pid =>
+        {
+            this.BeginInvoke(() =>
+            {
+                var affected = this._activeTracker.OnProcessExited(pid);
+                foreach (var id in affected)
+                {
+                    this.RequestRefresh(sessionId: id, trackingChanged: true);
+                }
+            });
+        };
 
         this.Shown += async (s, e) =>
         {
@@ -751,10 +829,9 @@ internal partial class MainForm : Form
 
             await this.LoadInitialDataAsync().ConfigureAwait(true);
 
-            // Start background timers only after initial data is loaded to avoid
-            // populating the grid before session states (Active/Archived/Done) are applied.
-            this._backgroundPollTimer.Start();
-            this._visualRefreshTimer.Start();
+            // Start event-driven refresh after initial data is loaded
+            this._windowHookService?.Start();
+            this._fullRefreshTimer?.Start();
 
             this.CheckForMissingAllowedDirs();
             this.CheckForMissingSessionCwds();
@@ -768,10 +845,12 @@ internal partial class MainForm : Form
 
         this.FormClosed += (s, e) =>
         {
-            this._backgroundPollTimer?.Stop();
-            this._visualRefreshTimer?.Stop();
+            this._refreshDebounceTimer?.Stop();
+            this._fullRefreshTimer?.Stop();
             this._spinnerTimer?.Stop();
             this._updateCheckTimer?.Stop();
+            this._windowHookService?.Dispose();
+            this._processExitTracker?.Dispose();
         };
     }
 
@@ -886,78 +965,32 @@ internal partial class MainForm : Form
         var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         foreach (var s in this._cachedSessions)
         {
+            var metadataPath = Path.Combine(SessionStateService.GetSessionDir(s.Id), "metadata.js");
+            if (File.Exists(metadataPath))
+            {
+                continue;
+            }
+
             var displayName = !string.IsNullOrEmpty(s.Alias) ? s.Alias : s.Summary;
             EdgeWorkspaceService.WriteSessionMetadata(s.Id, displayName, version);
         }
     }
 
-    private readonly Dictionary<string, string> _signalStatuses = new(StringComparer.OrdinalIgnoreCase);
-
-    private void CheckEdgeTabChanges()
+    /// <summary>
+    /// Writes metadata.js for a single session (e.g., when its workspace.yaml changes).
+    /// </summary>
+    private void WriteSessionMetadata(string sessionId)
     {
-        foreach (var ws in this._activeTracker.GetTrackedEdgeWorkspaces())
+        var session = this._cachedSessions?.FirstOrDefault(s =>
+            string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (session == null)
         {
-            if (!ws.IsOpen)
-            {
-                this._signalStatuses.Remove(ws.WorkspaceId);
-                continue;
-            }
-
-            // If currently processing a save, check if done
-            if (this._signalStatuses.TryGetValue(ws.WorkspaceId, out var status) && status == "processing")
-            {
-                continue;
-            }
-
-            // Check for save signal from session.html button click
-            var saveDetected = ws.DetectSaveSignal();
-            Program.Logger.LogInformation("[SaveSignal] {Sid}: DetectSaveSignal={Detected}", ws.WorkspaceId, saveDetected);
-            if (saveDetected)
-            {
-                this._signalStatuses[ws.WorkspaceId] = "processing";
-                Program.Logger.LogInformation("[SaveSignal] {Sid}: Save signal detected, saving...", ws.WorkspaceId);
-
-                var wsId = ws.WorkspaceId;
-                var urls = ws.GetTabUrls();
-                Program.Logger.LogInformation("[SaveSignal] {Sid}: Got {Count} URLs", wsId, urls.Count);
-                if (urls.Count > 0)
-                {
-                    EdgeTabPersistenceService.SaveTabs(wsId, urls);
-                    var titleHash = ws.GetTabNameHash();
-                    Program.Logger.LogInformation("[SaveSignal] {Sid}: New title hash={Hash}", wsId, titleHash);
-                    if (titleHash != null)
-                    {
-                        EdgeTabPersistenceService.SaveTabTitleHash(wsId, titleHash);
-                    }
-
-                    this.BeginInvoke(() => this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored"));
-                }
-
-                ws.HasUnsavedChanges = false;
-                this._signalStatuses.Remove(wsId);
-                continue;
-            }
-
-            // Lightweight change detection — just reads tab names, no navigation
-            ws.CheckForTabChanges();
-            if (ws.HasUnsavedChanges)
-            {
-                this._signalStatuses[ws.WorkspaceId] = "unsaved";
-            }
-            else
-            {
-                this._signalStatuses.Remove(ws.WorkspaceId);
-            }
+            return;
         }
 
-        // Write signal file for session.html to poll
-        if (this._signalStatuses.Count > 0)
-        {
-            Program.Logger.LogInformation("[Signals] Writing statuses: [{Statuses}]",
-                string.Join(", ", this._signalStatuses.Select(kv => $"{kv.Key}={kv.Value}")));
-        }
-
-        EdgeWorkspaceService.WriteSessionSignals(this._signalStatuses);
+        var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+        EdgeWorkspaceService.WriteSessionMetadata(session.Id, displayName, version);
     }
 
     private bool _refreshInProgress;
@@ -1160,7 +1193,7 @@ internal partial class MainForm : Form
     }
 
     /// <summary>
-    /// Core background refresh: refreshes session data, Edge tracking, and notifications.
+    /// Core background refresh: refreshes session data and notifications.
     /// Returns the latest snapshot. Does not touch the grid.
     /// </summary>
     private async Task RefreshBackgroundCoreAsync()
@@ -1179,25 +1212,6 @@ internal partial class MainForm : Form
             this.WriteSessionMetadata();
             var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
-            // Edge scan uses UI Automation (COM/STA) — run on a dedicated STA thread
-            bool edgeChanged = await Task.Factory.StartNew(
-                () => this._activeTracker.ScanAndTrackEdgeWorkspaces(),
-                CancellationToken.None,
-                TaskCreationOptions.None,
-                StaTaskScheduler.Instance).ConfigureAwait(true);
-            if (edgeChanged)
-            {
-                // Re-build snapshot to include newly discovered Edge workspaces
-                snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
-            }
-
-            // Check Edge tab changes on STA thread
-            await Task.Factory.StartNew(
-                () => this.CheckEdgeTabChanges(),
-                CancellationToken.None,
-                TaskCreationOptions.None,
-                StaTaskScheduler.Instance).ConfigureAwait(true);
-
             this._lastSnapshot = snapshot;
 
             // Bell notification: detect transitions and fire toast
@@ -1210,27 +1224,83 @@ internal partial class MainForm : Form
     }
 
     /// <summary>
-    /// Background polling callback: refreshes data, Edge tracking, and notifications.
-    /// Runs even when the toast is hidden.
-    /// </summary>
-    private async void RefreshBackgroundAsync() => await this.RefreshBackgroundCoreAsync().ConfigureAwait(true);
-
-    /// <summary>
-    /// Visual polling: repopulates the grid from the latest cached snapshot.
-    /// Stopped when the toast is hidden, restarted when shown.
-    /// </summary>
-    private void RefreshVisualsAsync()
-    {
-        this.PopulateGridWithFilter(this._lastSnapshot);
-    }
-
-    /// <summary>
     /// Full refresh: background data + visual grid. Used by user-triggered actions (context menu, etc.).
     /// </summary>
     private async void RefreshActiveStatusAsync()
     {
         await this.RefreshBackgroundCoreAsync().ConfigureAwait(true);
         this.PopulateGridWithFilter(this._lastSnapshot);
+    }
+
+    private void RequestRefresh(string? sessionId = null, bool trackingChanged = false, bool dataChanged = false, bool fullRefresh = false)
+    {
+        if (sessionId != null)
+        {
+            if (trackingChanged)
+            {
+                this._dirtyTrackingSessionIds.Add(sessionId);
+            }
+
+            if (dataChanged)
+            {
+                this._dirtyDataSessionIds.Add(sessionId);
+            }
+        }
+
+        if (fullRefresh)
+        {
+            this._dirtyFullRefresh = true;
+        }
+
+        this._refreshDebounceTimer!.Stop();
+        this._refreshDebounceTimer.Start();
+    }
+
+    private async void OnDebouncedRefresh(object? sender, EventArgs e)
+    {
+        this._refreshDebounceTimer!.Stop();
+
+        if (this._dirtyFullRefresh)
+        {
+            this._dirtyFullRefresh = false;
+            this._dirtyTrackingSessionIds.Clear();
+            this._dirtyDataSessionIds.Clear();
+            await this.RefreshBackgroundCoreAsync().ConfigureAwait(true);
+            this.PopulateGridWithFilter(this._lastSnapshot);
+            return;
+        }
+
+        // For data changes: reload affected sessions
+        if (this._dirtyDataSessionIds.Count > 0)
+        {
+            var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+            this._cachedSessions = sessions;
+            this.ApplySessionStates(this._cachedSessions);
+        }
+
+        // For tracking changes: build incremental snapshot
+        if (this._dirtyTrackingSessionIds.Count > 0 || this._dirtyDataSessionIds.Count > 0)
+        {
+            var snapshot = this._activeTracker.IncrementalRefresh(this._cachedSessions);
+            this._lastSnapshot = snapshot;
+
+            if (this._dirtyTrackingSessionIds.Count > 0 && this._dirtyDataSessionIds.Count == 0)
+            {
+                this._sessionsVisuals.GridVisuals.UpdateGridIncremental(snapshot);
+            }
+            else
+            {
+                this.PopulateGridWithFilter(snapshot);
+            }
+        }
+
+        this._dirtyTrackingSessionIds.Clear();
+        this._dirtyDataSessionIds.Clear();
+    }
+
+    private Dictionary<string, string> BuildSessionSummaryMap()
+    {
+        return ActiveStatusTracker.BuildSessionSummaryMap(this._cachedSessions);
     }
 
     /// <summary>
@@ -1298,6 +1368,17 @@ internal partial class MainForm : Form
 
         // Re-run refresh with started sessions seeded (bells now suppressed)
         snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+
+        // Edge scan uses UI Automation (COM/STA) — run once at startup on a dedicated STA thread
+        bool edgeChanged = await Task.Factory.StartNew(
+            () => this._activeTracker.ScanAndTrackEdgeWorkspaces(),
+            CancellationToken.None,
+            TaskCreationOptions.None,
+            StaTaskScheduler.Instance).ConfigureAwait(true);
+        if (edgeChanged)
+        {
+            snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
+        }
 
         // Now enable watcher events — startup seeding is complete
         this._activeTracker.EventsJournal.SuppressEvents = false;

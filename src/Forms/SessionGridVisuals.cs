@@ -33,6 +33,7 @@ internal class SessionGridVisuals
     private static Color BellRowSelectedColor => Application.IsDarkModeEnabled
         ? Color.FromArgb(120, 40, 40)
         : Color.FromArgb(240, 160, 160);
+
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
     private readonly LauncherSettings _settings;
@@ -48,6 +49,11 @@ internal class SessionGridVisuals
     /// Callback to get the number of context files for a session.
     /// </summary>
     internal Func<string, int>? GetSessionFileCount;
+
+    /// <summary>
+    /// Callback to get cached file and tab counts for a session.
+    /// </summary>
+    internal Func<string, (int Files, int Tabs)>? GetContextCounts;
 
     /// <summary>
     /// Set to true when the user manually resizes the CWD column, preventing auto-fit from overriding it.
@@ -410,9 +416,7 @@ internal class SessionGridVisuals
                 }
 
                 // Build context indicator data
-                var fileCount = this.GetSessionFileCount?.Invoke(session.Id) ?? 0;
-                var hasTabs = EdgeTabPersistenceService.HasSavedTabs(session.Id);
-                var tabCount = hasTabs ? EdgeTabPersistenceService.LoadTabs(session.Id).Count : 0;
+                var (fileCount, tabCount) = this.GetContextCounts?.Invoke(session.Id) ?? (0, 0);
                 var contextValue = BuildContextValue(fileCount, tabCount);
 
                 var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, contextValue, activeText);
@@ -448,16 +452,7 @@ internal class SessionGridVisuals
                     row.Cells["CWD"].ToolTipText = session.Cwd;
                 }
 
-                if (statusIcon == "bell")
-                {
-                    row.DefaultCellStyle.BackColor = BellRowColor;
-                    row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
-                }
-                else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
-                {
-                    row.DefaultCellStyle.BackColor = ActiveRowColor;
-                    row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
-                }
+                ApplyRowStyling(row, statusIcon, activeText);
             }
 
             // Restore selection and CurrentCell
@@ -598,6 +593,62 @@ internal class SessionGridVisuals
         }
     }
 
+    /// <summary>
+    /// Updates only the cells that changed between the previous and current snapshot.
+    /// Avoids full grid rebuild for better performance and no visual flicker.
+    /// </summary>
+    internal void UpdateGridIncremental(ActiveStatusSnapshot snapshot)
+    {
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is not string sessionId)
+            {
+                continue;
+            }
+
+            var newActiveText = snapshot.ActiveTextBySessionId.GetValueOrDefault(sessionId, "");
+            var newStatusIcon = snapshot.StatusIconBySessionId.GetValueOrDefault(sessionId, "");
+
+            // Update status icon if changed
+            var currentStatus = row.Cells[0].Value?.ToString() ?? "";
+            if (currentStatus != newStatusIcon)
+            {
+                row.Cells[0].Value = newStatusIcon;
+                ApplyRowStyling(row, newStatusIcon, newActiveText);
+            }
+
+            // Update active text if changed
+            var currentActive = row.Cells[5].Value?.ToString() ?? "";
+            if (currentActive != newActiveText)
+            {
+                row.Cells[5].Value = newActiveText;
+                ApplyRowStyling(row, newStatusIcon, newActiveText);
+            }
+        }
+    }
+
+    private static void ApplyRowStyling(DataGridViewRow row, string statusIcon, string activeText)
+    {
+        if (statusIcon == "bell")
+        {
+            row.DefaultCellStyle.BackColor = BellRowColor;
+            row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
+            row.DefaultCellStyle.ForeColor = Color.Empty;
+        }
+        else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
+        {
+            row.DefaultCellStyle.BackColor = ActiveRowColor;
+            row.DefaultCellStyle.SelectionBackColor = Color.Empty;
+            row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
+        }
+        else
+        {
+            row.DefaultCellStyle.BackColor = Color.Empty;
+            row.DefaultCellStyle.SelectionBackColor = Color.Empty;
+            row.DefaultCellStyle.ForeColor = Color.Empty;
+        }
+    }
+
     internal void AdvanceSpinnerFrame()
     {
         this._spinnerFrameIndex = (this._spinnerFrameIndex + 1) % 8;
@@ -616,26 +667,7 @@ internal class SessionGridVisuals
             {
                 row.Cells[0].Value = statusIcon;
                 var activeText = row.Cells[5].Value?.ToString() ?? "";
-
-                if (statusIcon == "bell")
-                {
-                    row.DefaultCellStyle.BackColor = BellRowColor;
-                    row.DefaultCellStyle.SelectionBackColor = BellRowSelectedColor;
-                    row.DefaultCellStyle.ForeColor = Color.Empty;
-                }
-                else if (statusIcon == "working" || !string.IsNullOrEmpty(activeText))
-                {
-                    row.DefaultCellStyle.BackColor = ActiveRowColor;
-                    row.DefaultCellStyle.SelectionBackColor = Color.Empty;
-                    row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
-                }
-                else
-                {
-                    row.DefaultCellStyle.BackColor = Color.Empty;
-                    row.DefaultCellStyle.SelectionBackColor = Color.Empty;
-                    row.DefaultCellStyle.ForeColor = Color.Empty;
-                }
-
+                ApplyRowStyling(row, statusIcon, activeText);
                 break;
             }
         }
@@ -751,19 +783,8 @@ internal class SessionGridVisuals
         this._activeTracker.InitStartedSessions([sessionId]);
         row.Cells[0].Value = "";
 
-        var activeText = row.Cells[5].Value as string;
-        if (!string.IsNullOrEmpty(activeText))
-        {
-            row.DefaultCellStyle.BackColor = ActiveRowColor;
-            row.DefaultCellStyle.ForeColor = ActiveRowForeColor;
-        }
-        else
-        {
-            row.DefaultCellStyle.BackColor = Color.Empty;
-            row.DefaultCellStyle.ForeColor = Color.Empty;
-        }
-
-        row.DefaultCellStyle.SelectionBackColor = Color.Empty;
+        var activeText = row.Cells[5].Value as string ?? "";
+        ApplyRowStyling(row, "", activeText);
     }
 
     private void HandleContextClick(DataGridViewRow row, string sessionId, DataGridViewCellMouseEventArgs e)

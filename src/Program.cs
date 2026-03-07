@@ -15,6 +15,7 @@ using CopilotBooster.Services;
 using Microsoft.Extensions.Logging;
 
 [assembly: InternalsVisibleTo("CopilotBooster.Tests")]
+[assembly: InternalsVisibleTo("CopilotBooster.IntegrationTests")]
 
 /// <summary>
 /// Entry point for the Copilot launcher application.

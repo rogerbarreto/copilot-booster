@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace CopilotBooster.Services;
 
 /// <summary>
-/// Result snapshot returned by <see cref="ActiveStatusTracker.Refresh"/>.
+/// Result snapshot returned by <see cref="ActiveStatusTracker.FullRefresh"/> or <see cref="ActiveStatusTracker.IncrementalRefresh"/>.
 /// </summary>
 internal record ActiveStatusSnapshot(
     Dictionary<string, string> ActiveTextBySessionId,
@@ -472,7 +472,7 @@ internal class ActiveStatusTracker
     /// Builds a dictionary mapping non-empty session summaries to session IDs
     /// for window title matching. Excludes generic titles like "GitHub Copilot".
     /// </summary>
-    private static Dictionary<string, string> BuildSessionSummaryMap(List<NamedSession> sessions)
+    internal static Dictionary<string, string> BuildSessionSummaryMap(List<NamedSession> sessions)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var session in sessions)
@@ -488,9 +488,10 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
-    /// Refreshes active-status tracking state and returns a snapshot of active text and session names.
+    /// Performs a full refresh of active-status tracking state including Win32 calls,
+    /// process liveness checks, and cache persistence. Called at startup and by the fallback timer.
     /// </summary>
-    internal ActiveStatusSnapshot Refresh(List<NamedSession> sessions)
+    internal ActiveStatusSnapshot FullRefresh(List<NamedSession> sessions)
     {
         // Snapshot to avoid concurrent modification from UI thread
         var sessionSnapshot = sessions.ToList();
@@ -649,9 +650,6 @@ internal class ActiveStatusTracker
             this._explorerWindows.Remove(id);
         }
 
-        // Persist window handle cache so tracking survives app restarts
-        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces, this._teamsWindows);
-
         // Clean up closed Edge workspaces
         var closedEdge = new List<string>();
         foreach (var kvp in this._edgeWorkspaces.ToList())
@@ -732,6 +730,215 @@ internal class ActiveStatusTracker
         }
 
         return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById, statusIconBySessionId);
+    }
+
+    /// <summary>
+    /// Builds an <see cref="ActiveStatusSnapshot"/> from the already-cached in-memory state
+    /// without any Win32 calls, process liveness checks, or cache persistence.
+    /// Intended for fast, event-driven refreshes between full refresh cycles.
+    /// </summary>
+    internal ActiveStatusSnapshot IncrementalRefresh(List<NamedSession> sessions)
+    {
+        var sessionSnapshot = sessions.ToList();
+
+        var activeTextBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sessionNamesById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var session in sessionSnapshot)
+        {
+            var activeText = this.BuildActiveText(session.Id);
+            if (!string.IsNullOrEmpty(activeText))
+            {
+                activeTextBySessionId[session.Id] = activeText;
+            }
+
+            var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
+            if (!string.IsNullOrEmpty(displayName))
+            {
+                sessionNamesById[session.Id] = displayName;
+            }
+        }
+
+        this.EventsJournal.ProcessFallbackPoll(sessionSnapshot.Select(s => s.Id).ToList());
+        var statusIconBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var session in sessionSnapshot)
+        {
+            var status = this.EventsJournal.GetCachedStatus(session.Id);
+            switch (status)
+            {
+                case EventsJournalService.SessionStatus.Working:
+                    statusIconBySessionId[session.Id] = "working";
+                    break;
+                case EventsJournalService.SessionStatus.Idle:
+                    statusIconBySessionId[session.Id] = this._startedSessionIds.Contains(session.Id) ? "" : "bell";
+                    break;
+                case EventsJournalService.SessionStatus.IdleSilent:
+                    statusIconBySessionId[session.Id] = "";
+                    break;
+            }
+        }
+
+        return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById, statusIconBySessionId);
+    }
+
+    /// <summary>
+    /// Called when a window's title changes. Updates tracking state by matching the new title
+    /// against tracked session patterns. If the HWND was previously tracked but no longer matches,
+    /// it is removed from tracking.
+    /// </summary>
+    /// <param name="hwnd">The window handle whose title changed.</param>
+    /// <param name="title">The new window title.</param>
+    /// <param name="sessionSummaries">Optional mapping of session summary to session ID for title matching.</param>
+    internal HashSet<string> OnWindowTitleChanged(IntPtr hwnd, string title, Dictionary<string, string>? sessionSummaries)
+    {
+        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var match = WindowFocusService.MatchTrackedWindowTitle(title, sessionSummaries);
+
+        // Remove this HWND from any session it was previously tracked under
+        foreach (var kvp in this._activeTrackedWindows)
+        {
+            int before = kvp.Value.Count;
+            kvp.Value.RemoveAll(t => t.Hwnd == hwnd);
+            if (kvp.Value.Count < before)
+            {
+                affected.Add(kvp.Key);
+            }
+        }
+
+        if (match != null)
+        {
+            var (sessionId, label) = match.Value;
+            if (!this._activeTrackedWindows.ContainsKey(sessionId))
+            {
+                this._activeTrackedWindows[sessionId] = new List<(string Label, string Title, IntPtr Hwnd)>();
+            }
+
+            // Avoid duplicate HWND entries
+            if (!this._activeTrackedWindows[sessionId].Any(t => t.Hwnd == hwnd))
+            {
+                this._activeTrackedWindows[sessionId].Add((label, title, hwnd));
+            }
+
+            affected.Add(sessionId);
+        }
+
+        return affected;
+    }
+
+    /// <summary>
+    /// Called when a new window is created. If the window's owning process matches
+    /// a tracked process, captures the HWND for that process entry.
+    /// </summary>
+    /// <param name="hwnd">The newly created window handle.</param>
+    internal string? OnWindowCreated(IntPtr hwnd)
+    {
+        int pid = WindowFocusService.GetWindowProcessId(hwnd);
+        if (pid <= 0)
+        {
+            return null;
+        }
+
+        foreach (var kvp in this._trackedProcesses)
+        {
+            foreach (var proc in kvp.Value)
+            {
+                if (proc.Pid == pid && proc.Hwnd == IntPtr.Zero)
+                {
+                    proc.Hwnd = hwnd;
+                    return kvp.Key;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Called when a window is destroyed. Removes the HWND from all tracking collections.
+    /// </summary>
+    /// <param name="hwnd">The destroyed window handle.</param>
+    internal HashSet<string> OnWindowDestroyed(IntPtr hwnd)
+    {
+        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in this._activeTrackedWindows)
+        {
+            int before = kvp.Value.Count;
+            kvp.Value.RemoveAll(t => t.Hwnd == hwnd);
+            if (kvp.Value.Count < before)
+            {
+                affected.Add(kvp.Key);
+            }
+        }
+
+        foreach (var kvp in this._trackedProcesses)
+        {
+            int before = kvp.Value.Count;
+            kvp.Value.RemoveAll(p => p.Hwnd == hwnd);
+            if (kvp.Value.Count < before)
+            {
+                affected.Add(kvp.Key);
+            }
+        }
+
+        foreach (var kvp in this._explorerWindows)
+        {
+            int before = kvp.Value.Count;
+            kvp.Value.RemoveAll(e => e.Hwnd == hwnd);
+            if (kvp.Value.Count < before)
+            {
+                affected.Add(kvp.Key);
+            }
+        }
+
+        var emptyExplorers = this._explorerWindows.Where(kvp => kvp.Value.Count == 0).Select(kvp => kvp.Key).ToList();
+        foreach (var id in emptyExplorers)
+        {
+            this._explorerWindows.Remove(id);
+        }
+
+        var deadEdge = this._edgeWorkspaces.Where(kvp => kvp.Value.CachedHwnd == hwnd).Select(kvp => kvp.Key).ToList();
+        foreach (var id in deadEdge)
+        {
+            affected.Add(id);
+            this._edgeWorkspaces.Remove(id);
+        }
+
+        var deadTeams = this._teamsWindows.Where(kvp => kvp.Value.CachedHwnd == hwnd).Select(kvp => kvp.Key).ToList();
+        foreach (var id in deadTeams)
+        {
+            affected.Add(id);
+            if (this._teamsWindows.TryGetValue(id, out var tw))
+            {
+                tw.Release();
+            }
+
+            this._teamsWindows.Remove(id);
+            this.OnTeamsWindowClosed?.Invoke(id);
+        }
+
+        return affected;
+    }
+
+    /// <summary>
+    /// Called when a tracked process exits. Removes all entries from <see cref="_trackedProcesses"/>
+    /// where the PID matches.
+    /// </summary>
+    /// <param name="pid">The process ID that exited.</param>
+    internal HashSet<string> OnProcessExited(int pid)
+    {
+        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in this._trackedProcesses)
+        {
+            int before = kvp.Value.Count;
+            kvp.Value.RemoveAll(p => p.Pid == pid);
+            if (kvp.Value.Count < before)
+            {
+                affected.Add(kvp.Key);
+            }
+        }
+
+        return affected;
     }
 
     /// <summary>
@@ -975,4 +1182,12 @@ internal class ActiveStatusTracker
     /// </summary>
     internal IEnumerable<EdgeWorkspaceService> GetTrackedEdgeWorkspaces()
         => this._edgeWorkspaces.Values.ToList();
+
+    /// <summary>
+    /// Persists the window handle cache to disk. Called once on shutdown.
+    /// </summary>
+    internal void SaveWindowHandleCache()
+    {
+        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces, this._teamsWindows);
+    }
 }

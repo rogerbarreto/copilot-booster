@@ -1,5 +1,7 @@
 bin/
+bin-integration/
 obj/
+obj-integration/
 publish/
 publish2/
 *.user

@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CopilotBooster.Tests" />
+    <InternalsVisibleTo Include="CopilotBooster.IntegrationTests" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\*.png" />

@@ -59,7 +59,7 @@ internal class SessionRefreshCoordinator
     internal ActiveStatusSnapshot RefreshActiveStatus(IReadOnlyList<NamedSession> sessions)
     {
         Stopwatch? sw = Program.Logger.IsEnabled(LogLevel.Debug) ? Stopwatch.StartNew() : null;
-        var result = this._activeTracker.Refresh((List<NamedSession>)sessions);
+        var result = this._activeTracker.FullRefresh((List<NamedSession>)sessions);
         if (sw != null)
         {
             sw.Stop();
