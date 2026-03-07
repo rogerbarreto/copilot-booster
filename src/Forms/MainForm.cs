@@ -1281,8 +1281,19 @@ internal partial class MainForm : Form
                 Program.Logger.LogInformation("[SaveSignal] Saved {Count} tabs for session {SessionId}", urls.Count, sessionId);
                 this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored");
             }
+            else if (EdgeTabPersistenceService.HasSavedTabs(sessionId))
+            {
+                // No tabs found now but there were previously saved tabs — clear them
+                EdgeTabPersistenceService.SaveTabs(sessionId, []);
+                Program.Logger.LogInformation("[SaveSignal] Cleared previously saved tabs for session {SessionId}", sessionId);
+                this._toast.Show("✅ Edge state saved — previous tabs cleared");
+            }
+            else
+            {
+                this._toast.Show("No tabs to save — only the session anchor tab was found");
+            }
 
-            // Write lastSaved timestamp so session.html can confirm the save
+            // Always write lastSaved timestamp so session.html resets the button
             this._lastSavedBySession[sessionId] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             EdgeWorkspaceService.WriteSessionSignals(this._lastSavedBySession);
         }

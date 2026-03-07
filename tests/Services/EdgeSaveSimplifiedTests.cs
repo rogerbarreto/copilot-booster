@@ -157,6 +157,46 @@ public sealed class EdgeSaveSimplifiedTests : IDisposable
         Assert.Empty(loaded);
     }
 
+    // ── Save with previous tabs scenarios ─────────────────────────────
+
+    [Fact]
+    public void SaveTabs_EmptyList_ClearsPreviousTabs()
+    {
+        // Save some tabs first
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, ["https://example.com", "https://github.com"]);
+        Assert.Equal(2, EdgeTabPersistenceService.LoadTabs(this._testSessionId).Count);
+
+        // Save empty list — should clear
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, []);
+
+        var loaded = EdgeTabPersistenceService.LoadTabs(this._testSessionId);
+        Assert.Empty(loaded);
+        Assert.True(EdgeTabPersistenceService.HasSavedTabs(this._testSessionId), "File should still exist (empty list)");
+    }
+
+    [Fact]
+    public void HasSavedTabs_AfterClearingTabs_StillReturnsTrue()
+    {
+        // HasSavedTabs checks file existence, not content
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, ["https://example.com"]);
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, []);
+
+        // File still exists even with empty list
+        Assert.True(EdgeTabPersistenceService.HasSavedTabs(this._testSessionId));
+    }
+
+    [Fact]
+    public void SaveTabs_OverwritesPreviousTabs()
+    {
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, ["https://old.com"]);
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, ["https://new1.com", "https://new2.com"]);
+
+        var loaded = EdgeTabPersistenceService.LoadTabs(this._testSessionId);
+        Assert.Equal(2, loaded.Count);
+        Assert.Equal("https://new1.com", loaded[0]);
+        Assert.Equal("https://new2.com", loaded[1]);
+    }
+
     // ── ExtractSessionId regression ───────────────────────────────────
 
     [Fact]
