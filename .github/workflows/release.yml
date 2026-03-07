@@ -30,7 +30,7 @@ jobs:
         run: dotnet format copilot-booster.sln --verify-no-changes --verbosity normal
 
       - name: Unit Tests
-        run: dotnet test tests/CopilotBooster.Tests.csproj -c Release --nologo --verbosity normal
+        run: dotnet run --project tests/CopilotBooster.Tests.csproj -c Release
 
       - name: Install Playwright browsers
         shell: pwsh
