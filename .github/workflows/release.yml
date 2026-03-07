@@ -49,7 +49,7 @@ jobs:
     steps:
       - name: Trigger code signing workflow
         run: |
-          curl -X POST \
+          curl -X POST --fail-with-body \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.PRIVATE_REPO_PAT }}" \
             https://api.github.com/repos/rogerbarreto/copilot-booster-signing/dispatches \
