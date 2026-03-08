@@ -624,6 +624,18 @@ internal class SessionGridVisuals
                 row.Cells[5].Value = newActiveText;
                 ApplyRowStyling(row, newStatusIcon, newActiveText);
             }
+
+            // Update context column (tab/file counts) if changed
+            var (fileCount, tabCount) = this.GetContextCounts?.Invoke(sessionId) ?? (0, 0);
+            var newContextValue = BuildContextValue(fileCount, tabCount);
+            var currentContext = row.Cells[4].Value?.ToString() ?? "";
+            if (currentContext != newContextValue)
+            {
+                row.Cells[4].Value = newContextValue;
+                row.Cells[4].ToolTipText = string.IsNullOrEmpty(newContextValue)
+                    ? ""
+                    : BuildContextTooltip(fileCount, tabCount);
+            }
         }
     }
 

@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.1] - 2026-03-08
+
+### Fixed
+
+- **Edge tab count updates instantly after save** — the session grid now refreshes the tab count column immediately after saving or clearing Edge tabs, instead of requiring a manual refresh.
+- **Version display moved to session.html** — version is now stamped directly into `session.html` at startup instead of being injected via `metadata.js`, preventing unnecessary polling.
+- **Terminal launcher tests no longer leave orphan tabs** — invalid-directory tests now verify method existence via reflection instead of launching actual terminal processes.
+
+### Added
+
+- **Integration tests for save→count flow** — new unit and E2E tests verify that the Edge tab count in the session grid matches the persisted tab count immediately after save.
+
 ## [0.18.0] - 2026-03-07
 
 ### Added

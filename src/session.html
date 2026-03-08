@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <script>
+        const BOOSTER_VERSION = '__BOOSTER_VERSION__';
         let savePending = false;
         let requestedAt = 0;
         let metadataTimer = null;
@@ -75,15 +76,11 @@
             const { id } = parseHash();
             if (!id) return;
             window.__sessionName = undefined;
-            window.__boosterVersion = undefined;
             window.__metadataInterval = undefined;
             loadScript('meta-script', `./sessions/${id}/metadata.js`, () => {
                 const name = window.__sessionName || parseHash().name;
                 setTitle(id, name);
                 document.getElementById('session-name').textContent = name || 'Unnamed Session';
-                if (window.__boosterVersion) {
-                    document.getElementById('version').textContent = 'v' + window.__boosterVersion;
-                }
                 scheduleMetadata(window.__metadataInterval || 60000);
             }, () => scheduleMetadata(60000));
         }
@@ -125,6 +122,9 @@
             setTitle(id, name);
             document.getElementById('session-name').textContent = name || 'Unnamed Session';
             document.getElementById('session-id').textContent = id;
+            if (BOOSTER_VERSION && !BOOSTER_VERSION.startsWith('__')) {
+                document.getElementById('version').textContent = 'v' + BOOSTER_VERSION;
+            }
             document.getElementById('save-link').onclick = onSaveClick;
             pollMetadata();
             pollSignals();

@@ -205,4 +205,69 @@ public sealed class EdgeSaveSimplifiedTests : IDisposable
         var result = EdgeWorkspaceService.ExtractSessionId("CB Session [abc-123]");
         Assert.Equal("abc-123", result);
     }
+
+    // ── Full flow: SaveTabs + UpdateTabCount → GetCounts matches instantly ──
+
+    [Fact]
+    public void SaveTabs_UpdateTabCount_GetCountsMatchesImmediately()
+    {
+        using var watcher = new SessionContextWatcherService();
+        string? changedId = null;
+        watcher.CountsChanged += id => changedId = id;
+
+        var urls = new List<string> { "https://a.com", "https://b.com", "https://c.com" };
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, urls);
+        watcher.UpdateTabCount(this._testSessionId, urls.Count);
+
+        var counts = watcher.GetCounts(this._testSessionId);
+        Assert.Equal(3, counts.Tabs);
+        Assert.Equal(this._testSessionId, changedId);
+    }
+
+    [Fact]
+    public void SaveTabs_ClearTabs_UpdateTabCountZero_RemovesCount()
+    {
+        using var watcher = new SessionContextWatcherService();
+
+        // First save 3 tabs
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, ["https://a.com", "https://b.com", "https://c.com"]);
+        watcher.UpdateTabCount(this._testSessionId, 3);
+        Assert.Equal(3, watcher.GetCounts(this._testSessionId).Tabs);
+
+        // Now clear tabs
+        string? changedId = null;
+        watcher.CountsChanged += id => changedId = id;
+
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, []);
+        watcher.UpdateTabCount(this._testSessionId, 0);
+
+        var counts = watcher.GetCounts(this._testSessionId);
+        Assert.Equal(0, counts.Tabs);
+        Assert.Equal(this._testSessionId, changedId);
+    }
+
+    [Fact]
+    public void SaveTabs_UpdateTabCount_CountMatchesPersistedTabs()
+    {
+        using var watcher = new SessionContextWatcherService();
+
+        var urls = new List<string> { "https://a.com", "https://b.com" };
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, urls);
+        watcher.UpdateTabCount(this._testSessionId, urls.Count);
+
+        // Verify persisted count matches watcher count
+        var persisted = EdgeTabPersistenceService.LoadTabs(this._testSessionId);
+        var cached = watcher.GetCounts(this._testSessionId);
+        Assert.Equal(persisted.Count, cached.Tabs);
+
+        // Update with different count
+        var newUrls = new List<string> { "https://x.com" };
+        EdgeTabPersistenceService.SaveTabs(this._testSessionId, newUrls);
+        watcher.UpdateTabCount(this._testSessionId, newUrls.Count);
+
+        persisted = EdgeTabPersistenceService.LoadTabs(this._testSessionId);
+        cached = watcher.GetCounts(this._testSessionId);
+        Assert.Equal(persisted.Count, cached.Tabs);
+        Assert.Equal(1, cached.Tabs);
+    }
 }

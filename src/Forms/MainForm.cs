@@ -102,6 +102,10 @@ internal partial class MainForm : Form
     public MainForm(int initialTab = 0)
     {
         this.InitializeFormProperties();
+
+        var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        EdgeWorkspaceService.StampSessionHtmlVersion(version);
+
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
         this._activeTracker.EventsJournal.LoadCache();
@@ -970,7 +974,6 @@ internal partial class MainForm : Form
 
     private void WriteSessionMetadata()
     {
-        var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         foreach (var s in this._cachedSessions)
         {
             var metadataPath = Path.Combine(SessionStateService.GetSessionDir(s.Id), "metadata.js");
@@ -980,7 +983,7 @@ internal partial class MainForm : Form
             }
 
             var displayName = !string.IsNullOrEmpty(s.Alias) ? s.Alias : s.Summary;
-            EdgeWorkspaceService.WriteSessionMetadata(s.Id, displayName, version);
+            EdgeWorkspaceService.WriteSessionMetadata(s.Id, displayName);
         }
     }
 
@@ -996,9 +999,8 @@ internal partial class MainForm : Form
             return;
         }
 
-        var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         var displayName = !string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary;
-        EdgeWorkspaceService.WriteSessionMetadata(session.Id, displayName, version);
+        EdgeWorkspaceService.WriteSessionMetadata(session.Id, displayName);
     }
 
     private bool _refreshInProgress;
@@ -1278,6 +1280,7 @@ internal partial class MainForm : Form
             if (urls.Count > 0)
             {
                 EdgeTabPersistenceService.SaveTabs(sessionId, urls);
+                this._contextWatcher?.UpdateTabCount(sessionId, urls.Count);
                 Program.Logger.LogInformation("[SaveSignal] Saved {Count} tabs for session {SessionId}", urls.Count, sessionId);
                 this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored");
             }
@@ -1285,6 +1288,7 @@ internal partial class MainForm : Form
             {
                 // No tabs found now but there were previously saved tabs — clear them
                 EdgeTabPersistenceService.SaveTabs(sessionId, []);
+                this._contextWatcher?.UpdateTabCount(sessionId, 0);
                 Program.Logger.LogInformation("[SaveSignal] Cleared previously saved tabs for session {SessionId}", sessionId);
                 this._toast.Show("✅ Edge state saved — previous tabs cleared");
             }

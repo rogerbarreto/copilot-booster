@@ -367,6 +367,34 @@ internal partial class EdgeWorkspaceService
     }
 
     /// <summary>
+    /// Replaces the __BOOSTER_VERSION__ placeholder in session.html with the actual version.
+    /// Safe to call multiple times — only writes when the placeholder or version differs.
+    /// </summary>
+    internal static void StampSessionHtmlVersion(string version)
+    {
+        var path = GetSessionHtmlPath();
+        if (path == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var html = File.ReadAllText(path);
+            var stamped = html.Replace("'__BOOSTER_VERSION__'", $"'{version}'");
+            if (stamped != html)
+            {
+                File.WriteAllText(path, stamped);
+                Program.Logger.LogDebug("Stamped session.html with version {Version}", version);
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to stamp session.html version: {Error}", ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Writes the list of session IDs with unsaved changes to a JS file
     /// next to session.html for the page to poll.
     /// </summary>
@@ -388,7 +416,7 @@ internal partial class EdgeWorkspaceService
     /// <summary>
     /// Writes per-session metadata (name, version, poll interval) to the session's state directory.
     /// </summary>
-    internal static void WriteSessionMetadata(string sessionId, string? displayName, string version, int metadataIntervalMs = 60000)
+    internal static void WriteSessionMetadata(string sessionId, string? displayName, int metadataIntervalMs = 60000)
     {
         try
         {
@@ -398,7 +426,6 @@ internal partial class EdgeWorkspaceService
             var escaped = name.Replace("\\", "\\\\").Replace("\"", "\\\"");
             File.WriteAllText(path,
                 $"window.__sessionName = \"{escaped}\";\n" +
-                $"window.__boosterVersion = \"{version}\";\n" +
                 $"window.__metadataInterval = {metadataIntervalMs};");
         }
         catch (Exception ex)

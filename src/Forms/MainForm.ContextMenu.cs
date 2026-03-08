@@ -319,7 +319,20 @@ internal partial class MainForm
                 if (urls.Count > 0)
                 {
                     EdgeTabPersistenceService.SaveTabs(sid, urls);
-                    this.BeginInvoke(() => this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored"));
+                    this.BeginInvoke(() =>
+                    {
+                        this._contextWatcher?.UpdateTabCount(sid, urls.Count);
+                        this._toast.Show($"✅ Edge state saved — {urls.Count} tab(s) stored");
+                    });
+                }
+                else if (EdgeTabPersistenceService.HasSavedTabs(sid))
+                {
+                    EdgeTabPersistenceService.SaveTabs(sid, []);
+                    this.BeginInvoke(() =>
+                    {
+                        this._contextWatcher?.UpdateTabCount(sid, 0);
+                        this._toast.Show("✅ Edge state saved — previous tabs cleared");
+                    });
                 }
                 else
                 {

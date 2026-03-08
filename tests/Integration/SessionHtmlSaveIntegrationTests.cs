@@ -143,50 +143,74 @@ public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     [Fact]
     public async Task SessionHtml_SaveCompletesViaAppCodePath_WriteSessionSignalsAsync()
     {
-        using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new()
+        const string SessionId = "test-app-path-id";
+        var testSessionDir = SessionStateService.EnsureSessionDir(SessionId);
+
+        try
         {
-            Headless = true,
-            Args = ["--allow-file-access-from-files"],
-        });
-        var page = await browser.NewPageAsync();
+            using var playwright = await Playwright.CreateAsync();
+            await using var browser = await playwright.Chromium.LaunchAsync(new()
+            {
+                Headless = true,
+                Args = ["--allow-file-access-from-files"],
+            });
+            var page = await browser.NewPageAsync();
 
-        var sessionHtml = FindSessionHtml();
-        var sessionDir = Path.GetDirectoryName(sessionHtml)!;
-        this._signalsFilePath = Path.Combine(sessionDir, "session-signals.js");
+            var sessionHtml = FindSessionHtml();
+            var sessionDir = Path.GetDirectoryName(sessionHtml)!;
+            this._signalsFilePath = Path.Combine(sessionDir, "session-signals.js");
 
-        // Write initial empty signals
-        EdgeWorkspaceService.WriteSessionSignals([]);
+            // Write initial empty signals
+            EdgeWorkspaceService.WriteSessionSignals([]);
 
-        await page.GotoAsync($"{ToFileUri(sessionHtml)}#test-app-path-id");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+            // Set up context watcher to track tab count changes
+            using var contextWatcher = new SessionContextWatcherService();
+            Assert.Equal(0, contextWatcher.GetCounts(SessionId).Tabs);
 
-        // Click save — JS sets title to ::Save
-        await page.ClickAsync("#save-link");
-        var title = await page.TitleAsync();
-        Assert.Contains("::Save", title);
+            await page.GotoAsync($"{ToFileUri(sessionHtml)}#{SessionId}");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
-        // Simulate what the C# app does when it detects ::Save:
-        // 1. It would call GetTabUrls() (not testable without real Edge)
-        // 2. It calls SaveTabs() (not testable without real tabs)
-        // 3. It calls WriteSessionSignals with a lastSaved timestamp — THIS is the app code path
-        var requestedAt = await page.EvaluateAsync<long>("requestedAt");
-        var lastSaved = new Dictionary<string, long> { ["test-app-path-id"] = requestedAt + 1000 };
-        EdgeWorkspaceService.WriteSessionSignals(lastSaved);
+            // Click save — JS sets title to ::Save
+            await page.ClickAsync("#save-link");
+            var title = await page.TitleAsync();
+            Assert.Contains("::Save", title);
 
-        // Trigger pollSignals and verify the button resets
-        await page.EvaluateAsync("pollSignals()");
-        await page.WaitForFunctionAsync(
-            "() => document.getElementById('save-link').textContent.includes('Save Tabs')",
-            null,
-            new() { Timeout = 10000 });
+            // Simulate what the C# app does when it detects ::Save:
+            var urls = new List<string> { "https://github.com", "https://learn.microsoft.com" };
+            EdgeTabPersistenceService.SaveTabs(SessionId, urls);
+            contextWatcher.UpdateTabCount(SessionId, urls.Count);
 
-        var buttonText = await page.TextContentAsync("#save-link");
-        Assert.Contains("Save Tabs", buttonText);
+            var requestedAt = await page.EvaluateAsync<long>("requestedAt");
+            var lastSaved = new Dictionary<string, long> { [SessionId] = requestedAt + 1000 };
+            EdgeWorkspaceService.WriteSessionSignals(lastSaved);
 
-        // Verify beforeunload guard is deactivated after save completes
-        var isGuardActive = await page.EvaluateAsync<bool>("beforeUnloadActive");
-        Assert.False(isGuardActive, "beforeunload guard should be inactive after save completes");
+            // Trigger pollSignals and verify the button resets
+            await page.EvaluateAsync("pollSignals()");
+            await page.WaitForFunctionAsync(
+                "() => document.getElementById('save-link').textContent.includes('Save Tabs')",
+                null,
+                new() { Timeout = 10000 });
+
+            var buttonText = await page.TextContentAsync("#save-link");
+            Assert.Contains("Save Tabs", buttonText);
+
+            // ASSERT: after button resets, tab count reflects the saved tabs
+            var counts = contextWatcher.GetCounts(SessionId);
+            Assert.Equal(2, counts.Tabs);
+            var persisted = EdgeTabPersistenceService.LoadTabs(SessionId);
+            Assert.Equal(persisted.Count, counts.Tabs);
+
+            // Verify beforeunload guard is deactivated after save completes
+            var isGuardActive = await page.EvaluateAsync<bool>("beforeUnloadActive");
+            Assert.False(isGuardActive, "beforeunload guard should be inactive after save completes");
+        }
+        finally
+        {
+            if (Directory.Exists(testSessionDir))
+            {
+                Directory.Delete(testSessionDir, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -376,5 +400,153 @@ public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
 
         var buttonText = await page.TextContentAsync("#save-link");
         Assert.Contains("Save Tabs", buttonText);
+    }
+
+    /// <summary>
+    /// Full integration test: save tabs → update context watcher → GetCounts matches immediately.
+    /// Simulates the exact flow from HandleEdgeSaveSignalAsync and OnSaveEdgeTabs handlers.
+    /// </summary>
+    [StaFact]
+    public async Task SessionHtml_E2E_SaveTabs_ContextCountUpdatesImmediatelyAsync()
+    {
+        const string SessionId = "e2e-tab-count-test";
+        var testSessionDir = SessionStateService.EnsureSessionDir(SessionId);
+
+        try
+        {
+            var sessionHtml = FindSessionHtml();
+            var sessionDir = Path.GetDirectoryName(sessionHtml)!;
+            this._signalsFilePath = Path.Combine(sessionDir, "session-signals.js");
+            EdgeWorkspaceService.WriteSessionSignals([]);
+
+            using var contextWatcher = new SessionContextWatcherService();
+            string? countChangedForId = null;
+            int countChangedFiredCount = 0;
+            contextWatcher.CountsChanged += id =>
+            {
+                countChangedForId = id;
+                Interlocked.Increment(ref countChangedFiredCount);
+            };
+
+            // Before save: no tabs
+            Assert.Equal(0, contextWatcher.GetCounts(SessionId).Tabs);
+
+            using var hookService = new WindowEventHookService();
+            using var saveDetected = new ManualResetEventSlim();
+
+            hookService.WindowTitleChanged += (hwnd, title) =>
+            {
+                if (!title.Contains("::Save", StringComparison.OrdinalIgnoreCase)
+                    || !title.Contains(SessionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                // Simulate HandleEdgeSaveSignalAsync:
+                // 1. Extract session ID
+                var sid = EdgeWorkspaceService.ExtractSessionId(title);
+                if (sid == null)
+                {
+                    return;
+                }
+
+                // 2. Save tabs (simulated — in real flow these come from Edge UI Automation)
+                var urls = new List<string>
+                {
+                    "https://github.com/features",
+                    "https://learn.microsoft.com",
+                    "https://stackoverflow.com"
+                };
+                EdgeTabPersistenceService.SaveTabs(sid, urls);
+
+                // 3. Update context watcher (the fix we're testing)
+                contextWatcher.UpdateTabCount(sid, urls.Count);
+
+                // 4. Write signal so session.html resets
+                var lastSaved = new Dictionary<string, long>
+                {
+                    [sid] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                EdgeWorkspaceService.WriteSessionSignals(lastSaved);
+
+                saveDetected.Set();
+            };
+            hookService.Start();
+
+            // Launch headed browser
+            using var playwright = await Playwright.CreateAsync();
+            await using var browser = await playwright.Chromium.LaunchAsync(new()
+            {
+                Headless = false,
+                Args = ["--allow-file-access-from-files"],
+            });
+            var page = await browser.NewPageAsync();
+            await page.GotoAsync($"{ToFileUri(sessionHtml)}#{SessionId}");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+            // Click save
+            await page.ClickAsync("#save-link");
+
+            // Pump messages for WinEvent hook
+            var deadline = Environment.TickCount64 + 10000;
+            while (!saveDetected.IsSet && Environment.TickCount64 < deadline)
+            {
+                Application.DoEvents();
+                await Task.Delay(50);
+            }
+
+            Assert.True(saveDetected.IsSet, "::Save title change should be detected");
+
+            // ASSERT: tab count updated IMMEDIATELY after save
+            var counts = contextWatcher.GetCounts(SessionId);
+            Assert.Equal(3, counts.Tabs);
+
+            // ASSERT: CountsChanged event fired
+            Assert.Equal(SessionId, countChangedForId);
+            Assert.True(countChangedFiredCount >= 1);
+
+            // ASSERT: persisted tabs match cached count
+            var persisted = EdgeTabPersistenceService.LoadTabs(SessionId);
+            Assert.Equal(counts.Tabs, persisted.Count);
+
+            // Verify session.html button resets
+            await page.EvaluateAsync("pollSignals()");
+            await page.WaitForFunctionAsync(
+                "() => document.getElementById('save-link').textContent.includes('Save Tabs')",
+                null,
+                new() { Timeout = 10000 });
+            Assert.Contains("Save Tabs", await page.TextContentAsync("#save-link"));
+
+            // ASSERT: right after button returns to "Save Tabs", tab count MUST reflect the save
+            counts = contextWatcher.GetCounts(SessionId);
+            Assert.Equal(3, counts.Tabs);
+
+            // ASSERT: persisted tabs match cached count at this point
+            persisted = EdgeTabPersistenceService.LoadTabs(SessionId);
+            Assert.Equal(3, persisted.Count);
+            Assert.Equal(persisted.Count, counts.Tabs);
+
+            // Now simulate saving with 0 tabs (clear)
+            countChangedForId = null;
+            EdgeTabPersistenceService.SaveTabs(SessionId, []);
+            contextWatcher.UpdateTabCount(SessionId, 0);
+
+            // ASSERT: tab count drops to 0 immediately (icon should be removed)
+            counts = contextWatcher.GetCounts(SessionId);
+            Assert.Equal(0, counts.Tabs);
+            Assert.Equal(SessionId, countChangedForId);
+
+            // ASSERT: persisted tabs also empty
+            persisted = EdgeTabPersistenceService.LoadTabs(SessionId);
+            Assert.Empty(persisted);
+            Assert.Equal(persisted.Count, counts.Tabs);
+        }
+        finally
+        {
+            if (Directory.Exists(testSessionDir))
+            {
+                Directory.Delete(testSessionDir, recursive: true);
+            }
+        }
     }
 }
