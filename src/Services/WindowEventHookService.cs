@@ -23,6 +23,7 @@ internal partial class WindowEventHookService : IDisposable
 
     private readonly List<IntPtr> _hookHandles = [];
     private WinEventProc? _callback;
+    private bool _stopped;
 
     /// <summary>Fires when a new visible top-level window is created.</summary>
     public event Action<IntPtr>? WindowCreated;
@@ -60,6 +61,8 @@ internal partial class WindowEventHookService : IDisposable
     /// </summary>
     public void Stop()
     {
+        this._stopped = true;
+
         foreach (var handle in this._hookHandles)
         {
             UnhookWinEvent(handle);
@@ -100,7 +103,7 @@ internal partial class WindowEventHookService : IDisposable
         uint idEventThread,
         uint dwmsEventTime)
     {
-        if (hwnd == IntPtr.Zero)
+        if (hwnd == IntPtr.Zero || this._stopped)
         {
             return;
         }

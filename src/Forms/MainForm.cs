@@ -675,6 +675,15 @@ internal partial class MainForm : Form
             this._trayIcon = null;
         }
 
+        // Stop the window hook BEFORE base.OnFormClosing destroys the form handle.
+        // This prevents WinEvent callbacks from firing during handle destruction,
+        // which would call RequestRefresh → timer.Start() → Win32Exception.
+        this._windowHookService?.Stop();
+        this._refreshDebounceTimer?.Stop();
+        this._fullRefreshTimer?.Stop();
+        this._spinnerTimer?.Stop();
+        this._updateCheckTimer?.Stop();
+
         this._activeTracker.EventsJournal.SaveCache();
         this._activeTracker.EventsJournal.Dispose();
         this._workspaceWatcher?.Dispose();
@@ -893,10 +902,6 @@ internal partial class MainForm : Form
 
         this.FormClosed += (s, e) =>
         {
-            this._refreshDebounceTimer?.Stop();
-            this._fullRefreshTimer?.Stop();
-            this._spinnerTimer?.Stop();
-            this._updateCheckTimer?.Stop();
             this._windowHookService?.Dispose();
             this._processExitTracker?.Dispose();
         };
@@ -1349,6 +1354,11 @@ internal partial class MainForm : Form
 
     private void RequestRefresh(string? sessionId = null, bool trackingChanged = false, bool dataChanged = false, bool fullRefresh = false)
     {
+        if (this.IsDisposed || !this.IsHandleCreated)
+        {
+            return;
+        }
+
         if (sessionId != null)
         {
             if (trackingChanged)
