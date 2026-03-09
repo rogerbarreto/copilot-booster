@@ -203,6 +203,13 @@ internal class ActiveStatusTracker
 
                     if (alive)
                     {
+                        // Try to recapture HWND (e.g., after splash → main transition)
+                        var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
+                        if (newHwnd != IntPtr.Zero)
+                        {
+                            proc.Hwnd = newHwnd;
+                        }
+
                         parts.Add(proc.Name);
                     }
                     else if (proc.FolderPath != null)
@@ -954,8 +961,7 @@ internal class ActiveStatusTracker
                     continue;
                 }
 
-                // HWND destroyed — try to recapture from the same PID
-                // (e.g., VS destroys its splash screen and creates the main window)
+                // HWND destroyed — check if the process is still alive
                 if (proc.Pid > 0)
                 {
                     bool stillAlive = false;
@@ -964,18 +970,10 @@ internal class ActiveStatusTracker
 
                     if (stillAlive)
                     {
-                        var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
-                        if (newHwnd != IntPtr.Zero && newHwnd != hwnd && !this.IsHwndTracked(newHwnd))
-                        {
-                            proc.Hwnd = newHwnd;
-                            affected.Add(kvp.Key);
-                            continue;
-                        }
-
-                        // PID alive but no untracked window found.
-                        // Check if another session shares this PID (single-process IDE like VS Code).
-                        // If so, this session's window is genuinely closed — remove it.
-                        // If not (VS pattern — own PID), keep entry for recapture.
+                        // PID alive — IDE may be transitioning windows (e.g., VS splash → main).
+                        // Don't try FindWindowHandleByPid here — during shutdown it finds
+                        // dying child windows. Clear HWND and let ForegroundChanged/OnWindowCreated
+                        // recapture the real new window, or BuildActiveText will show via PID check.
                         bool sharedPid = false;
                         foreach (var other in this._trackedProcesses)
                         {
@@ -994,6 +992,7 @@ internal class ActiveStatusTracker
 
                         if (sharedPid)
                         {
+                            // Another session shares this PID — this window is genuinely closed
                             kvp.Value.RemoveAt(i);
                             affected.Add(kvp.Key);
                             continue;
