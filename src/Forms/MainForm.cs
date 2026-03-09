@@ -425,7 +425,7 @@ internal partial class MainForm : Form
             case Keys.Enter when grid.Focused && grid.CurrentRow != null:
                 // Show context menu at the selected row
                 var cellRect = grid.GetCellDisplayRectangle(1, grid.CurrentRow.Index, false);
-                grid.ContextMenuStrip?.Show(grid, cellRect.Left, cellRect.Bottom);
+                grid.ContextMenuStrip?.ShowOnCurrentScreen(grid, new Point(cellRect.Left, cellRect.Bottom));
                 return true;
 
             case Keys.Enter | Keys.Shift when grid.Focused && grid.CurrentRow != null:

@@ -899,7 +899,7 @@ internal class SessionGridVisuals
         }
 
         var cellRect = this._grid.GetCellDisplayRectangle(4, rowIndex, false);
-        menu.Show(this._grid, new Point(cellRect.Left + (cellRect.Width / 2), cellRect.Bottom));
+        menu.ShowOnCurrentScreen(this._grid, new Point(cellRect.Left + (cellRect.Width / 2), cellRect.Bottom));
     }
 
     [ExcludeFromCodeCoverage]

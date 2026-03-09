@@ -384,6 +384,11 @@ internal class ExistingSessionsVisuals
 
             foreach (DataGridViewColumn c in this.SessionGrid.Columns)
             {
+                if (c.SortMode == DataGridViewColumnSortMode.NotSortable)
+                {
+                    continue;
+                }
+
                 c.HeaderCell.SortGlyphDirection = c.Name == this.SortColumn
                     ? this.SortDirection
                     : SortOrder.None;
@@ -571,7 +576,7 @@ internal class ExistingSessionsVisuals
 
         this.NewSessionButton.Click += (s, e) =>
         {
-            newSessionMenu.Show(this.NewSessionButton, new Point(0, this.NewSessionButton.Height));
+            newSessionMenu.ShowOnCurrentScreen(this.NewSessionButton, new Point(0, this.NewSessionButton.Height));
         };
 
         var searchLabel = new Label
@@ -1303,6 +1308,7 @@ internal class ExistingSessionsVisuals
         };
 
         this.SessionGrid.ContextMenuStrip = gridContextMenu;
+        gridContextMenu.ConstrainToParentScreen(this.SessionGrid);
 
         this.SessionGrid.CellMouseDown += (s, e) =>
         {

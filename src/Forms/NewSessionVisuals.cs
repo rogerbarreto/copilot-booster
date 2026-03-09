@@ -145,7 +145,7 @@ internal class NewSessionVisuals
                 if (hit.Item != null)
                 {
                     hit.Item.Selected = true;
-                    this.CwdListView.ContextMenuStrip?.Show(this.CwdListView, e.Location);
+                    this.CwdListView.ContextMenuStrip?.ShowOnCurrentScreen(this.CwdListView, e.Location);
                 }
             }
         };
