@@ -191,16 +191,9 @@ internal class ActiveStatusTracker
                                 parts.Add(proc.Name);
                             }
                         }
-                        else if (proc.FolderPath != null)
-                        {
-                            parts.Add(proc.Name);
-                        }
+                        // PID dead + HWND dead = IDE genuinely closed. Don't show.
                     }
-                    else if (proc.FolderPath != null)
-                    {
-                        // Pid=0 (launcher exited), HWND dead — keep showing while FullRefresh recaptures
-                        parts.Add(proc.Name);
-                    }
+                    // Pid=0 + HWND dead = launcher exited and window was destroyed. Don't show.
                 }
                 else if (proc.Pid > 0)
                 {

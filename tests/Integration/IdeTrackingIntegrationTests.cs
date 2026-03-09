@@ -522,6 +522,81 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         Assert.Equal("", GetActiveCell(grid, 1));
     }
 
+    /// <summary>
+    /// Reproduces the stale tracking bug: IDE has FolderPath set, gets its HWND captured,
+    /// then the process is killed. If OnWindowDestroyed doesn't fire (which can happen
+    /// when the process terminates abruptly), BuildActiveText should still detect
+    /// that both PID and HWND are dead and NOT show the IDE.
+    /// </summary>
+    [StaFact]
+    public void E2E_IdeWithFolderPath_ProcessKilled_NoDestroyEvent_GridMustClear()
+    {
+        const string SessionId = "e2e-stale-folder-test";
+        var workDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        using var hookService = new WindowEventHookService();
+        var tracker = new ActiveStatusTracker();
+        var grid = CreateGrid();
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
+
+        AddRow(grid, SessionId);
+
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = SessionId, Summary = "Stale Folder Test" }
+        };
+
+        // Only wire WindowCreated and ForegroundChanged — NOT WindowDestroyed.
+        // This simulates the case where EVENT_OBJECT_DESTROY doesn't fire.
+        var dirtySessionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        hookService.WindowCreated += hwnd =>
+        {
+            var sid = tracker.OnWindowCreated(hwnd);
+            if (sid != null) { dirtySessionIds.Add(sid); }
+        };
+        hookService.ForegroundChanged += hwnd =>
+        {
+            var sid = tracker.OnWindowCreated(hwnd);
+            if (sid != null) { dirtySessionIds.Add(sid); }
+        };
+        hookService.Start();
+
+        // Launch IDE with FolderPath set — same as OnOpenInIde
+        var proc = this.LaunchIde();
+        tracker.TrackProcess(SessionId, new ActiveProcess("Visual Studio", proc.Id, workDir));
+
+        // Wait for HWND capture
+        PumpUntil(() => dirtySessionIds.Contains(SessionId), 3000);
+        if (!dirtySessionIds.Contains(SessionId))
+        {
+            PumpUntil(() =>
+            {
+                var h = WindowFocusService.FindWindowHandleByPid(proc.Id);
+                if (h != IntPtr.Zero)
+                {
+                    tracker.OnWindowCreated(h);
+                    dirtySessionIds.Add(SessionId);
+                    return true;
+                }
+                return false;
+            }, 7000);
+        }
+
+        // Verify IDE shows
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+
+        // Kill the process — PID and HWND die, but NO OnWindowDestroyed fires
+        proc.Kill();
+        proc.WaitForExit(5000);
+        PumpUntil(() => false, 1000);
+
+        // IDE must be GONE — FolderPath should NOT keep it alive
+        // when both PID and HWND are dead
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = Environment.TickCount64 + timeoutMs;
