@@ -95,6 +95,7 @@ dotnet_code_quality_unused_parameters = all:suggestion
 [*.cs]
 # Note: these settings cause "dotnet format" to fix the code. You should review each change if you uses "dotnet format".
 dotnet_diagnostic.RCS1036.severity = warning # Remove unnecessary blank line.
+dotnet_style_allow_multiple_blank_lines_experimental = false:error # IDE2000
 dotnet_diagnostic.RCS1037.severity = warning # Remove trailing white-space.
 dotnet_diagnostic.RCS1097.severity = warning # Remove redundant 'ToString' call.
 dotnet_diagnostic.RCS1138.severity = warning # Add summary to documentation comment.

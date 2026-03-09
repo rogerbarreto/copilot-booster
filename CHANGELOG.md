@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.2] - 2026-03-09
+
+### Fixed
+
+- **Terminal/Copilot CLI detection is now immediate** — windows are detected as soon as they open via `EVENT_OBJECT_NAMECHANGE` and `EVENT_SYSTEM_FOREGROUND` hooks, instead of waiting for the 45-second full refresh.
+- **IDE tracking survives Visual Studio splash→main window transition** — when VS destroys its splash screen and creates the main window, the HWND is recaptured by PID without relying on window titles.
+- **IDE close is detected immediately** — closing Visual Studio or VS Code Insiders now clears the "Running" column right away instead of leaving stale entries.
+- **Single-process IDE tracking (VS Code pattern)** — multiple sessions using the same IDE host process are tracked independently; closing one session's window does not affect others.
+- **IDE tracking never relies on window titles** — all detection uses PID matching and HWND association from the session that launched the IDE.
+
+### Added
+
+- **E2E integration tests for Terminal/CLI grid detection** — 5 tests using real `wt.exe` and `TerminalLauncherService` paths with proper cleanup.
+- **E2E integration tests for IDE lifecycle** — full open/close/reopen matrix across multiple sessions using `mspaint.exe` as an IDE stand-in.
+- **IDE simulators (IdeSimVS, IdeSimVSCode)** — standalone test tools that mimic VS splash→main transition and VS Code single-instance host behavior, with random window titles to prevent title-based tracking.
+- **VS simulator SLN and folder modes** — distinct tests for opening .sln files vs folders, matching observed VS behavior.
+- **Real Visual Studio integration test** — E2E test using actual `devenv.exe` with `LocalOnly` trait for local-only execution.
+- **`IDE2000` enforced** — multiple blank lines now flagged as error in `.editorconfig`.
+
 ## [0.18.1] - 2026-03-08
 
 ### Fixed

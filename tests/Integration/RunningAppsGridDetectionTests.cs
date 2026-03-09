@@ -43,7 +43,6 @@ public sealed class RunningAppsGridDetectionTests : IDisposable
         }
     }
 
-
     private static LauncherSettings CreateTestSettings()
     {
         var settings = LauncherSettings.CreateDefault();
