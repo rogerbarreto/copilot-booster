@@ -879,10 +879,11 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
-    /// Called when a new window is created. If the window's owning process matches
-    /// a tracked process, captures the HWND for that process entry.
+    /// Called when a new window is created or gains focus. If the window's owning process matches
+    /// a tracked process, captures the HWND for that process entry. Also handles launcher-based
+    /// IDEs where the launcher PID exited (Pid=0) by matching the window title to FolderPath.
     /// </summary>
-    /// <param name="hwnd">The newly created window handle.</param>
+    /// <param name="hwnd">The window handle to try to associate.</param>
     internal string? OnWindowCreated(IntPtr hwnd)
     {
         int pid = WindowFocusService.GetWindowProcessId(hwnd);
@@ -891,6 +892,7 @@ internal class ActiveStatusTracker
             return null;
         }
 
+        // First pass: match by PID (direct process match)
         foreach (var kvp in this._trackedProcesses)
         {
             foreach (var proc in kvp.Value)
@@ -899,6 +901,31 @@ internal class ActiveStatusTracker
                 {
                     proc.Hwnd = hwnd;
                     return kvp.Key;
+                }
+            }
+        }
+
+        // Second pass: for launcher-based IDEs where the HWND hasn't been captured yet,
+        // match by checking if the window title contains the folder name.
+        // This handles both cases: Pid=0 (launcher already exited) and Pid>0 (launcher
+        // still exiting while the host creates the window under a different PID).
+        var title = WindowFocusService.GetWindowTitle(hwnd);
+        if (!string.IsNullOrEmpty(title))
+        {
+            foreach (var kvp in this._trackedProcesses)
+            {
+                foreach (var proc in kvp.Value)
+                {
+                    if (proc.Hwnd == IntPtr.Zero && proc.FolderPath != null)
+                    {
+                        var folderName = Path.GetFileName(proc.FolderPath.TrimEnd('\\'));
+                        if (!string.IsNullOrEmpty(folderName)
+                            && title.Contains(folderName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            proc.Hwnd = hwnd;
+                            return kvp.Key;
+                        }
+                    }
                 }
             }
         }
@@ -945,28 +972,49 @@ internal class ActiveStatusTracker
                     if (stillAlive)
                     {
                         var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
-                        if (newHwnd != IntPtr.Zero && newHwnd != hwnd)
+                        if (newHwnd != IntPtr.Zero && newHwnd != hwnd && !this.IsHwndTracked(newHwnd))
                         {
+                            // For IDEs with FolderPath, verify the new window belongs to this session
+                            // (not another session using the same host process)
+                            if (proc.FolderPath != null)
+                            {
+                                var newTitle = WindowFocusService.GetWindowTitle(newHwnd);
+                                var folderName = Path.GetFileName(proc.FolderPath.TrimEnd('\\'));
+                                if (string.IsNullOrEmpty(folderName)
+                                    || !newTitle.Contains(folderName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // New window doesn't match this session — window is genuinely closed
+                                    kvp.Value.RemoveAt(i);
+                                    affected.Add(kvp.Key);
+                                    continue;
+                                }
+                            }
+
                             proc.Hwnd = newHwnd;
                             affected.Add(kvp.Key);
                             continue;
                         }
 
-                        // PID alive but no new window yet — clear HWND and keep entry for recapture
+                        // PID alive but no suitable window found.
+                        // If FolderPath is set, another session may use the same host process —
+                        // this session's window is genuinely closed.
+                        if (proc.FolderPath != null)
+                        {
+                            kvp.Value.RemoveAt(i);
+                            affected.Add(kvp.Key);
+                            continue;
+                        }
+
+                        // No FolderPath — clear HWND and keep entry for recapture (VS splash transition)
                         proc.Hwnd = IntPtr.Zero;
                         affected.Add(kvp.Key);
                         continue;
                     }
                 }
 
-                // PID dead and HWND dead — check FolderPath fallback
-                if (proc.FolderPath != null)
-                {
-                    proc.Hwnd = IntPtr.Zero;
-                    affected.Add(kvp.Key);
-                    continue;
-                }
-
+                // PID dead and HWND destroyed — the IDE window is genuinely closed.
+                // Remove the entry (don't keep it alive via FolderPath — that's only for
+                // entries that never had an HWND captured).
                 kvp.Value.RemoveAt(i);
                 affected.Add(kvp.Key);
             }
@@ -1009,6 +1057,25 @@ internal class ActiveStatusTracker
         }
 
         return affected;
+    }
+
+    /// <summary>
+    /// Returns true if the given HWND is already tracked by any session in <see cref="_trackedProcesses"/>.
+    /// </summary>
+    private bool IsHwndTracked(IntPtr hwnd)
+    {
+        foreach (var kvp in this._trackedProcesses)
+        {
+            foreach (var proc in kvp.Value)
+            {
+                if (proc.Hwnd == hwnd)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

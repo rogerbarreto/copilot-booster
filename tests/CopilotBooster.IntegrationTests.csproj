@@ -27,7 +27,15 @@
     <!-- Exclude unit test files — only compile Integration/ subfolder -->
     <Compile Remove="**\*.cs" />
     <Compile Include="Integration\**\*.cs" />
+    <!-- Exclude simulator tool source files from test compilation -->
+    <Compile Remove="Integration\TestTools\**\*.cs" />
   </ItemGroup>
+
+  <!-- Build IDE simulators into the test output directory -->
+  <Target Name="BuildIdeSimulators" BeforeTargets="Build">
+    <Exec Command="dotnet build &quot;$(MSBuildThisFileDirectory)Integration\TestTools\IdeSimVS\IdeSimVS.csproj&quot; -c $(Configuration) -o &quot;$(OutputPath)TestTools&quot; --tl:off -v:q" />
+    <Exec Command="dotnet build &quot;$(MSBuildThisFileDirectory)Integration\TestTools\IdeSimVSCode\IdeSimVSCode.csproj&quot; -c $(Configuration) -o &quot;$(OutputPath)TestTools&quot; --tl:off -v:q" />
+  </Target>
 
   <ItemGroup>
     <Using Include="Xunit" />
