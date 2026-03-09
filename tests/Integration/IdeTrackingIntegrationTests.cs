@@ -135,22 +135,14 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         string sessionId,
         string ideName,
         ActiveStatusTracker tracker,
-        HashSet<string> dirtySessionIds)
-    {
-        return this.LaunchAndTrackIde(sessionId, ideName, tracker, dirtySessionIds, null);
-    }
-
-    private Process LaunchAndTrackIde(
-        string sessionId,
-        string ideName,
-        ActiveStatusTracker tracker,
         HashSet<string> dirtySessionIds,
-        string? exePath)
+        string? exePath = null,
+        string? exeArgs = null)
     {
         Process proc;
         if (exePath != null)
         {
-            proc = Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = false })!;
+            proc = Process.Start(new ProcessStartInfo(exePath, exeArgs ?? "") { UseShellExecute = false })!;
             this._startedProcesses.Add(proc);
         }
         else
@@ -373,15 +365,12 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// E2E using IdeSimVS simulator: mimics real VS opening a folder.
-    /// The simulator creates a splash window (HWND #1), destroys it,
-    /// creates the main window (HWND #2) with a generic title, then updates
-    /// the title — all under the same PID. Window titles are random and
-    /// unrelated to the folder path, so no title-based matching can work.
-    /// Verifies: open → tracked through splash transition → close → removed.
+    /// E2E using IdeSimVS simulator in FOLDER mode: mimics real VS opening a folder.
+    /// Splash (HWND #1) → destroyed → main window (HWND #2, generic title) → title update.
+    /// All under same PID. Random titles — no title-based tracking.
     /// </summary>
     [StaFact]
-    public void E2E_VsSimulator_SplashTransition_OpenAndClose()
+    public void E2E_VsSimulator_FolderMode_SplashTransition_OpenAndClose()
     {
         const string Session1 = "e2e-vs-sim-1";
         const string Session2 = "e2e-vs-sim-2";
@@ -431,6 +420,83 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         dirtySessionIds.Clear();
         var proc2 = this.LaunchAndTrackIde(Session2, "Visual Studio", tracker, dirtySessionIds, simExe);
         Assert.True(dirtySessionIds.Contains(Session2), "VS Sim 2 not captured");
+        PumpUntil(() => false, 3000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 1));
+
+        // ── Close Session 1 — Session 2 must remain ──
+        dirtySessionIds.Clear();
+        proc1.Kill();
+        PumpUntil(() => dirtySessionIds.Contains(Session1), 10000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 1));
+
+        // ── Close Session 2 ──
+        dirtySessionIds.Clear();
+        proc2.Kill();
+        PumpUntil(() => dirtySessionIds.Contains(Session2), 10000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+        Assert.Equal("", GetActiveCell(grid, 1));
+    }
+
+    /// <summary>
+    /// E2E using IdeSimVS simulator in SLN mode: mimics real VS opening a .sln file.
+    /// Splash (HWND #1) → destroyed → main window (HWND #2, project title immediately).
+    /// No delayed title update. All under same PID. Random titles.
+    /// </summary>
+    [StaFact]
+    public void E2E_VsSimulator_SlnMode_SplashTransition_OpenAndClose()
+    {
+        const string Session1 = "e2e-vs-sln-1";
+        const string Session2 = "e2e-vs-sln-2";
+
+        var simExe = Path.Combine(
+            Path.GetDirectoryName(typeof(IdeTrackingIntegrationTests).Assembly.Location)!,
+            "TestTools", "IdeSimVS.exe");
+
+        if (!File.Exists(simExe))
+        {
+            Assert.Fail($"IdeSimVS.exe not found at {simExe}");
+        }
+
+        using var hookService = new WindowEventHookService();
+        var tracker = new ActiveStatusTracker();
+        var grid = CreateGrid();
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
+
+        AddRow(grid, Session1);
+        AddRow(grid, Session2);
+
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = Session1, Summary = "VS Sln 1" },
+            new() { Id = Session2, Summary = "VS Sln 2" }
+        };
+
+        var dirtySessionIds = this.WireHooks(hookService, tracker);
+        hookService.Start();
+
+        // ── Open VS sim (SLN mode) for Session 1 ──
+        var proc1 = this.LaunchAndTrackIde(Session1, "Visual Studio", tracker, dirtySessionIds, simExe, "--sln");
+        Assert.True(dirtySessionIds.Contains(Session1), "VS Sln Sim 1 not captured");
+
+        // Wait for splash → main transition
+        PumpUntil(() => false, 3000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+        Assert.Equal("", GetActiveCell(grid, 1));
+
+        // ── Open VS sim (SLN mode) for Session 2 ──
+        dirtySessionIds.Clear();
+        var proc2 = this.LaunchAndTrackIde(Session2, "Visual Studio", tracker, dirtySessionIds, simExe, "--sln");
+        Assert.True(dirtySessionIds.Contains(Session2), "VS Sln Sim 2 not captured");
         PumpUntil(() => false, 3000);
 
         RefreshGrid(tracker, visuals, sessions);

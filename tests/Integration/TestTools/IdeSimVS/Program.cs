@@ -1,19 +1,29 @@
 // VS-style IDE simulator: mimics the real Visual Studio window lifecycle.
-// Usage: IdeSimVS.exe [folder-path]
+// Usage: IdeSimVS.exe [--sln] [folder-path]
 //
-// Real VS behavior (observed via process inspection):
+// Two modes matching real VS behavior observed via process inspection:
+//
+// FOLDER MODE (default):
 // 1. T+0s: Process starts, no visible windows
-// 2. T+1s: Splash screen appears (HWND #1, "IDE Sim Enterprise ...")
+// 2. T+1s: Splash screen appears (HWND #1)
 // 3. T+2s: Splash destroyed, main window created (HWND #2, generic title)
-// 4. T+3s: Main window title updates (still HWND #2, now includes project info)
+// 4. T+3s: Main window title updates to include project info
 //
-// Window titles are intentionally random/unrelated to the folder name,
+// SLN MODE (--sln flag):
+// 1. T+0s: Process starts, no visible windows
+// 2. T+1s: Splash screen appears (HWND #1)
+// 3. T+2s: Splash destroyed, main window created (HWND #2, project title immediately)
+//
+// Window titles are intentionally random/unrelated to the folder path,
 // to ensure no tracking logic depends on window titles.
 // The PID stays the same throughout — VS does NOT use a launcher process.
 
 using System;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
+
+bool slnMode = args.Contains("--sln", StringComparer.OrdinalIgnoreCase);
 
 // Phase 1: Splash screen (short-lived window) — different HWND than main
 var splash = new Form
@@ -31,10 +41,13 @@ Thread.Sleep(1500);
 splash.Close();
 splash.Dispose();
 
-// Phase 2: Main window with generic title (no project info yet) — new HWND
+// Phase 2: Main window
 var main = new Form
 {
-    Text = "IDE Simulator",
+    // SLN mode: project title immediately. Folder mode: generic title first.
+    Text = slnMode
+        ? $"RandomProject.sln - IDE Simulator {Guid.NewGuid():N}"
+        : "IDE Simulator",
     Width = 800,
     Height = 600,
     StartPosition = FormStartPosition.CenterScreen
@@ -42,13 +55,16 @@ var main = new Form
 main.Show();
 Application.DoEvents();
 
-// Phase 3: Title updates after a delay (simulates VS loading the project)
-var titleTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-titleTimer.Tick += (s, e) =>
+// Phase 3 (folder mode only): Title updates after a delay
+if (!slnMode)
 {
-    titleTimer.Stop();
-    main.Text = $"SomeProject - IDE Simulator {Guid.NewGuid():N}";
-};
-titleTimer.Start();
+    var titleTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+    titleTimer.Tick += (s, e) =>
+    {
+        titleTimer.Stop();
+        main.Text = $"SomeProject - IDE Simulator {Guid.NewGuid():N}";
+    };
+    titleTimer.Start();
+}
 
 Application.Run(main);
