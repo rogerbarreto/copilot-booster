@@ -208,20 +208,22 @@ internal class ActiveStatusTracker
                         if (newHwnd != IntPtr.Zero)
                         {
                             proc.Hwnd = newHwnd;
+                            proc.HwndEverCaptured = true;
                         }
 
                         parts.Add(proc.Name);
                     }
-                    else if (proc.FolderPath != null)
+                    else if (proc.FolderPath != null && !proc.HwndEverCaptured)
                     {
-                        // Launcher exited but entry kept for recapture — keep showing
+                        // Launcher exited, HWND never captured — keep showing while
+                        // ForegroundChanged/OnWindowCreated tries to capture the real window.
                         parts.Add(proc.Name);
                     }
+                    // PID dead + HWND was previously captured = IDE genuinely closed. Don't show.
                 }
-                else if (proc.FolderPath != null)
+                else if (proc.FolderPath != null && !proc.HwndEverCaptured)
                 {
-                    // Launcher exited (Pid=0) but real IDE window not captured yet.
-                    // Keep showing until FullRefresh resolves or removes the entry.
+                    // Pid=0, HWND never captured — launcher exited, waiting for window.
                     parts.Add(proc.Name);
                 }
             }
@@ -900,6 +902,7 @@ internal class ActiveStatusTracker
                 if (proc.Pid == pid && proc.Hwnd == IntPtr.Zero)
                 {
                     proc.Hwnd = hwnd;
+                    proc.HwndEverCaptured = true;
                     return kvp.Key;
                 }
             }
@@ -923,6 +926,7 @@ internal class ActiveStatusTracker
                             && title.Contains(folderName, StringComparison.OrdinalIgnoreCase))
                         {
                             proc.Hwnd = hwnd;
+                            proc.HwndEverCaptured = true;
                             return kvp.Key;
                         }
                     }
@@ -961,7 +965,7 @@ internal class ActiveStatusTracker
                     continue;
                 }
 
-                // HWND destroyed — check if the process is still alive
+                // HWND destroyed — try to recapture from the same PID
                 if (proc.Pid > 0)
                 {
                     bool stillAlive = false;
@@ -970,10 +974,14 @@ internal class ActiveStatusTracker
 
                     if (stillAlive)
                     {
-                        // PID alive — IDE may be transitioning windows (e.g., VS splash → main).
-                        // Don't try FindWindowHandleByPid here — during shutdown it finds
-                        // dying child windows. Clear HWND and let ForegroundChanged/OnWindowCreated
-                        // recapture the real new window, or BuildActiveText will show via PID check.
+                        var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
+                        if (newHwnd != IntPtr.Zero && newHwnd != hwnd && !this.IsHwndTracked(newHwnd))
+                        {
+                            proc.Hwnd = newHwnd;
+                            affected.Add(kvp.Key);
+                            continue;
+                        }
+
                         bool sharedPid = false;
                         foreach (var other in this._trackedProcesses)
                         {
@@ -992,7 +1000,6 @@ internal class ActiveStatusTracker
 
                         if (sharedPid)
                         {
-                            // Another session shares this PID — this window is genuinely closed
                             kvp.Value.RemoveAt(i);
                             affected.Add(kvp.Key);
                             continue;

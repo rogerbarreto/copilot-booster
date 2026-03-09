@@ -27,6 +27,13 @@ internal class ActiveProcess
     /// </summary>
     public IntPtr Hwnd { get; set; }
 
+    /// <summary>
+    /// True once an HWND has been successfully captured at least once.
+    /// Used to distinguish "never captured" (show via FolderPath while waiting)
+    /// from "was captured then lost" (IDE genuinely closed).
+    /// </summary>
+    public bool HwndEverCaptured { get; set; }
+
     public ActiveProcess(string name, int pid, string? folderPath = null)
     {
         this.Name = name;

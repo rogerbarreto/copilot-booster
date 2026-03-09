@@ -597,6 +597,164 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         Assert.Equal("", GetActiveCell(grid, 0));
     }
 
+    /// <summary>
+    /// Reproduces VS shutdown cascading destroy bug:
+    /// IdeSimVS creates main + 10 tool windows (11 HWNDs, same PID).
+    /// When killed, all 11+ HWNDs are destroyed in sequence.
+    /// OnWindowDestroyed must NOT recapture to dying child windows.
+    /// After process exit, the grid must be clear.
+    /// </summary>
+    [StaFact]
+    public void E2E_VsSimulator_KillProcess_CascadingDestroy_GridMustClear()
+    {
+        const string SessionId = "e2e-cascade-destroy";
+
+        var simExe = Path.Combine(
+            Path.GetDirectoryName(typeof(IdeTrackingIntegrationTests).Assembly.Location)!,
+            "TestTools", "IdeSimVS.exe");
+
+        if (!File.Exists(simExe))
+        {
+            Assert.Fail($"IdeSimVS.exe not found at {simExe}");
+        }
+
+        using var hookService = new WindowEventHookService();
+        var tracker = new ActiveStatusTracker();
+        var grid = CreateGrid();
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
+
+        AddRow(grid, SessionId);
+
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = SessionId, Summary = "Cascade Test" }
+        };
+
+        var dirtySessionIds = this.WireHooks(hookService, tracker);
+        hookService.Start();
+
+        // Launch VS simulator (creates main + 10 tool windows = 11+ HWNDs)
+        var proc = this.LaunchAndTrackIde(SessionId, "Visual Studio", tracker, dirtySessionIds, simExe, "--sln");
+        Assert.True(dirtySessionIds.Contains(SessionId), "VS Sim not captured");
+
+        // Watch the PID — same as MainForm.ContextMenu does after OnOpenInIde
+        using var processExitTracker = new ProcessExitTracker();
+        processExitTracker.ProcessExited += pid =>
+        {
+            var affected = tracker.OnProcessExited(pid);
+            foreach (var id in affected)
+            {
+                dirtySessionIds.Add(id);
+            }
+        };
+        processExitTracker.Watch(proc.Id);
+
+        // Wait for all windows to be fully created
+        PumpUntil(() => false, 4000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+
+        // Close gracefully by sending WM_CLOSE to each visible window of this PID
+        // until the process exits. This matches how real VS shuts down:
+        // main window destroyed first, then tool windows cascade.
+        int closeAttempts = 0;
+        PumpUntil(() =>
+        {
+            if (proc.HasExited)
+            {
+                return true;
+            }
+
+            var hwndToClose = WindowFocusService.FindWindowHandleByPid(proc.Id);
+            if (hwndToClose != IntPtr.Zero)
+            {
+                closeAttempts++;
+                Console.Error.WriteLine($"  WM_CLOSE #{closeAttempts} → HWND={hwndToClose}");
+                _ = SendMessage(hwndToClose, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            }
+            return false;
+        }, 10000);
+        Console.Error.WriteLine($"Process exited after {closeAttempts} WM_CLOSE messages");
+        Assert.True(proc.HasExited, "VS Sim did not exit after closing all windows");
+        PumpUntil(() => false, 2000);
+
+        // Check what BuildActiveText returns
+        var activeText = tracker.BuildActiveText(SessionId);
+        Console.Error.WriteLine($"BuildActiveText after close: '{activeText}'");
+
+        // Grid must be clear — the cascading destroys must NOT keep the entry alive
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+    }
+
+    /// <summary>
+    /// Uses REAL Visual Studio to reproduce the stale tracking bug.
+    /// Opens VS with a CWD folder (same as OnOpenInIde), waits for it to load,
+    /// then kills VS. After VS exits, the grid must clear.
+    /// Reproduces the cascading EVENT_OBJECT_DESTROY issue where
+    /// OnWindowDestroyed keeps recapturing to dying child windows.
+    /// </summary>
+    [StaFact]
+    public void E2E_RealVisualStudio_OpenAndClose_GridMustClear()
+    {
+        const string DevenvPath = @"C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\devenv.exe";
+        if (!File.Exists(DevenvPath))
+        {
+            return; // Skip if VS not installed
+        }
+
+        const string SessionId = "e2e-real-vs-close";
+        var targetPath = @"S:\MyGames\Utilities-Mechanics-Playground\Scripts";
+
+        using var hookService = new WindowEventHookService();
+        var tracker = new ActiveStatusTracker();
+        var grid = CreateGrid();
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
+
+        AddRow(grid, SessionId);
+
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = SessionId, Summary = "Real VS Close Test" }
+        };
+
+        var dirtySessionIds = this.WireHooks(hookService, tracker);
+        hookService.Start();
+
+        // Launch VS the EXACT same way as MainForm.ContextMenu.OnOpenInIde
+        var proc = SessionInteractionManager.OpenInIde(DevenvPath, targetPath);
+        Assert.NotNull(proc);
+        this._startedProcesses.Add(proc);
+        tracker.TrackProcess(SessionId, new ActiveProcess("Visual Studio", proc.Id, targetPath));
+
+        // Wait for VS to fully load (splash → main window)
+        PumpUntil(() => false, 10000);
+
+        // Verify VS shows in grid
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+
+        // Close VS gracefully via WM_CLOSE (same as user clicking X)
+        // This is key: VS destroys 40+ child windows while the process is still alive,
+        // which is the exact scenario that causes cascading HWND recapture.
+        var vsHwnd = WindowFocusService.FindWindowHandleByPid(proc.Id);
+        Assert.NotEqual(IntPtr.Zero, vsHwnd);
+        _ = SendMessage(vsHwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+
+        // Pump messages while waiting for VS to fully exit
+        // (destroy events fire while process is shutting down)
+        PumpUntil(() => proc.HasExited, 15000);
+        Assert.True(proc.HasExited, "VS did not exit after WM_CLOSE");
+
+        // Extra pump to process any remaining events after process exit
+        PumpUntil(() => false, 2000);
+
+        // Grid MUST be clear after VS exits
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+    }
+
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
     {
         var deadline = Environment.TickCount64 + timeoutMs;
