@@ -974,38 +974,38 @@ internal class ActiveStatusTracker
                         var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
                         if (newHwnd != IntPtr.Zero && newHwnd != hwnd && !this.IsHwndTracked(newHwnd))
                         {
-                            // For IDEs with FolderPath, verify the new window belongs to this session
-                            // (not another session using the same host process)
-                            if (proc.FolderPath != null)
-                            {
-                                var newTitle = WindowFocusService.GetWindowTitle(newHwnd);
-                                var folderName = Path.GetFileName(proc.FolderPath.TrimEnd('\\'));
-                                if (string.IsNullOrEmpty(folderName)
-                                    || !newTitle.Contains(folderName, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    // New window doesn't match this session — window is genuinely closed
-                                    kvp.Value.RemoveAt(i);
-                                    affected.Add(kvp.Key);
-                                    continue;
-                                }
-                            }
-
                             proc.Hwnd = newHwnd;
                             affected.Add(kvp.Key);
                             continue;
                         }
 
-                        // PID alive but no suitable window found.
-                        // If FolderPath is set, another session may use the same host process —
-                        // this session's window is genuinely closed.
-                        if (proc.FolderPath != null)
+                        // PID alive but no untracked window found.
+                        // Check if another session shares this PID (single-process IDE like VS Code).
+                        // If so, this session's window is genuinely closed — remove it.
+                        // If not (VS pattern — own PID), keep entry for recapture.
+                        bool sharedPid = false;
+                        foreach (var other in this._trackedProcesses)
+                        {
+                            if (string.Equals(other.Key, kvp.Key, StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            if (other.Value.Any(p => p.Pid == proc.Pid || (p.Hwnd != IntPtr.Zero
+                                && WindowFocusService.GetWindowProcessId(p.Hwnd) == proc.Pid)))
+                            {
+                                sharedPid = true;
+                                break;
+                            }
+                        }
+
+                        if (sharedPid)
                         {
                             kvp.Value.RemoveAt(i);
                             affected.Add(kvp.Key);
                             continue;
                         }
 
-                        // No FolderPath — clear HWND and keep entry for recapture (VS splash transition)
                         proc.Hwnd = IntPtr.Zero;
                         affected.Add(kvp.Key);
                         continue;
