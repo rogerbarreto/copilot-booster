@@ -137,7 +137,27 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         ActiveStatusTracker tracker,
         HashSet<string> dirtySessionIds)
     {
-        var proc = this.LaunchIde();
+        return this.LaunchAndTrackIde(sessionId, ideName, tracker, dirtySessionIds, null);
+    }
+
+    private Process LaunchAndTrackIde(
+        string sessionId,
+        string ideName,
+        ActiveStatusTracker tracker,
+        HashSet<string> dirtySessionIds,
+        string? exePath)
+    {
+        Process proc;
+        if (exePath != null)
+        {
+            proc = Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = false })!;
+            this._startedProcesses.Add(proc);
+        }
+        else
+        {
+            proc = this.LaunchIde();
+        }
+
         tracker.TrackProcess(sessionId, new ActiveProcess(ideName, proc.Id, null));
 
         // Try event-driven capture first (ForegroundChanged or WindowCreated)
@@ -350,6 +370,90 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         // THIS IS THE BUG: After launcher exits, the IDE should still be tracked
         // but it disappears because the real IDE PID was never associated.
         Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+    }
+
+    /// <summary>
+    /// E2E using IdeSimVS simulator: mimics real VS opening a folder.
+    /// The simulator creates a splash window (HWND #1), destroys it,
+    /// creates the main window (HWND #2) with a generic title, then updates
+    /// the title — all under the same PID. Window titles are random and
+    /// unrelated to the folder path, so no title-based matching can work.
+    /// Verifies: open → tracked through splash transition → close → removed.
+    /// </summary>
+    [StaFact]
+    public void E2E_VsSimulator_SplashTransition_OpenAndClose()
+    {
+        const string Session1 = "e2e-vs-sim-1";
+        const string Session2 = "e2e-vs-sim-2";
+
+        var simExe = Path.Combine(
+            Path.GetDirectoryName(typeof(IdeTrackingIntegrationTests).Assembly.Location)!,
+            "TestTools", "IdeSimVS.exe");
+
+        if (!File.Exists(simExe))
+        {
+            Assert.Fail($"IdeSimVS.exe not found at {simExe}");
+        }
+
+        using var hookService = new WindowEventHookService();
+        var tracker = new ActiveStatusTracker();
+        var grid = CreateGrid();
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
+
+        AddRow(grid, Session1);
+        AddRow(grid, Session2);
+
+        var sessions = new List<NamedSession>
+        {
+            new() { Id = Session1, Summary = "VS Sim 1" },
+            new() { Id = Session2, Summary = "VS Sim 2" }
+        };
+
+        var dirtySessionIds = this.WireHooks(hookService, tracker);
+        hookService.Start();
+
+        // ── Open VS sim for Session 1 ──
+        var proc1 = this.LaunchAndTrackIde(Session1, "Visual Studio", tracker, dirtySessionIds, simExe);
+        Assert.True(dirtySessionIds.Contains(Session1), "VS Sim 1 not captured");
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+        Assert.Equal("", GetActiveCell(grid, 1));
+
+        // Wait for splash → main transition to complete
+        PumpUntil(() => false, 3000);
+
+        // Verify still tracked after splash destroyed
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+
+        // ── Open VS sim for Session 2 ──
+        dirtySessionIds.Clear();
+        var proc2 = this.LaunchAndTrackIde(Session2, "Visual Studio", tracker, dirtySessionIds, simExe);
+        Assert.True(dirtySessionIds.Contains(Session2), "VS Sim 2 not captured");
+        PumpUntil(() => false, 3000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 0));
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 1));
+
+        // ── Close Session 1 — Session 2 must remain ──
+        dirtySessionIds.Clear();
+        proc1.Kill();
+        PumpUntil(() => dirtySessionIds.Contains(Session1), 10000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+        Assert.Contains("Visual Studio", GetActiveCell(grid, 1));
+
+        // ── Close Session 2 ──
+        dirtySessionIds.Clear();
+        proc2.Kill();
+        PumpUntil(() => dirtySessionIds.Contains(Session2), 10000);
+
+        RefreshGrid(tracker, visuals, sessions);
+        Assert.Equal("", GetActiveCell(grid, 0));
+        Assert.Equal("", GetActiveCell(grid, 1));
     }
 
     private static void PumpUntil(Func<bool> condition, int timeoutMs)
