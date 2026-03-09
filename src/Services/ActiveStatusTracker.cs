@@ -91,6 +91,16 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
+    /// Reloads <see cref="_activeSessionIds"/> from the PID registry so that the
+    /// PID-based fallback in <see cref="BuildActiveText"/> is current during
+    /// incremental refreshes (which otherwise skip this reload).
+    /// </summary>
+    internal void RefreshActiveSessionIds()
+    {
+        this._activeSessionIds = LoadActiveSessionIds();
+    }
+
+    /// <summary>
     /// Syncs the terminal cache file with the set of actually open terminal windows.
     /// Adds newly discovered terminals and removes stale entries.
     /// </summary>
@@ -158,25 +168,61 @@ internal class ActiveStatusTracker
         {
             foreach (var proc in procs)
             {
-                // Prefer HWND-based liveness check (works for cached IDEs with PID=0)
                 if (proc.Hwnd != IntPtr.Zero)
                 {
                     if (WindowFocusService.IsWindowAlive(proc.Hwnd))
                     {
                         parts.Add(proc.Name);
                     }
-                }
-                else
-                {
-                    try
+                    else if (proc.Pid > 0)
                     {
-                        var p = Process.GetProcessById(proc.Pid);
-                        if (!p.HasExited)
+                        // HWND died but process still alive (e.g. VS splash screen closed,
+                        // real window opened). Try to recapture immediately.
+                        bool stillAlive = false;
+                        try { stillAlive = !Process.GetProcessById(proc.Pid).HasExited; }
+                        catch { }
+
+                        if (stillAlive)
+                        {
+                            var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
+                            if (newHwnd != IntPtr.Zero)
+                            {
+                                proc.Hwnd = newHwnd;
+                                parts.Add(proc.Name);
+                            }
+                        }
+                        else if (proc.FolderPath != null)
                         {
                             parts.Add(proc.Name);
                         }
                     }
-                    catch (Exception ex) { Program.Logger.LogWarning("Failed to check process liveness: {Error}", ex.Message); }
+                    else if (proc.FolderPath != null)
+                    {
+                        // Pid=0 (launcher exited), HWND dead — keep showing while FullRefresh recaptures
+                        parts.Add(proc.Name);
+                    }
+                }
+                else if (proc.Pid > 0)
+                {
+                    bool alive = false;
+                    try { alive = !Process.GetProcessById(proc.Pid).HasExited; }
+                    catch { }
+
+                    if (alive)
+                    {
+                        parts.Add(proc.Name);
+                    }
+                    else if (proc.FolderPath != null)
+                    {
+                        // Launcher exited but entry kept for recapture — keep showing
+                        parts.Add(proc.Name);
+                    }
+                }
+                else if (proc.FolderPath != null)
+                {
+                    // Launcher exited (Pid=0) but real IDE window not captured yet.
+                    // Keep showing until FullRefresh resolves or removes the entry.
+                    parts.Add(proc.Name);
                 }
             }
         }
@@ -820,6 +866,12 @@ internal class ActiveStatusTracker
                 value.Add((label, title, hwnd));
             }
 
+            // Keep PID registry current so BuildActiveText fallback works during incremental refreshes
+            if (label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase))
+            {
+                this.RefreshActiveSessionIds();
+            }
+
             affected.Add(sessionId);
         }
 
@@ -874,10 +926,48 @@ internal class ActiveStatusTracker
 
         foreach (var kvp in this._trackedProcesses)
         {
-            int before = kvp.Value.Count;
-            kvp.Value.RemoveAll(p => p.Hwnd == hwnd);
-            if (kvp.Value.Count < before)
+            for (int i = kvp.Value.Count - 1; i >= 0; i--)
             {
+                var proc = kvp.Value[i];
+                if (proc.Hwnd != hwnd)
+                {
+                    continue;
+                }
+
+                // HWND destroyed — try to recapture from the same PID
+                // (e.g., VS destroys its splash screen and creates the main window)
+                if (proc.Pid > 0)
+                {
+                    bool stillAlive = false;
+                    try { stillAlive = !Process.GetProcessById(proc.Pid).HasExited; }
+                    catch { }
+
+                    if (stillAlive)
+                    {
+                        var newHwnd = WindowFocusService.FindWindowHandleByPid(proc.Pid);
+                        if (newHwnd != IntPtr.Zero && newHwnd != hwnd)
+                        {
+                            proc.Hwnd = newHwnd;
+                            affected.Add(kvp.Key);
+                            continue;
+                        }
+
+                        // PID alive but no new window yet — clear HWND and keep entry for recapture
+                        proc.Hwnd = IntPtr.Zero;
+                        affected.Add(kvp.Key);
+                        continue;
+                    }
+                }
+
+                // PID dead and HWND dead — check FolderPath fallback
+                if (proc.FolderPath != null)
+                {
+                    proc.Hwnd = IntPtr.Zero;
+                    affected.Add(kvp.Key);
+                    continue;
+                }
+
+                kvp.Value.RemoveAt(i);
                 affected.Add(kvp.Key);
             }
         }
@@ -932,7 +1022,19 @@ internal class ActiveStatusTracker
         foreach (var kvp in this._trackedProcesses)
         {
             int before = kvp.Value.Count;
-            kvp.Value.RemoveAll(p => p.Pid == pid);
+
+            // Entries with FolderPath are IDE launchers — don't remove them,
+            // just clear the PID so FullRefresh can recapture via title fallback.
+            foreach (var proc in kvp.Value)
+            {
+                if (proc.Pid == pid && proc.FolderPath != null)
+                {
+                    proc.Pid = 0;
+                    affected.Add(kvp.Key);
+                }
+            }
+
+            kvp.Value.RemoveAll(p => p.Pid == pid && p.FolderPath == null);
             if (kvp.Value.Count < before)
             {
                 affected.Add(kvp.Key);

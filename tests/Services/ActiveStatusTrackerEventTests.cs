@@ -254,4 +254,77 @@
         Assert.Contains("Terminal", result);
         Assert.Contains("Copilot CLI", result);
     }
+
+    // ── OnWindowTitleChanged + RefreshActiveSessionIds ──────────────────
+
+    [Fact]
+    public void OnWindowTitleChanged_CopilotCliMatch_RefreshesActiveSessionIds()
+    {
+        var tracker = new ActiveStatusTracker();
+        var hwnd = new IntPtr(600);
+
+        // Before title match, _activeSessionIds is empty (no PID registry)
+        var textBefore = tracker.BuildActiveText("session-test");
+        Assert.Equal("", textBefore);
+
+        // Title match for Copilot CLI triggers RefreshActiveSessionIds
+        var affected = tracker.OnWindowTitleChanged(hwnd, "Copilot CLI - session-test", null);
+
+        Assert.Contains("session-test", affected);
+        // The window should be tracked via _activeTrackedWindows, so BuildActiveText returns "Copilot CLI"
+        var textAfter = tracker.BuildActiveText("session-test");
+        Assert.Contains("Copilot CLI", textAfter);
+    }
+
+    [Fact]
+    public void OnWindowTitleChanged_TerminalMatch_DoesNotRefreshActiveSessionIds()
+    {
+        var tracker = new ActiveStatusTracker();
+        var hwnd = new IntPtr(700);
+
+        // Terminal match should NOT call RefreshActiveSessionIds (only Copilot CLI does)
+        var affected = tracker.OnWindowTitleChanged(hwnd, "Terminal - session-test", null);
+
+        Assert.Contains("session-test", affected);
+        var text = tracker.BuildActiveText("session-test");
+        Assert.Contains("Terminal", text);
+    }
+
+    // ── Immediate detection on window creation with title ──────────────
+
+    [Fact]
+    public void OnWindowTitleChanged_WindowCreatedWithTitle_ImmediatelyTracked()
+    {
+        var tracker = new ActiveStatusTracker();
+        var hwnd = new IntPtr(800);
+
+        // Simulate what MainForm.WindowCreated now does: read title and call OnWindowTitleChanged
+        var affected = tracker.OnWindowTitleChanged(hwnd, "Terminal - session-new", null);
+
+        Assert.Contains("session-new", affected);
+
+        // Verify the session appears in incremental snapshot
+        var sessions = new List<NamedSession> { new() { Id = "session-new", Summary = "New Session" } };
+        var snapshot = tracker.IncrementalRefresh(sessions);
+
+        Assert.True(snapshot.ActiveTextBySessionId.ContainsKey("session-new"));
+        Assert.Contains("Terminal", snapshot.ActiveTextBySessionId["session-new"]);
+    }
+
+    [Fact]
+    public void OnWindowTitleChanged_CopilotCliCreatedWithTitle_ImmediatelyTracked()
+    {
+        var tracker = new ActiveStatusTracker();
+        var hwnd = new IntPtr(900);
+
+        var affected = tracker.OnWindowTitleChanged(hwnd, "Copilot CLI - session-cli", null);
+
+        Assert.Contains("session-cli", affected);
+
+        var sessions = new List<NamedSession> { new() { Id = "session-cli", Summary = "CLI Session" } };
+        var snapshot = tracker.IncrementalRefresh(sessions);
+
+        Assert.True(snapshot.ActiveTextBySessionId.ContainsKey("session-cli"));
+        Assert.Contains("Copilot CLI", snapshot.ActiveTextBySessionId["session-cli"]);
+    }
 }

@@ -238,6 +238,7 @@ internal partial class MainForm
             if (proc != null)
             {
                 this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, targetPath));
+                this._processExitTracker?.Watch(proc.Id);
                 this.RefreshActiveStatusAsync();
             }
         };
@@ -249,6 +250,7 @@ internal partial class MainForm
             {
                 var dir = Path.GetDirectoryName(filePath) ?? filePath;
                 this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, dir));
+                this._processExitTracker?.Watch(proc.Id);
                 this.RefreshActiveStatusAsync();
             }
         };

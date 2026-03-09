@@ -120,10 +120,16 @@ internal partial class WindowEventHookService : IDisposable
 
             case EVENT_OBJECT_NAMECHANGE:
                 // Only handle top-level window name changes, not child element changes.
-                if (idObject == OBJID_WINDOW && IsWindowVisible(hwnd) && GetAncestor(hwnd, GA_ROOT) == hwnd)
+                // Note: IsWindowVisible is NOT checked here because Windows Terminal
+                // title changes may fire before the window is fully visible, and
+                // the idObject + GetAncestor checks are sufficient to filter noise.
+                if (idObject == OBJID_WINDOW && GetAncestor(hwnd, GA_ROOT) == hwnd)
                 {
                     var title = GetWindowTitle(hwnd);
-                    this.WindowTitleChanged?.Invoke(hwnd, title);
+                    if (title.Length > 0)
+                    {
+                        this.WindowTitleChanged?.Invoke(hwnd, title);
+                    }
                 }
                 break;
 
