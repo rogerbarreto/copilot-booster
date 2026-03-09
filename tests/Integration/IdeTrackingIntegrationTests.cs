@@ -696,6 +696,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// OnWindowDestroyed keeps recapturing to dying child windows.
     /// </summary>
     [StaFact]
+    [Trait("Category", "LocalOnly")]
     public void E2E_RealVisualStudio_OpenAndClose_GridMustClear()
     {
         const string DevenvPath = @"C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\IDE\devenv.exe";

@@ -41,7 +41,7 @@ jobs:
           else { Write-Error "playwright.ps1 not found"; exit 1 }
 
       - name: Integration Tests
-        run: dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release
+        run: dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release -- -trait "Category!=LocalOnly"
 
   signing-info:
     needs: test
