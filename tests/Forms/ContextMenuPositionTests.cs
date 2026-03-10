@@ -1,7 +1,4 @@
-﻿using System.Drawing;
-using CopilotBooster.Forms;
-
-public sealed class ContextMenuPositionTests
+﻿public sealed class ContextMenuPositionTests
 {
     private static readonly Rectangle s_primaryScreen = new(0, 0, 1920, 1040);
     private static readonly Rectangle s_secondaryScreen = new(1920, 0, 2560, 1440);

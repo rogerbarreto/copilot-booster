@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.3] - 2026-03-09
+
+### Fixed
+
+- **Context menus no longer jump to adjacent monitors** — on multi-screen setups, right-click menus now open on the correct monitor.
+- **Win32Exception crash on form disposal** — WinEvent hook callbacks that fire after the form is disposed no longer cause unhandled exceptions.
+
 ## [0.18.2] - 2026-03-09
 
 ### Fixed

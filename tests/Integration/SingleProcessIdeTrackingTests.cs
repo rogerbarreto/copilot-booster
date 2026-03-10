@@ -129,20 +129,23 @@ public sealed class SingleProcessIdeTrackingTests : IDisposable
         hooks.ForegroundChanged += hwnd => { tracker.OnWindowCreated(hwnd); };
         hooks.Start();
 
+        // Unique ID to isolate the simulator's mutex/pipe from other test runs
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
         // ── Open Session 1 (this starts the host process) ──
-        var proc1 = Process.Start(new ProcessStartInfo(s_simExe, $"\"{dir1}\"") { UseShellExecute = true })!;
+        var proc1 = Process.Start(new ProcessStartInfo(s_simExe, $"--id {runId} \"{dir1}\"") { UseShellExecute = true })!;
         this._startedProcesses.Add(proc1);
         tracker.TrackProcess(S1, new ActiveProcess("IDE Code", proc1.Id, dir1));
         WaitAndPump(3000);
 
         // ── Open Session 2 (launcher exits, host creates window) ──
-        var proc2 = Process.Start(new ProcessStartInfo(s_simExe, $"\"{dir2}\"") { UseShellExecute = true })!;
+        var proc2 = Process.Start(new ProcessStartInfo(s_simExe, $"--id {runId} \"{dir2}\"") { UseShellExecute = true })!;
         this._startedProcesses.Add(proc2);
         tracker.TrackProcess(S2, new ActiveProcess("IDE Code", proc2.Id, dir2));
         WaitAndPump(3000);
 
         // ── Open Session 3 ──
-        var proc3 = Process.Start(new ProcessStartInfo(s_simExe, $"\"{dir3}\"") { UseShellExecute = true })!;
+        var proc3 = Process.Start(new ProcessStartInfo(s_simExe, $"--id {runId} \"{dir3}\"") { UseShellExecute = true })!;
         this._startedProcesses.Add(proc3);
         tracker.TrackProcess(S3, new ActiveProcess("IDE Code", proc3.Id, dir3));
         WaitAndPump(3000);

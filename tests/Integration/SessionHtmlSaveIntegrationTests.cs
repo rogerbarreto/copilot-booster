@@ -407,6 +407,7 @@ public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     /// Simulates the exact flow from HandleEdgeSaveSignalAsync and OnSaveEdgeTabs handlers.
     /// </summary>
     [StaFact]
+    [Trait("Category", "LocalOnly")]
     public async Task SessionHtml_E2E_SaveTabs_ContextCountUpdatesImmediatelyAsync()
     {
         const string SessionId = "e2e-tab-count-test";

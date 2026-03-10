@@ -17,13 +17,29 @@ using System.Windows.Forms;
 const string MutexName = "IdeSimVSCode_SingleInstance_Mutex";
 const string PipeName = "IdeSimVSCode_Pipe";
 
-var folderPath = args.Length > 0 ? args[0] : "";
+// Support --id <unique-id> to isolate instances across test runs
+string instanceId = "";
+var folderPath = "";
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--id" && i + 1 < args.Length)
+    {
+        instanceId = args[++i];
+    }
+    else
+    {
+        folderPath = args[i];
+    }
+}
+
+var mutexName = string.IsNullOrEmpty(instanceId) ? MutexName : $"{MutexName}_{instanceId}";
+var pipeName = string.IsNullOrEmpty(instanceId) ? PipeName : $"{PipeName}_{instanceId}";
 var folderName = string.IsNullOrEmpty(folderPath)
     ? "Untitled"
     : Path.GetFileName(folderPath.TrimEnd('\\'));
 
 bool createdNew;
-using var mutex = new Mutex(true, MutexName, out createdNew);
+using var mutex = new Mutex(true, mutexName, out createdNew);
 
 if (createdNew)
 {
@@ -42,7 +58,7 @@ if (createdNew)
         {
             try
             {
-                using var server = new NamedPipeServerStream(PipeName, PipeDirection.In);
+                using var server = new NamedPipeServerStream(pipeName, PipeDirection.In);
                 server.WaitForConnection();
                 using var reader = new StreamReader(server);
                 var requestedFolder = reader.ReadLine() ?? "Untitled";
@@ -91,7 +107,7 @@ else
     // Another instance is already running — send folder name to it and EXIT
     try
     {
-        using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
+        using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.Out);
         client.Connect(3000);
         using var writer = new StreamWriter(client) { AutoFlush = true };
         writer.WriteLine(folderName);
