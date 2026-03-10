@@ -135,6 +135,24 @@ public sealed class FileSystemWatcherIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void SessionContextWatcher_LockFileCreated_DoesNotFire()
+    {
+        var sessionDir = Path.Combine(this._tempDir, "test-session-lock");
+        Directory.CreateDirectory(sessionDir);
+
+        using var watcher = new SessionContextWatcherService(this._tempDir);
+        using var fired = new ManualResetEventSlim();
+
+        watcher.CountsChanged += _ => fired.Set();
+        watcher.StartWatching();
+
+        // Create a .lock file (e.g. inuse.48696.lock) — should be filtered
+        File.WriteAllText(Path.Combine(sessionDir, "inuse.48696.lock"), "");
+
+        Assert.False(fired.Wait(1000, TestContext.Current.CancellationToken), "CountsChanged should NOT fire for .lock file creation");
+    }
+
+    [Fact]
     public void SessionContextWatcher_PrimeCache_PopulatesCounts()
     {
         var sessionDir = Path.Combine(this._tempDir, "test-session-prime");

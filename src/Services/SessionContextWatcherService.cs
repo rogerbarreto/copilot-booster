@@ -150,6 +150,12 @@ internal class SessionContextWatcherService : IDisposable
                 return;
             }
 
+            // Skip .lock files (e.g. inuse.48696.lock created by Copilot CLI)
+            if (fileName.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             var isEdgeTabs = string.Equals(fileName, "edge-tabs.json", StringComparison.OrdinalIgnoreCase);
 
             // Skip reserved root-level files (except edge-tabs.json)
@@ -223,6 +229,12 @@ internal class SessionContextWatcherService : IDisposable
             }
 
             if (!relativePath.Contains(Path.DirectorySeparatorChar) && s_reservedFiles.Contains(fileName))
+            {
+                continue;
+            }
+
+            // Skip .lock files (e.g. inuse.48696.lock created by Copilot CLI)
+            if (fileName.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

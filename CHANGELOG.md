@@ -4,12 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.4] - 2026-03-10
+
+### Fixed
+
+- **Ignore .lock files in context counts** — Copilot CLI `inuse.*.lock` files are now filtered out so they don't appear as context files.
+
 ## [0.18.3] - 2026-03-09
 
 ### Fixed
 
 - **Context menus no longer jump to adjacent monitors** — on multi-screen setups, right-click menus now open on the correct monitor.
-- **Win32Exception crash on form disposal** — WinEvent hook callbacks that fire after the form is disposed no longer cause unhandled exceptions.
+- **Fix crash: Win32Exception "Error creating window handle"** — WinEvent hook callbacks could fire after the form's window handle was destroyed during closing, causing `RequestRefresh()` to restart the debounce timer on a dead form. Added `IsDisposed`/`IsHandleCreated` guard, moved hook/timer cleanup before handle destruction, and added `_stopped` flag to `WindowEventHookService`.
 
 ## [0.18.2] - 2026-03-09
 
