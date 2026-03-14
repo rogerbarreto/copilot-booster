@@ -111,7 +111,9 @@ internal class GitHubPollingService : IDisposable
 
                 foreach (var item in data.Items.ToList())
                 {
-                    if (item.IsFinal)
+                    // Skip final items unless they need StateReason backfill
+                    // (issues closed before the StateReason fix have null StateReason)
+                    if (item.IsFinal && (item.IsPr || item.StateReason != null))
                     {
                         continue;
                     }

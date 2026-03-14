@@ -166,4 +166,113 @@ public sealed class GitHubPrDiscoveryTests
             Assert.NotNull(icon);
         }
     }
+
+    /// <summary>
+    /// Simulates the stale data bug: a closed "not_planned" issue was tracked
+    /// BEFORE the StateReason fix, so StateReason is null in the persisted data.
+    /// The polling service must backfill StateReason even for final (closed) items.
+    /// Without the fix, IsFinal skips the item and StateReason stays null → purple icon.
+    /// </summary>
+    [Fact]
+    public async Task Polling_ClosedIssue_MissingStateReason_BackfillsFromApi()
+    {
+        var api = CreateApi();
+        const string SessionId = "e2e-stale-state-reason";
+
+        var staleItem = new GitHubTrackedItem
+        {
+            Type = "issue",
+            Number = 7385,
+            State = "closed",
+            StateReason = null,
+            Title = "Old title",
+            LastModifiedAt = "2026-03-13T15:44:48Z",
+            LastSeenAt = "2026-03-13T16:00:00Z"
+        };
+
+        var data = new GitHubTrackingData
+        {
+            Owner = "dotnet",
+            Repo = "extensions",
+            Items = [staleItem]
+        };
+
+        GitHubTrackingService.Save(SessionId, data);
+
+        try
+        {
+            // Verify the IsFinal check allows backfill for missing StateReason
+            var item = data.Items[0];
+            bool shouldSkip = item.IsFinal && (item.IsPr || item.StateReason != null);
+            Assert.False(shouldSkip, "Closed issue with null StateReason must NOT be skipped");
+
+            // Actually poll via PollSessionNow and verify backfill
+            using var poller = new GitHubPollingService(api, () => [SessionId]);
+            poller.PollSessionNow(SessionId);
+            await Task.Delay(3000);
+
+            var updated = GitHubTrackingService.Load(SessionId);
+            Assert.NotNull(updated);
+            var updatedItem = updated.Items.First(i => i.Number == 7385);
+            Assert.Equal("not_planned", updatedItem.StateReason);
+        }
+        finally
+        {
+            var dir = SessionStateService.GetSessionDir(SessionId);
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Same bug but for PRs: a merged PR tracked before the fix has no check data.
+    /// Merged PRs should NOT be re-polled (they're truly final).
+    /// </summary>
+    [Fact]
+    public async Task Polling_MergedPr_NotRepolled()
+    {
+        var api = CreateApi();
+        const string SessionId = "e2e-merged-pr-nopoll";
+
+        var mergedItem = new GitHubTrackedItem
+        {
+            Type = "pr",
+            Number = 99999,
+            State = "merged",
+            Title = "Some merged PR"
+        };
+
+        var data = new GitHubTrackingData
+        {
+            Owner = "dotnet",
+            Repo = "extensions",
+            Items = [mergedItem]
+        };
+
+        GitHubTrackingService.Save(SessionId, data);
+
+        try
+        {
+            using var poller = new GitHubPollingService(api, () => [SessionId]);
+            poller.PollSessionNow(SessionId);
+            await Task.Delay(2000);
+
+            // Merged PR should NOT have been changed (still merged, no re-poll)
+            var updated = GitHubTrackingService.Load(SessionId);
+            Assert.NotNull(updated);
+            var item = updated.Items.First(i => i.Number == 99999);
+            Assert.Equal("merged", item.State);
+            Assert.Equal("Some merged PR", item.Title); // Title unchanged = not re-polled
+        }
+        finally
+        {
+            var dir = SessionStateService.GetSessionDir(SessionId);
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
 }
