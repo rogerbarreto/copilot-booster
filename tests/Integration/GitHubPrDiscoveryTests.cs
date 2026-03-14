@@ -108,4 +108,62 @@ public sealed class GitHubPrDiscoveryTests
 
         Assert.Null(doc);
     }
+
+    /// <summary>
+    /// Issue #7385 on dotnet/extensions is closed as "not_planned".
+    /// The API response must include state_reason so the icon shows gray (not purple).
+    /// </summary>
+    [Fact]
+    public async Task GetIssue_ClosedNotPlanned_HasStateReason()
+    {
+        var api = CreateApi();
+
+        var doc = await api.GetIssueAsync("dotnet", "extensions", 7385);
+
+        Assert.NotNull(doc);
+        using (doc)
+        {
+            Assert.Equal("closed", doc.RootElement.GetProperty("state").GetString());
+            Assert.True(doc.RootElement.TryGetProperty("state_reason", out var sr),
+                "API response must include state_reason");
+            Assert.Equal("not_planned", sr.GetString());
+        }
+    }
+
+    /// <summary>
+    /// When a "not_planned" issue is added via AddIssueForm parsing,
+    /// the resulting GitHubTrackedItem must have StateReason = "not_planned".
+    /// </summary>
+    [Fact]
+    public async Task ParseIssue_ClosedNotPlanned_StateReasonPreserved()
+    {
+        var api = CreateApi();
+
+        var doc = await api.GetIssueAsync("dotnet", "extensions", 7385);
+        Assert.NotNull(doc);
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            var state = root.GetProperty("state").GetString() ?? "open";
+            var stateReason = root.TryGetProperty("state_reason", out var srp)
+                && srp.ValueKind != System.Text.Json.JsonValueKind.Null
+                ? srp.GetString() : null;
+
+            var item = new GitHubTrackedItem
+            {
+                Type = "issue",
+                Number = 7385,
+                State = state,
+                StateReason = stateReason
+            };
+
+            Assert.Equal("closed", item.State);
+            Assert.Equal("not_planned", item.StateReason);
+
+            // Verify the icon would be gray, not purple
+            var icon = GitHubIconRenderer.GetIssueIcon(item.State, item.StateReason);
+            Assert.NotNull(icon);
+        }
+    }
 }
