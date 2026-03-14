@@ -302,7 +302,7 @@ internal class ExistingSessionsVisuals
                 Padding = new Padding(4, 4, 4, 4),
                 BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : SystemColors.Window,
                 ForeColor = Application.IsDarkModeEnabled ? Color.FromArgb(0xCC, 0xCC, 0xCC) : SystemColors.ControlText,
-                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x38, 0x38, 0x38) : Color.FromArgb(200, 220, 245),
+                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x38, 0x46, 0x59) : Color.FromArgb(200, 220, 245),
                 SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : Color.Black
             },
             EnableHeadersVisualStyles = false,
