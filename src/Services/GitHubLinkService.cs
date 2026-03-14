@@ -24,16 +24,12 @@ internal static class GitHubLinkService
                 return;
             }
 
-            // Edge not running — start workspace and navigate
+            // Edge not running — start workspace with URL as initial tab
             _ = Task.Factory.StartNew(async () =>
             {
                 var workspace = SessionInteractionManager.CreateEdgeWorkspace(sessionId);
                 tracker.TrackEdge(sessionId, workspace);
-                if (await workspace.OpenAsync().ConfigureAwait(false))
-                {
-                    await Task.Delay(1500).ConfigureAwait(false);
-                    NavigateInEdge(url, workspace);
-                }
+                await workspace.OpenAsync(initialUrl: url).ConfigureAwait(false);
             }, System.Threading.CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
             return;
         }

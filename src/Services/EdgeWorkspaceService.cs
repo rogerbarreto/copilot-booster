@@ -84,7 +84,7 @@ internal partial class EdgeWorkspaceService
     /// Waits up to <paramref name="timeoutMs"/> milliseconds for the tab to appear.
     /// </summary>
     /// <returns>True if the tab was detected; false on timeout.</returns>
-    internal async Task<bool> OpenAsync(string? sessionName = null, bool hasSavedTabs = false, int timeoutMs = 10000)
+    internal async Task<bool> OpenAsync(string? sessionName = null, bool hasSavedTabs = false, int timeoutMs = 10000, string? initialUrl = null)
     {
         var sessionHtml = GetSessionHtmlPath();
         if (sessionHtml == null)
@@ -134,7 +134,31 @@ internal partial class EdgeWorkspaceService
                 {
                     WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
                     WindowFocusService.WaitForForeground(this.CachedHwnd);
-                    WindowFocusService.SendCtrlT(this.CachedHwnd);
+
+                    if (!string.IsNullOrEmpty(initialUrl))
+                    {
+                        // Open a new tab first, then navigate to the URL in it
+                        WindowFocusService.SendCtrlT(this.CachedHwnd);
+                        await Task.Delay(300).ConfigureAwait(false);
+                        var edgePath2 = FindEdgePath();
+                        if (edgePath2 != null)
+                        {
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo
+                                {
+                                    FileName = edgePath2,
+                                    Arguments = $"\"{initialUrl}\"",
+                                    UseShellExecute = false
+                                });
+                            }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        WindowFocusService.SendCtrlT(this.CachedHwnd);
+                    }
                 }
 
                 return true;
