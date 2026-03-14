@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
@@ -25,8 +27,7 @@ internal static class AddIssueForm
         }
 
         var remotes = GitService.GetRemotes(gitRoot);
-        string? owner = null, repo = null;
-
+        var remoteMap = new Dictionary<string, (string owner, string repo)>();
         foreach (var remote in remotes)
         {
             var url = GitService.GetRemoteUrl(gitRoot, remote);
@@ -35,14 +36,12 @@ internal static class AddIssueForm
                 var parsed = GitService.ParseGitHubOwnerRepo(url);
                 if (parsed.HasValue)
                 {
-                    owner = parsed.Value.owner;
-                    repo = parsed.Value.repo;
-                    break;
+                    remoteMap[remote] = parsed.Value;
                 }
             }
         }
 
-        if (owner == null || repo == null)
+        if (remoteMap.Count == 0)
         {
             MessageBox.Show("Could not detect a GitHub repository from git remotes.", "Add Issue", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return null;
@@ -57,28 +56,73 @@ internal static class AddIssueForm
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 480,
-            Height = 250,
+            Height = 280,
             StartPosition = FormStartPosition.CenterParent,
             TopMost = Program._settings.AlwaysOnTop
         };
 
+        int y = 12;
+
+        var cmbRemote = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(100, y),
+            Width = 340
+        };
+        foreach (var kv in remoteMap)
+        {
+            cmbRemote.Items.Add($"{kv.Key} ({kv.Value.owner}/{kv.Value.repo})");
+        }
+
+        if (cmbRemote.Items.Count > 0)
+        {
+            var preferred = remoteMap.Keys.FirstOrDefault(r => r.Equals("upstream", StringComparison.OrdinalIgnoreCase))
+                ?? remoteMap.Keys.FirstOrDefault(r => r.Equals("origin", StringComparison.OrdinalIgnoreCase))
+                ?? remoteMap.Keys.First();
+            cmbRemote.SelectedIndex = remoteMap.Keys.ToList().IndexOf(preferred);
+        }
+
+        var lblRemote = new Label { Text = "Remote:", AutoSize = true, Location = new Point(14, y + 3) };
+
+        if (remoteMap.Count > 1)
+        {
+            form.Controls.AddRange([lblRemote, cmbRemote]);
+            y += 32;
+        }
+
+        (string owner, string repo) GetSelectedRemote()
+        {
+            var idx = Math.Max(0, cmbRemote.SelectedIndex);
+            return remoteMap.Values.ElementAt(idx);
+        }
+
+        var (initialOwner, initialRepo) = GetSelectedRemote();
         var lblRepo = new Label
         {
-            Text = $"{owner}/{repo}",
+            Text = $"{initialOwner}/{initialRepo}",
             ForeColor = Color.Gray,
             AutoSize = true,
-            Location = new Point(14, 12)
+            Location = new Point(14, y)
+        };
+        form.Controls.Add(lblRepo);
+        y += 22;
+
+        cmbRemote.SelectedIndexChanged += (s, e) =>
+        {
+            var (o, r) = GetSelectedRemote();
+            lblRepo.Text = $"{o}/{r}";
         };
 
-        var lblIssue = new Label { Text = "Issue Number:", AutoSize = true, Location = new Point(14, 38) };
-        var txtIssue = new TextBox { PlaceholderText = "e.g., 15", Location = new Point(110, 35), Width = 140 };
+        var lblIssue = new Label { Text = "Issue Number:", AutoSize = true, Location = new Point(14, y + 3) };
+        var txtIssue = new TextBox { PlaceholderText = "e.g., 15", Location = new Point(110, y), Width = 140 };
+        y += 32;
 
         var lblInfo = new Label
         {
             Text = "",
             AutoSize = true,
             MaximumSize = new Size(440, 80),
-            Location = new Point(14, 70),
+            Location = new Point(14, y),
             ForeColor = Color.Gray
         };
 
@@ -86,7 +130,7 @@ internal static class AddIssueForm
         {
             Text = "Add Issue",
             DialogResult = DialogResult.None,
-            Location = new Point(350, 170),
+            Location = new Point(350, 200),
             Width = 80,
             Enabled = false
         };
@@ -95,7 +139,7 @@ internal static class AddIssueForm
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
-            Location = new Point(260, 170),
+            Location = new Point(260, 200),
             Width = 80
         };
 
@@ -103,6 +147,7 @@ internal static class AddIssueForm
 
         async Task ValidateAsync()
         {
+            var (owner, repo) = GetSelectedRemote();
             var issueText = txtIssue.Text.Trim();
             if (!int.TryParse(issueText, out var issueNum) || issueNum <= 0)
             {
@@ -128,7 +173,7 @@ internal static class AddIssueForm
                     var author = root.TryGetProperty("user", out var u) && u.TryGetProperty("login", out var l) ? l.GetString() ?? "" : "";
                     var updatedAt = root.TryGetProperty("updated_at", out var ua) ? ua.GetString() ?? "" : "";
 
-                    var labels = new System.Collections.Generic.List<string>();
+                    var labels = new List<string>();
                     if (root.TryGetProperty("labels", out var labelsArr))
                     {
                         foreach (var lbl in labelsArr.EnumerateArray())
@@ -186,7 +231,7 @@ internal static class AddIssueForm
             }
         };
 
-        form.Controls.AddRange([lblRepo, lblIssue, txtIssue, lblInfo, btnAdd, btnCancel]);
+        form.Controls.AddRange([lblIssue, txtIssue, lblInfo, btnAdd, btnCancel]);
         form.AcceptButton = btnAdd;
         form.CancelButton = btnCancel;
 

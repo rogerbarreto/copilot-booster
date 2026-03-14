@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
@@ -25,10 +27,9 @@ internal static class AddPrForm
             return null;
         }
 
+        // Build remote → (owner, repo) mapping (only GitHub remotes)
         var remotes = GitService.GetRemotes(gitRoot);
-        string? owner = null, repo = null;
-
-        // Resolve owner/repo from first GitHub remote
+        var remoteMap = new Dictionary<string, (string owner, string repo)>();
         foreach (var remote in remotes)
         {
             var url = GitService.GetRemoteUrl(gitRoot, remote);
@@ -37,14 +38,12 @@ internal static class AddPrForm
                 var parsed = GitService.ParseGitHubOwnerRepo(url);
                 if (parsed.HasValue)
                 {
-                    owner = parsed.Value.owner;
-                    repo = parsed.Value.repo;
-                    break;
+                    remoteMap[remote] = parsed.Value;
                 }
             }
         }
 
-        if (owner == null || repo == null)
+        if (remoteMap.Count == 0)
         {
             MessageBox.Show("Could not detect a GitHub repository from git remotes.", "Add PR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return null;
@@ -59,36 +58,83 @@ internal static class AddPrForm
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 480,
-            Height = 280,
+            Height = 310,
             StartPosition = FormStartPosition.CenterParent,
             TopMost = Program._settings.AlwaysOnTop
         };
 
+        int y = 12;
+
+        // Remote dropdown (shown only if multiple remotes)
+        var cmbRemote = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(100, y),
+            Width = 340
+        };
+        foreach (var kv in remoteMap)
+        {
+            cmbRemote.Items.Add($"{kv.Key} ({kv.Value.owner}/{kv.Value.repo})");
+        }
+
+        if (cmbRemote.Items.Count > 0)
+        {
+            // Prefer "upstream", then "origin", then first
+            var preferred = remoteMap.Keys.FirstOrDefault(r => r.Equals("upstream", StringComparison.OrdinalIgnoreCase))
+                ?? remoteMap.Keys.FirstOrDefault(r => r.Equals("origin", StringComparison.OrdinalIgnoreCase))
+                ?? remoteMap.Keys.First();
+            cmbRemote.SelectedIndex = remoteMap.Keys.ToList().IndexOf(preferred);
+        }
+
+        var lblRemote = new Label { Text = "Remote:", AutoSize = true, Location = new Point(14, y + 3) };
+
+        if (remoteMap.Count > 1)
+        {
+            form.Controls.AddRange([lblRemote, cmbRemote]);
+            y += 32;
+        }
+
+        (string owner, string repo) GetSelectedRemote()
+        {
+            var idx = Math.Max(0, cmbRemote.SelectedIndex);
+            return remoteMap.Values.ElementAt(idx);
+        }
+
+        var (initialOwner, initialRepo) = GetSelectedRemote();
         var lblRepo = new Label
         {
-            Text = $"{owner}/{repo}",
+            Text = $"{initialOwner}/{initialRepo}",
             ForeColor = Color.Gray,
             AutoSize = true,
-            Location = new Point(14, 12)
+            Location = new Point(14, y)
+        };
+        form.Controls.Add(lblRepo);
+        y += 22;
+
+        cmbRemote.SelectedIndexChanged += (s, e) =>
+        {
+            var (o, r) = GetSelectedRemote();
+            lblRepo.Text = $"{o}/{r}";
         };
 
-        var lblPr = new Label { Text = "PR Number:", AutoSize = true, Location = new Point(14, 38) };
-        var txtPr = new TextBox { PlaceholderText = "e.g., 42", Location = new Point(100, 35), Width = 140 };
+        var lblPr = new Label { Text = "PR Number:", AutoSize = true, Location = new Point(14, y + 3) };
+        var txtPr = new TextBox { PlaceholderText = "e.g., 42", Location = new Point(100, y), Width = 140 };
 
         var btnDiscover = new Button
         {
             Text = "Discover from Branch",
-            Location = new Point(250, 34),
+            Location = new Point(250, y - 1),
             Width = 160,
             Height = 25
         };
+        y += 32;
 
         var lblInfo = new Label
         {
             Text = "",
             AutoSize = true,
             MaximumSize = new Size(440, 80),
-            Location = new Point(14, 70),
+            Location = new Point(14, y),
             ForeColor = Color.Gray
         };
 
@@ -96,7 +142,7 @@ internal static class AddPrForm
         {
             Text = "Add PR",
             DialogResult = DialogResult.None,
-            Location = new Point(350, 200),
+            Location = new Point(350, 230),
             Width = 80,
             Enabled = false
         };
@@ -105,7 +151,7 @@ internal static class AddPrForm
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
-            Location = new Point(260, 200),
+            Location = new Point(260, 230),
             Width = 80
         };
 
@@ -113,6 +159,7 @@ internal static class AddPrForm
 
         async Task ValidateAsync()
         {
+            var (owner, repo) = GetSelectedRemote();
             var prText = txtPr.Text.Trim();
             if (!int.TryParse(prText, out var prNum) || prNum <= 0)
             {
@@ -182,12 +229,15 @@ internal static class AddPrForm
 
         btnDiscover.Click += async (s, e) =>
         {
+            var (owner, repo) = GetSelectedRemote();
             lblInfo.Text = "Discovering PR for current branch...";
             lblInfo.ForeColor = Color.Gray;
             btnAdd.Enabled = false;
 
+            var (discOwner, discRepo) = GetSelectedRemote();
             var branch = GitService.GetCurrentBranch(gitRoot);
-            var doc = await api.ListPullRequestsForBranchAsync(owner, repo, branch).ConfigureAwait(true);
+
+            var doc = await api.ListPullRequestsForBranchAsync(discOwner, discRepo, branch).ConfigureAwait(true);
             if (doc != null)
             {
                 using (doc)
@@ -216,7 +266,7 @@ internal static class AddPrForm
             }
         };
 
-        form.Controls.AddRange([lblRepo, lblPr, txtPr, btnDiscover, lblInfo, btnAdd, btnCancel]);
+        form.Controls.AddRange([lblPr, txtPr, btnDiscover, lblInfo, btnAdd, btnCancel]);
         form.AcceptButton = btnAdd;
         form.CancelButton = btnCancel;
 

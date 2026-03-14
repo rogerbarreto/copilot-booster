@@ -60,12 +60,45 @@ internal class GitHubApiService
     }
 
     /// <summary>
-    /// Lists open PRs for a branch. Used for PR discovery.
+    /// Lists open PRs matching a branch. Tries with owner prefix first (same-repo),
+    /// then scans all open PRs for fork-based matches.
+    /// Returns a JSON document where [0] is the matched PR.
     /// </summary>
     internal async Task<JsonDocument?> ListPullRequestsForBranchAsync(string owner, string repo, string branch)
     {
-        var url = $"https://api.github.com/repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open";
-        return await this.GetAsync(url).ConfigureAwait(false);
+        // Try with owner prefix (same-repo PRs)
+        var doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open").ConfigureAwait(false);
+        if (doc != null && doc.RootElement.GetArrayLength() > 0)
+        {
+            return doc;
+        }
+
+        doc?.Dispose();
+
+        // Fallback: scan all open PRs and match by head branch name
+        // (works for fork-based PRs where the head owner differs)
+        doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls?state=open&per_page=100").ConfigureAwait(false);
+        if (doc != null)
+        {
+            using (doc)
+            {
+                foreach (var pr in doc.RootElement.EnumerateArray())
+                {
+                    if (pr.TryGetProperty("head", out var head) && head.TryGetProperty("ref", out var refProp))
+                    {
+                        var headRef = refProp.GetString();
+                        if (string.Equals(headRef, branch, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Re-wrap the single matched PR as a JSON array so [0] is correct
+                            var matchedJson = $"[{pr.GetRawText()}]";
+                            return JsonDocument.Parse(matchedJson);
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
