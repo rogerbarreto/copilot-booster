@@ -354,16 +354,6 @@ internal partial class MainForm
             this._toast.Show($"✅ {prefix} #{number} removed from session");
         };
 
-        this._sessionsVisuals.OnWindowPinned += (sid, hwnd, title) =>
-        {
-            // Use first word of title as the display label
-            var label = title.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "Window";
-            var proc = new ActiveProcess(label, 0, null) { Hwnd = hwnd, HwndEverCaptured = true };
-            this._activeTracker.TrackProcess(sid, proc);
-            this.RequestRefresh(sessionId: sid, trackingChanged: true);
-            this._toast.Show($"📌 {label} pinned to session");
-        };
-
         this._sessionsVisuals.OnOpenEdge += async (sid) =>
         {
             if (this._activeTracker.TryGetEdge(sid, out var existing) && existing.IsOpen)

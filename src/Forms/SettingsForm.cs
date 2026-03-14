@@ -216,6 +216,25 @@ internal sealed class SettingsForm : Form
         dateFormatRow.Controls.AddRange([dateFormatLabel, dateFormatCombo]);
 
         // Add to general body (reverse visual order for Dock.Top stacking)
+        var trackActiveInfo = new Label
+        {
+            Text = "When enabled, focusing a tracked window (IDE, Terminal, Edge) selects the session in the grid and switches tabs.",
+            Dock = DockStyle.Top,
+            Height = 20,
+            Padding = new Padding(24, 0, 0, 4),
+            ForeColor = SystemColors.GrayText,
+            Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
+        };
+        var trackActiveCheck = new CheckBox
+        {
+            Text = "Track active session from focused window",
+            Checked = Program._settings.TrackActiveSession,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(4, 4, 0, 0)
+        };
+        generalBody.Controls.Add(trackActiveInfo);
+        generalBody.Controls.Add(trackActiveCheck);
         generalBody.Controls.Add(autoHideOnFocusCheck);
         generalBody.Controls.Add(notifyOnBellCheck);
         generalBody.Controls.Add(pinnedOrderRow);
@@ -699,26 +718,6 @@ internal sealed class SettingsForm : Form
             Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
         };
 
-        var trackActiveCheck = new CheckBox
-        {
-            Text = "Track active session from focused window",
-            Checked = Program._settings.TrackActiveSession,
-            AutoSize = true,
-            Dock = DockStyle.Top,
-            Padding = new Padding(4, 8, 0, 0)
-        };
-        var trackActiveInfo = new Label
-        {
-            Text = "When enabled, focusing a tracked window (IDE, Terminal, Edge) selects the session in the grid and switches tabs.",
-            Dock = DockStyle.Top,
-            Height = 20,
-            Padding = new Padding(24, 0, 0, 4),
-            ForeColor = SystemColors.GrayText,
-            Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
-        };
-
-        githubBody.Controls.Add(trackActiveInfo);
-        githubBody.Controls.Add(trackActiveCheck);
         githubBody.Controls.Add(openInEdgeInfo);
         githubBody.Controls.Add(openInEdgeCheck);
 

@@ -169,9 +169,6 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when user selects "Remove" for a tracked item. Args: sessionId, type, number.</summary>
     internal event Action<string, string, int>? OnRemoveGitHubItem;
 
-    /// <summary>Fired when a window is pinned to a session via drag-drop. Args: sessionId, hwnd, title.</summary>
-    internal event Action<string, IntPtr, string>? OnWindowPinned;
-
     /// <summary>
     /// Callback to determine git-root visibility for context menu.
     /// Returns (hasGitRoot, isSubfolder).
