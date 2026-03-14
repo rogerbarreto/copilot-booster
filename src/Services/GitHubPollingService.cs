@@ -56,6 +56,40 @@ internal class GitHubPollingService : IDisposable
         this._timer?.Dispose();
     }
 
+    /// <summary>
+    /// Triggers an immediate poll for a specific session (e.g., after adding a PR/Issue).
+    /// </summary>
+    internal void PollSessionNow(string sessionId)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var data = GitHubTrackingService.Load(sessionId);
+                if (data == null || data.Items.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var item in data.Items.ToList())
+                {
+                    if (item.IsPr)
+                    {
+                        await this.PollPrAsync(sessionId, data.Owner, data.Repo, item).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await this.PollIssueAsync(sessionId, data.Owner, data.Repo, item).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.Logger.LogDebug("Immediate poll error for {Session}: {Error}", sessionId, ex.Message);
+            }
+        });
+    }
+
     private async Task PollAsync()
     {
         if (this._polling)

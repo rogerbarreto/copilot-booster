@@ -244,6 +244,20 @@ internal class SessionGridVisuals
                 return;
             }
 
+            // GitHub column — draw PR/Issue icons with state colors and overlays
+            if (this._grid.Columns[e.ColumnIndex].Name == "GitHub")
+            {
+                e.PaintBackground(e.ClipBounds, true);
+                var githubValue = e.Value as string;
+                if (!string.IsNullOrEmpty(githubValue) && e.RowIndex >= 0
+                    && this._grid.Rows[e.RowIndex].Tag is string sessionId)
+                {
+                    this.PaintGitHubIcons(e, sessionId);
+                }
+                e.Handled = true;
+                return;
+            }
+
             // CWD column — truncate text and draw git/warning icon
             if (this._grid.Columns[e.ColumnIndex].Name == "CWD")
             {
@@ -794,6 +808,82 @@ internal class SessionGridVisuals
 
             e.Graphics!.DrawImage(icon, ix, iy, icon.Width, icon.Height);
             ix += icon.Width + Spacing;
+        }
+    }
+
+    private void PaintGitHubIcons(DataGridViewCellPaintingEventArgs e, string sessionId)
+    {
+        var data = GitHubTrackingService.Load(sessionId);
+        if (data == null || data.Items.Count == 0)
+        {
+            return;
+        }
+
+        const int IconSize = 16;
+        const int Spacing = 4;
+        const int OverlaySize = 10;
+
+        int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
+        int ix = e.CellBounds.X + ((e.CellBounds.Width - totalWidth) / 2);
+        int iy = e.CellBounds.Y + ((e.CellBounds.Height - IconSize) / 2);
+
+        foreach (var item in data.Items)
+        {
+            Bitmap icon;
+            if (item.IsPr)
+            {
+                icon = GitHubIconRenderer.GetPrIcon(item.State, item.Draft, IconSize);
+            }
+            else
+            {
+                icon = GitHubIconRenderer.GetIssueIcon(item.State, IconSize);
+            }
+
+            e.Graphics!.DrawImage(icon, ix, iy, IconSize, IconSize);
+
+            // PR overlays: CI failures (✗) or approvals (✓)
+            if (item.IsPr)
+            {
+                if (item.Checks == "failure")
+                {
+                    var xIcon = GitHubIconRenderer.GetXIcon(OverlaySize);
+                    e.Graphics.DrawImage(xIcon, ix + IconSize - OverlaySize + 2, iy - 2, OverlaySize, OverlaySize);
+                }
+                else if (item.Approvals > 0)
+                {
+                    var checkIcon = GitHubIconRenderer.GetCheckIcon(OverlaySize);
+                    e.Graphics.DrawImage(checkIcon, ix + IconSize - OverlaySize + 2, iy - 2, OverlaySize, OverlaySize);
+
+                    using var approvalFont = new Font(this._grid.Font.FontFamily, 6f, FontStyle.Bold);
+                    TextRenderer.DrawText(e.Graphics, item.Approvals.ToString(), approvalFont,
+                        new Point(ix + IconSize - 3, iy + IconSize - 10),
+                        GitHubIconRenderer.CheckGreen);
+                }
+            }
+
+            // Red notification dot for new activity
+            if (item.HasNewActivity)
+            {
+                GitHubIconRenderer.DrawNotificationDot(e.Graphics!, ix, iy, IconSize);
+            }
+
+            // Tooltip
+            var cell = this._grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            var prefix = item.IsPr ? "PR" : "Issue";
+            var tooltip = $"{prefix} #{item.Number}: {item.Title}\nState: {item.State}";
+            if (item.IsPr && item.Approvals > 0)
+            {
+                tooltip += $"\nApprovals: {item.Approvals} ({string.Join(", ", item.Approvers)})";
+            }
+
+            if (item.IsPr && !string.IsNullOrEmpty(item.Checks))
+            {
+                tooltip += $"\nCI: {item.Checks}";
+            }
+
+            cell.ToolTipText = tooltip;
+
+            ix += IconSize + Spacing;
         }
     }
 
