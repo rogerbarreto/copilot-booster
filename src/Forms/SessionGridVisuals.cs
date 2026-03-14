@@ -854,10 +854,8 @@ internal class SessionGridVisuals
 
             e.Graphics!.DrawImage(icon, ix, iy, IconSize, IconSize);
 
-            // PR overlays — two positions:
-            // Top-LEFT: Pipeline CI status (❌ red failure, ✓ blue success)
-            // Bottom-RIGHT: Approval count (✓ green with number)
-            if (item.IsPr)
+            // PR overlays — only for open/draft PRs (not merged/closed)
+            if (item.IsPr && !item.IsFinal)
             {
                 // Pipeline CI overlay — top-left of the icon
                 if (item.Checks == "failure")
@@ -871,15 +869,17 @@ internal class SessionGridVisuals
                     e.Graphics.DrawImage(pipelineIcon, ix - 4, iy - 4, OverlaySize, OverlaySize);
                 }
 
-                // Approval overlay — bottom-right of the icon
+                // Approval overlay — green ✓ above the count number, bottom-right
                 if (item.Approvals > 0)
                 {
-                    var approvalIcon = GitHubIconRenderer.GetCheckIcon(OverlaySize - 2);
-                    e.Graphics.DrawImage(approvalIcon, ix + IconSize - OverlaySize + 5, iy + IconSize - OverlaySize + 3, OverlaySize - 2, OverlaySize - 2);
+                    var approvalIcon = GitHubIconRenderer.GetCheckIcon(OverlaySize - 4);
+                    int ax = ix + IconSize - 2;
+                    int ay = iy + 1;
+                    e.Graphics.DrawImage(approvalIcon, ax, ay, OverlaySize - 4, OverlaySize - 4);
 
                     using var approvalFont = new Font(this._grid.Font.FontFamily, 6.5f, FontStyle.Bold);
                     TextRenderer.DrawText(e.Graphics, item.Approvals.ToString(), approvalFont,
-                        new Point(ix + IconSize, iy + IconSize - 11),
+                        new Point(ax, ay + OverlaySize - 5),
                         GitHubIconRenderer.CheckGreen);
                 }
             }
