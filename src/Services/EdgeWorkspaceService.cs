@@ -137,9 +137,7 @@ internal partial class EdgeWorkspaceService
 
                     if (!string.IsNullOrEmpty(initialUrl))
                     {
-                        // Open a new tab first, then navigate to the URL in it
-                        WindowFocusService.SendCtrlT(this.CachedHwnd);
-                        await Task.Delay(300).ConfigureAwait(false);
+                        // Navigate directly — Edge opens the URL in a new tab automatically
                         var edgePath2 = FindEdgePath();
                         if (edgePath2 != null)
                         {
