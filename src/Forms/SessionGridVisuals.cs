@@ -119,6 +119,11 @@ internal class SessionGridVisuals
         // Select the row under the cursor on right-click so context menu targets it
         this._grid.CellMouseDown += (s, e) =>
         {
+            if (this.PinMode)
+            {
+                return;
+            }
+
             if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
             {
                 var row = this._grid.Rows[e.RowIndex];
@@ -134,6 +139,12 @@ internal class SessionGridVisuals
         this._grid.CellMouseClick += (s, e) =>
         {
             if (e.RowIndex < 0)
+            {
+                return;
+            }
+
+            // In pin mode, only the MainForm pin click handler should process clicks
+            if (this.PinMode)
             {
                 return;
             }
@@ -189,6 +200,12 @@ internal class SessionGridVisuals
 
         this._grid.CellMouseMove += (s, e) =>
         {
+            if (this.PinMode)
+            {
+                this._grid.Cursor = Cursors.Cross;
+                return;
+            }
+
             if (e.RowIndex >= 0 && e.ColumnIndex == 4)
             {
                 var contextValue = this._grid.Rows[e.RowIndex].Cells[4].Value as string;

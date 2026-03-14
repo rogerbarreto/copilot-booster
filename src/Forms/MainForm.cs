@@ -651,7 +651,8 @@ internal partial class MainForm : Form
         }
         else
         {
-            menu.Items.Add(new ToolStripMenuItem($"🪟 {title}") { Enabled = false });
+            var displayTitle = title.Length > 60 ? title[..57] + "..." : title;
+            menu.Items.Add(new ToolStripMenuItem($"🪟 {displayTitle}") { Enabled = false, ForeColor = Color.Gray });
             menu.Items.Add(new ToolStripSeparator());
 
             var capturedHwnd = hwnd;
