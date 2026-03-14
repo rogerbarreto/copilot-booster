@@ -244,9 +244,9 @@ internal static class CiInformationForm
         logPanel.Controls.Add(logBox);
         logPanel.Controls.Add(searchBox);
         splitContainer.Panel2.Controls.Add(logPanel);
-        splitContainer.Panel2.Controls.Add(btnPanel);
 
         form.Controls.Add(splitContainer);
+        form.Controls.Add(btnPanel);
 
         if (checks.Count == 0)
         {
