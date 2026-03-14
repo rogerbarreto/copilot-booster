@@ -302,6 +302,66 @@ internal partial class MainForm
             }
         };
 
+        this._sessionsVisuals.OnShowCiJobs += (sid, prNumber) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null)
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                var prDoc = await this._githubApi.GetPullRequestAsync(data.Owner, data.Repo, prNumber);
+                string headSha = "";
+                if (prDoc != null)
+                {
+                    using (prDoc)
+                    {
+                        if (prDoc.RootElement.TryGetProperty("head", out var head)
+                            && head.TryGetProperty("sha", out var sha))
+                        {
+                            headSha = sha.GetString() ?? "";
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(headSha))
+                {
+                    this.BeginInvoke(async () =>
+                    {
+                        await CiInformationForm.ShowAsync(
+                            data.Owner, data.Repo, prNumber, headSha,
+                            sid, this._githubApi, this._activeTracker);
+                    });
+                }
+            });
+        };
+
+        this._sessionsVisuals.OnOpenGitHubItem += (sid, type, number) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null)
+            {
+                return;
+            }
+
+            var url = type == "pr"
+                ? GitHubLinkService.GetPrUrl(data.Owner, data.Repo, number)
+                : GitHubLinkService.GetIssueUrl(data.Owner, data.Repo, number);
+            GitHubLinkService.OpenUrl(url, sid, Program._settings.OpenLinksInEdgeSession, this._activeTracker);
+            GitHubTrackingService.MarkSeen(sid, type, number);
+            this.RequestRefresh(sessionId: sid, trackingChanged: true);
+        };
+
+        this._sessionsVisuals.OnRemoveGitHubItem += (sid, type, number) =>
+        {
+            GitHubTrackingService.RemoveItem(sid, type, number);
+            this.RequestRefresh(sessionId: sid, trackingChanged: true);
+            var prefix = type == "pr" ? "PR" : "Issue";
+            this._toast.Show($"✅ {prefix} #{number} removed from session");
+        };
+
         this._sessionsVisuals.OnOpenEdge += async (sid) =>
         {
             if (this._activeTracker.TryGetEdge(sid, out var existing) && existing.IsOpen)

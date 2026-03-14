@@ -108,6 +108,15 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when user selects "Add Issue..." from context menu. Args: sessionId.</summary>
     internal event Action<string>? OnAddIssue;
 
+    /// <summary>Fired when user selects "Show CI Jobs" for a tracked PR. Args: sessionId, prNumber.</summary>
+    internal event Action<string, int>? OnShowCiJobs;
+
+    /// <summary>Fired when user selects "Open in Edge" for a tracked item. Args: sessionId, type, number.</summary>
+    internal event Action<string, string, int>? OnOpenGitHubItem;
+
+    /// <summary>Fired when user selects "Remove" for a tracked item. Args: sessionId, type, number.</summary>
+    internal event Action<string, string, int>? OnRemoveGitHubItem;
+
     /// <summary>
     /// Callback to determine git-root visibility for context menu.
     /// Returns (hasGitRoot, isSubfolder).
@@ -1043,27 +1052,65 @@ internal class ExistingSessionsVisuals
         // --- GitHub tracking ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
 
-        var menuAddPr = new ToolStripMenuItem("Add PR...");
-        menuAddPr.Click += (s, e) =>
-        {
-            var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
-            {
-                this.OnAddPr?.Invoke(sid);
-            }
-        };
-        gridContextMenu.Items.Add(menuAddPr);
+        var menuGitHub = new ToolStripMenuItem("GitHub");
+        gridContextMenu.Items.Add(menuGitHub);
 
-        var menuAddIssue = new ToolStripMenuItem("Add Issue...");
-        menuAddIssue.Click += (s, e) =>
+        // Populate GitHub submenu dynamically when opening
+        gridContextMenu.Opening += (s, e) =>
         {
+            menuGitHub.DropDownItems.Clear();
+
             var sid = this.GridVisuals.GetSelectedSessionId();
-            if (sid != null)
+            if (sid == null)
             {
-                this.OnAddIssue?.Invoke(sid);
+                return;
+            }
+
+            // Add PR / Add Issue
+            var addPr = new ToolStripMenuItem("Add PR...");
+            addPr.Click += (_, _) => this.OnAddPr?.Invoke(sid);
+            menuGitHub.DropDownItems.Add(addPr);
+
+            var addIssue = new ToolStripMenuItem("Add Issue...");
+            addIssue.Click += (_, _) => this.OnAddIssue?.Invoke(sid);
+            menuGitHub.DropDownItems.Add(addIssue);
+
+            // List tracked items
+            var data = GitHubTrackingService.Load(sid);
+            if (data != null && data.Items.Count > 0)
+            {
+                menuGitHub.DropDownItems.Add(new ToolStripSeparator());
+
+                foreach (var item in data.Items)
+                {
+                    var prefix = item.IsPr ? "PR" : "Issue";
+                    var stateHint = item.State != "open" ? $" ({item.State})" : "";
+                    var itemMenu = new ToolStripMenuItem($"{prefix} #{item.Number}{stateHint} — {item.Title}");
+
+                    if (item.IsPr)
+                    {
+                        var showCi = new ToolStripMenuItem("Show CI Jobs");
+                        var capturedNumber = item.Number;
+                        showCi.Click += (_, _) => this.OnShowCiJobs?.Invoke(sid, capturedNumber);
+                        itemMenu.DropDownItems.Add(showCi);
+                    }
+
+                    var openInBrowser = new ToolStripMenuItem("Open in Browser");
+                    var capturedType = item.Type;
+                    var capturedNum = item.Number;
+                    openInBrowser.Click += (_, _) => this.OnOpenGitHubItem?.Invoke(sid, capturedType, capturedNum);
+                    itemMenu.DropDownItems.Add(openInBrowser);
+
+                    itemMenu.DropDownItems.Add(new ToolStripSeparator());
+
+                    var remove = new ToolStripMenuItem("Remove");
+                    remove.Click += (_, _) => this.OnRemoveGitHubItem?.Invoke(sid, capturedType, capturedNum);
+                    itemMenu.DropDownItems.Add(remove);
+
+                    menuGitHub.DropDownItems.Add(itemMenu);
+                }
             }
         };
-        gridContextMenu.Items.Add(menuAddIssue);
 
         // --- New session operations ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
