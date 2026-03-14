@@ -29,6 +29,12 @@ internal class GitHubPollingService : IDisposable
     /// </summary>
     internal event Action<string>? ItemUpdated;
 
+    /// <summary>
+    /// Fires when a tracked item has new activity (sessionId, type, number, title).
+    /// Used for toast/tray notifications.
+    /// </summary>
+    internal event Action<string, string, int, string>? NewActivityDetected;
+
     internal GitHubPollingService(GitHubApiService api, Func<List<string>> getSessionIds)
     {
         this._api = api;
@@ -291,7 +297,11 @@ internal class GitHubPollingService : IDisposable
                 }
             }
 
-            GitHubTrackingService.UpdateItem(sessionId, updated);
+            if (GitHubTrackingService.UpdateItem(sessionId, updated))
+            {
+                this.NewActivityDetected?.Invoke(sessionId, "pr", item.Number, updated.Title);
+            }
+
             this.ItemUpdated?.Invoke(sessionId);
         }
     }
@@ -336,7 +346,11 @@ internal class GitHubPollingService : IDisposable
                     ? ua.GetString() ?? "" : ""
             };
 
-            GitHubTrackingService.UpdateItem(sessionId, updated);
+            if (GitHubTrackingService.UpdateItem(sessionId, updated))
+            {
+                this.NewActivityDetected?.Invoke(sessionId, "issue", item.Number, updated.Title);
+            }
+
             this.ItemUpdated?.Invoke(sessionId);
         }
     }

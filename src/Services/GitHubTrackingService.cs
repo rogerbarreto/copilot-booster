@@ -114,27 +114,30 @@ internal class GitHubTrackingService
 
     /// <summary>
     /// Updates a tracked item with fresh data from the API.
+    /// Returns true if new activity was detected.
     /// </summary>
-    internal static void UpdateItem(string sessionId, GitHubTrackedItem updated)
+    internal static bool UpdateItem(string sessionId, GitHubTrackedItem updated)
     {
         var data = Load(sessionId);
         if (data == null)
         {
-            return;
+            return false;
         }
 
         var existing = data.Items.FirstOrDefault(i => i.Type == updated.Type && i.Number == updated.Number);
         if (existing == null)
         {
-            return;
+            return false;
         }
 
         // Detect new activity
+        bool newActivity = false;
         if (!string.IsNullOrEmpty(updated.LastModifiedAt)
             && updated.LastModifiedAt != existing.LastModifiedAt
             && !string.IsNullOrEmpty(existing.LastSeenAt))
         {
             existing.HasNewActivity = true;
+            newActivity = true;
         }
 
         existing.State = updated.State;
@@ -150,6 +153,7 @@ internal class GitHubTrackingService
         existing.LastModifiedAt = updated.LastModifiedAt;
 
         Save(sessionId, data);
+        return newActivity;
     }
 
     /// <summary>

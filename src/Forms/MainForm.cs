@@ -904,6 +904,23 @@ internal partial class MainForm : Form
                     this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
                 }
             };
+            this._githubPoller.NewActivityDetected += (sid, type, number, title) =>
+            {
+                var prefix = type == "pr" ? "PR" : "Issue";
+                var session = this._cachedSessions.FirstOrDefault(s => s.Id == sid);
+                var sessionName = session != null
+                    ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                    : sid[..Math.Min(8, sid.Length)];
+
+                var message = $"🔔 {prefix} #{number} has new activity\n{title}";
+
+                if (this.IsHandleCreated)
+                {
+                    this.BeginInvoke(() => this._toast.Show(message));
+                }
+
+                this._trayIcon?.ShowBalloonTip(5000, $"GitHub: {prefix} #{number}", title, ToolTipIcon.Info);
+            };
             this._githubPoller.Start();
 
             this.CheckForMissingAllowedDirs();
