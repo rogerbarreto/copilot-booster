@@ -678,11 +678,10 @@ internal partial class MainForm : Form
         this._pinHwnd = hwnd;
         this._pinTitle = title;
 
-        // Show Copilot Booster
         this.ShowToast();
         this.Activate();
 
-        // Change cursor to crosshair
+        this._sessionsVisuals.GridVisuals.PinMode = true;
         this._sessionsVisuals.SessionGrid.Cursor = Cursors.Cross;
         this._toast.Show($"🎯 Click a session to pin: {title}");
     }
@@ -692,6 +691,7 @@ internal partial class MainForm : Form
         this._pinMode = false;
         this._pinHwnd = IntPtr.Zero;
         this._pinTitle = "";
+        this._sessionsVisuals.GridVisuals.PinMode = false;
         this._sessionsVisuals.SessionGrid.Cursor = Cursors.Default;
     }
 

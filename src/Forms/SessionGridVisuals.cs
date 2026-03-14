@@ -66,6 +66,11 @@ internal class SessionGridVisuals
     internal event Action<string, Point, Rectangle>? OnGitHubColumnClick;
 
     /// <summary>
+    /// When true, the grid cursor is locked to <see cref="Cursors.Cross"/> (pin mode).
+    /// </summary>
+    internal bool PinMode { get; set; }
+
+    /// <summary>
     /// Set to true when the user manually resizes the CWD column, preventing auto-fit from overriding it.
     /// </summary>
     internal bool CwdManuallyResized;
@@ -211,12 +216,12 @@ internal class SessionGridVisuals
                 this.UpdateGitHubTooltip(e.RowIndex, e.ColumnIndex, e.Location, ghSid);
                 return;
             }
-            this._grid.Cursor = Cursors.Default;
+            this._grid.Cursor = this.PinMode ? Cursors.Cross : Cursors.Default;
         };
 
         this._grid.CellMouseLeave += (s, e) =>
         {
-            this._grid.Cursor = Cursors.Default;
+            this._grid.Cursor = this.PinMode ? Cursors.Cross : Cursors.Default;
         };
 
         this._grid.CellPainting += (s, e) =>
