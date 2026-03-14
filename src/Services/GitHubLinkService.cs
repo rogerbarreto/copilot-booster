@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace CopilotBooster.Services;
 
@@ -9,40 +10,67 @@ namespace CopilotBooster.Services;
 internal static class GitHubLinkService
 {
     /// <summary>
-    /// Opens a GitHub URL. If <paramref name="useEdgeSession"/> is true and an Edge workspace
-    /// is active for the session, opens in that workspace. Otherwise opens in the OS default browser.
+    /// Opens a GitHub URL. If Edge session is enabled: opens in running workspace,
+    /// or starts a new workspace and navigates. Falls back to OS default browser.
     /// </summary>
     internal static void OpenUrl(string url, string? sessionId, bool useEdgeSession, ActiveStatusTracker? tracker)
     {
-        // Try opening in the session's Edge workspace if enabled and running
-        if (useEdgeSession && sessionId != null && tracker != null
-            && tracker.TryGetEdge(sessionId, out var ws) && ws.IsOpen)
+        if (useEdgeSession && sessionId != null && tracker != null)
         {
-            // Focus the session's Edge workspace first so the new tab opens in it
-            if (ws.CachedHwnd != IntPtr.Zero)
+            if (tracker.TryGetEdge(sessionId, out var ws) && ws.IsOpen)
             {
-                WindowFocusService.TryFocusWindowHandle(ws.CachedHwnd);
-                WindowFocusService.WaitForForeground(ws.CachedHwnd, 500);
+                // Edge running — focus and navigate
+                NavigateInEdge(url, ws);
+                return;
             }
 
-            var edgePath = EdgeWorkspaceService.FindEdgePath();
-            if (edgePath != null)
+            // Edge not running — start workspace and navigate
+            _ = Task.Factory.StartNew(async () =>
             {
-                try
+                var workspace = SessionInteractionManager.CreateEdgeWorkspace(sessionId);
+                tracker.TrackEdge(sessionId, workspace);
+                if (await workspace.OpenAsync().ConfigureAwait(false))
                 {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = edgePath,
-                        Arguments = $"\"{url}\"",
-                        UseShellExecute = false
-                    });
-                    return;
+                    await Task.Delay(1500).ConfigureAwait(false);
+                    NavigateInEdge(url, workspace);
                 }
-                catch { }
-            }
+            }, System.Threading.CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
+            return;
         }
 
         // Fallback: OS default browser
+        OpenInDefaultBrowser(url);
+    }
+
+    private static void NavigateInEdge(string url, EdgeWorkspaceService ws)
+    {
+        if (ws.CachedHwnd != IntPtr.Zero)
+        {
+            WindowFocusService.TryFocusWindowHandle(ws.CachedHwnd);
+            WindowFocusService.WaitForForeground(ws.CachedHwnd, 500);
+        }
+
+        var edgePath = EdgeWorkspaceService.FindEdgePath();
+        if (edgePath != null)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = edgePath,
+                    Arguments = $"\"{url}\"",
+                    UseShellExecute = false
+                });
+                return;
+            }
+            catch { }
+        }
+
+        OpenInDefaultBrowser(url);
+    }
+
+    private static void OpenInDefaultBrowser(string url)
+    {
         try
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
