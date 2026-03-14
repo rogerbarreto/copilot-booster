@@ -856,7 +856,7 @@ internal class SessionGridVisuals
             }
             else
             {
-                icon = GitHubIconRenderer.GetIssueIcon(item.State, IconSize);
+                icon = GitHubIconRenderer.GetIssueIcon(item.State, item.StateReason, IconSize);
             }
 
             e.Graphics!.DrawImage(icon, ix, iy, IconSize, IconSize);

@@ -278,6 +278,7 @@ internal class GitHubPollingService : IDisposable
                 Type = "issue",
                 Number = item.Number,
                 State = root.GetProperty("state").GetString() ?? "open",
+                StateReason = stateReason,
                 Title = root.GetProperty("title").GetString() ?? "",
                 Author = root.TryGetProperty("user", out var u) && u.TryGetProperty("login", out var l)
                     ? l.GetString() ?? "" : "",

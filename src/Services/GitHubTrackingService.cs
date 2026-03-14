@@ -138,6 +138,7 @@ internal class GitHubTrackingService
         }
 
         existing.State = updated.State;
+        existing.StateReason = updated.StateReason;
         existing.Draft = updated.Draft;
         existing.Title = updated.Title;
         existing.Author = updated.Author;

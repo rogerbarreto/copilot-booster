@@ -48,10 +48,12 @@ internal static class GitHubIconRenderer
     /// <summary>
     /// Gets an Issue icon with the appropriate state color.
     /// </summary>
-    internal static Bitmap GetIssueIcon(string state, int size = 16)
+    internal static Bitmap GetIssueIcon(string state, string? stateReason = null, int size = 16)
     {
-        var color = state == "closed" ? MergedPurple : OpenGreen;
-        var key = $"issue_{state}_{size}";
+        var color = state == "closed"
+            ? (stateReason == "not_planned" ? DraftGray : MergedPurple)
+            : OpenGreen;
+        var key = $"issue_{state}_{stateReason}_{size}";
         if (s_cache.TryGetValue(key, out var cached))
         {
             return cached;

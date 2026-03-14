@@ -196,8 +196,11 @@ internal static class AddIssueForm
                         }
                     }
 
+                    var stateReason = root.TryGetProperty("state_reason", out var srp) && srp.ValueKind != System.Text.Json.JsonValueKind.Null
+                        ? srp.GetString() : null;
+
                     var labelText = labels.Count > 0 ? string.Join(", ", labels) : "(none)";
-                    lblInfo.Text = $"✅ #{issueNum} — {title}\nState: {state}  |  Labels: {labelText}\nAuthor: {author}";
+                    lblInfo.Text = $"✅ #{issueNum} — {title}\nState: {state}{(stateReason != null ? $" ({stateReason})" : "")}  |  Labels: {labelText}\nAuthor: {author}";
                     lblInfo.ForeColor = Color.Green;
                     btnAdd.Enabled = true;
                     validated = true;
@@ -207,6 +210,7 @@ internal static class AddIssueForm
                         Type = "issue",
                         Number = issueNum,
                         State = state,
+                        StateReason = stateReason,
                         Title = title,
                         Author = author,
                         Labels = labels,

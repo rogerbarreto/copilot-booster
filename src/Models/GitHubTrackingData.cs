@@ -50,6 +50,12 @@ internal class GitHubTrackedItem
     public List<string> Labels { get; set; } = [];
 
     /// <summary>
+    /// Issue-only: reason for closing — "completed" or "not_planned".
+    /// </summary>
+    [JsonPropertyName("stateReason")]
+    public string? StateReason { get; set; }
+
+    /// <summary>
     /// PR-only: combined check status — "success", "failure", "pending", or "neutral".
     /// </summary>
     [JsonPropertyName("checks")]
