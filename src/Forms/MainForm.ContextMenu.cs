@@ -261,36 +261,26 @@ internal partial class MainForm
         this._sessionsVisuals.OnAddPr += (sid) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sid);
-            var item = AddPrForm.Show(sid, session?.Cwd, this._githubApi);
-            if (item != null)
+            var (item, owner, repo) = AddPrForm.Show(sid, session?.Cwd, this._githubApi);
+            if (item != null && owner != null && repo != null)
             {
-                var gitRoot = !string.IsNullOrEmpty(session?.Cwd) ? SessionService.FindGitRoot(session!.Cwd) : null;
-                var (owner, repo) = ResolveGitHubRepo(gitRoot);
-                if (owner != null && repo != null)
-                {
-                    GitHubTrackingService.AddItem(sid, owner, repo, item);
-                    this._githubPoller?.PollSessionNow(sid);
-                    this.RequestRefresh(sessionId: sid, trackingChanged: true);
-                    this._toast.Show($"✅ PR #{item.Number} added to session");
-                }
+                GitHubTrackingService.AddItem(sid, owner, repo, item);
+                this._githubPoller?.PollSessionNow(sid);
+                this.RequestRefresh(sessionId: sid, trackingChanged: true);
+                this._toast.Show($"✅ PR #{item.Number} added to session");
             }
         };
 
         this._sessionsVisuals.OnAddIssue += (sid) =>
         {
             var session = this._cachedSessions.Find(x => x.Id == sid);
-            var item = AddIssueForm.Show(sid, session?.Cwd, this._githubApi);
-            if (item != null)
+            var (item, owner, repo) = AddIssueForm.Show(sid, session?.Cwd, this._githubApi);
+            if (item != null && owner != null && repo != null)
             {
-                var gitRoot = !string.IsNullOrEmpty(session?.Cwd) ? SessionService.FindGitRoot(session!.Cwd) : null;
-                var (owner, repo) = ResolveGitHubRepo(gitRoot);
-                if (owner != null && repo != null)
-                {
-                    GitHubTrackingService.AddItem(sid, owner, repo, item);
-                    this._githubPoller?.PollSessionNow(sid);
-                    this.RequestRefresh(sessionId: sid, trackingChanged: true);
-                    this._toast.Show($"✅ Issue #{item.Number} added to session");
-                }
+                GitHubTrackingService.AddItem(sid, owner, repo, item);
+                this._githubPoller?.PollSessionNow(sid);
+                this.RequestRefresh(sessionId: sid, trackingChanged: true);
+                this._toast.Show($"✅ Issue #{item.Number} added to session");
             }
         };
 
@@ -759,28 +749,5 @@ internal partial class MainForm
         {
             this._toast.Show($"✅ Session ID copied: {sid}");
         };
-    }
-
-    private static (string? owner, string? repo) ResolveGitHubRepo(string? gitRoot)
-    {
-        if (gitRoot == null)
-        {
-            return (null, null);
-        }
-
-        foreach (var remote in GitService.GetRemotes(gitRoot))
-        {
-            var url = GitService.GetRemoteUrl(gitRoot, remote);
-            if (url != null)
-            {
-                var parsed = GitService.ParseGitHubOwnerRepo(url);
-                if (parsed.HasValue)
-                {
-                    return parsed.Value;
-                }
-            }
-        }
-
-        return (null, null);
     }
 }

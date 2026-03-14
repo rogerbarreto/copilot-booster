@@ -18,13 +18,13 @@ internal static class AddPrForm
     /// <summary>
     /// Shows the Add PR dialog. Returns the tracked item if added, or null if cancelled.
     /// </summary>
-    internal static GitHubTrackedItem? Show(string sessionId, string? cwd, GitHubApiService api)
+    internal static (GitHubTrackedItem? item, string? owner, string? repo) Show(string sessionId, string? cwd, GitHubApiService api)
     {
         var gitRoot = !string.IsNullOrEmpty(cwd) ? SessionService.FindGitRoot(cwd) : null;
         if (gitRoot == null)
         {
             MessageBox.Show("This session is not in a git repository.", "Add PR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return null;
+            return (null, null, null);
         }
 
         // Build remote → (owner, repo) mapping (only GitHub remotes)
@@ -46,7 +46,7 @@ internal static class AddPrForm
         if (remoteMap.Count == 0)
         {
             MessageBox.Show("Could not detect a GitHub repository from git remotes.", "Add PR", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return null;
+            return (null, null, null);
         }
 
         GitHubTrackedItem? result = null;
@@ -285,6 +285,12 @@ internal static class AddPrForm
         form.AcceptButton = btnAdd;
         form.CancelButton = btnCancel;
 
-        return form.ShowDialog() == DialogResult.OK ? result : null;
+        if (form.ShowDialog() == DialogResult.OK && result != null)
+        {
+            var (selectedOwner, selectedRepo) = GetSelectedRemote();
+            return (result, selectedOwner, selectedRepo);
+        }
+
+        return (null, null, null);
     }
 }
