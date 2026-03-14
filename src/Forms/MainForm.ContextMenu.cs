@@ -551,11 +551,12 @@ internal partial class MainForm
             }
 
             // Determine which icon was clicked based on X position
+            // clickPos is cell-relative (from CellMouseClick event)
             const int IconSize = 16;
             const int Spacing = 4;
             int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
             int startX = (cellBounds.Width - totalWidth) / 2;
-            int relativeX = clickPos.X - cellBounds.X - startX;
+            int relativeX = clickPos.X - startX;
 
             int index = relativeX / (IconSize + Spacing);
             if (index < 0 || index >= data.Items.Count)
