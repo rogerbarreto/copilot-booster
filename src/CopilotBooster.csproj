@@ -10,6 +10,7 @@
     <SelfContained>false</SelfContained>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>CA2007</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CopilotBooster.Tests" />

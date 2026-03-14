@@ -102,6 +102,12 @@ internal class ExistingSessionsVisuals
     /// </summary>
     internal event Action<string, IdeEntry, string>? OnOpenInIdeFile;
 
+    /// <summary>Fired when user selects "Add PR..." from context menu. Args: sessionId.</summary>
+    internal event Action<string>? OnAddPr;
+
+    /// <summary>Fired when user selects "Add Issue..." from context menu. Args: sessionId.</summary>
+    internal event Action<string>? OnAddIssue;
+
     /// <summary>
     /// Callback to determine git-root visibility for context menu.
     /// Returns (hasGitRoot, isSubfolder).
@@ -1033,6 +1039,31 @@ internal class ExistingSessionsVisuals
 
         var menuMoveToTab = new ToolStripMenuItem("Move to") { Image = TryExtractIcon(shell32, 265) };
         gridContextMenu.Items.Add(menuMoveToTab);
+
+        // --- GitHub tracking ---
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
+        var menuAddPr = new ToolStripMenuItem("Add PR...");
+        menuAddPr.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnAddPr?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuAddPr);
+
+        var menuAddIssue = new ToolStripMenuItem("Add Issue...");
+        menuAddIssue.Click += (s, e) =>
+        {
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid != null)
+            {
+                this.OnAddIssue?.Invoke(sid);
+            }
+        };
+        gridContextMenu.Items.Add(menuAddIssue);
 
         // --- New session operations ---
         gridContextMenu.Items.Add(new ToolStripSeparator());

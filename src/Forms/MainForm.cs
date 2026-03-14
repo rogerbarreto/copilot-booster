@@ -42,6 +42,7 @@ internal partial class MainForm : Form
     private readonly SessionContextWatcherService? _contextWatcher;
     private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
+    private readonly GitHubApiService _githubApi;
 
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
@@ -108,6 +109,7 @@ internal partial class MainForm : Form
 
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
+        this._githubApi = new GitHubApiService(() => Program._settings.GitHubToken);
         this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
         this._activeTracker.EventsJournal.StartWatching();
