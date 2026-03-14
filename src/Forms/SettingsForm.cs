@@ -71,7 +71,7 @@ internal sealed class SettingsForm : Form
             Indent = 16
         };
 
-        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "Edge" };
+        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "GitHub" };
         foreach (var name in categoryNames)
         {
             tree.Nodes.Add(name);
@@ -677,30 +677,50 @@ internal sealed class SettingsForm : Form
         toastBody.Controls.Add(toastModeCheck);
 
         // =====================================================================
-        // EDGE
+        // GITHUB
         // =====================================================================
-        var (edgePanel, edgeBody) = this.CreateCategoryPanel("Edge", "Microsoft Edge integration settings.", autoScroll: true, padding: new Padding(8));
+        var (githubPanel, githubBody) = this.CreateCategoryPanel("GitHub", "GitHub integration settings for PR/Issue tracking.", autoScroll: true, padding: new Padding(8));
 
-        var edgeRenameInfo = new Label
+        var openInEdgeCheck = new CheckBox
         {
-            Text = "When enabled, renaming a session will navigate to the Edge anchor tab to update its title.",
+            Text = "Open GitHub links in session Edge browser",
+            Checked = Program._settings.OpenLinksInEdgeSession,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(4, 4, 0, 0)
+        };
+        var openInEdgeInfo = new Label
+        {
+            Text = "When enabled, clicking PR/Issue icons opens in the session's Edge workspace instead of the OS default browser.",
             Dock = DockStyle.Top,
             Height = 20,
             Padding = new Padding(24, 0, 0, 4),
             ForeColor = SystemColors.GrayText,
             Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
         };
-        var edgeRenameCheck = new CheckBox
+
+        var trackActiveCheck = new CheckBox
         {
-            Text = "Update Edge tab on session rename",
-            Checked = Program._settings.UpdateEdgeTabOnRename,
+            Text = "Track active session from focused window",
+            Checked = Program._settings.TrackActiveSession,
             AutoSize = true,
             Dock = DockStyle.Top,
-            Padding = new Padding(4, 4, 0, 0)
+            Padding = new Padding(4, 8, 0, 0)
+        };
+        var trackActiveInfo = new Label
+        {
+            Text = "When enabled, focusing a tracked window (IDE, Terminal, Edge) selects the session in the grid and switches tabs.",
+            Dock = DockStyle.Top,
+            Height = 20,
+            Padding = new Padding(24, 0, 0, 4),
+            ForeColor = SystemColors.GrayText,
+            Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
         };
 
-        edgeBody.Controls.Add(edgeRenameInfo);
-        edgeBody.Controls.Add(edgeRenameCheck);
+        githubBody.Controls.Add(trackActiveInfo);
+        githubBody.Controls.Add(trackActiveCheck);
+        githubBody.Controls.Add(openInEdgeInfo);
+        githubBody.Controls.Add(openInEdgeCheck);
 
         // =====================================================================
         // PANEL MAP & TREE WIRING
@@ -716,7 +736,7 @@ internal sealed class SettingsForm : Form
             ["Git && GitHub"] = gitPanel,
             ["Session Tabs"] = sessionTabsPanel,
             ["Spotlight"] = toastPanel,
-            ["Edge"] = edgePanel
+            ["GitHub"] = githubPanel
         };
 
         foreach (var p in panelMap.Values)
@@ -830,8 +850,9 @@ internal sealed class SettingsForm : Form
                 : $"screen-{toastScreenCombo.SelectedIndex - 1}";
             Program._settings.ToastAnimate = toastAnimateCheck.Checked;
 
-            // Edge
-            Program._settings.UpdateEdgeTabOnRename = edgeRenameCheck.Checked;
+            // GitHub
+            Program._settings.OpenLinksInEdgeSession = openInEdgeCheck.Checked;
+            Program._settings.TrackActiveSession = trackActiveCheck.Checked;
 
             // Persist
             Program._settings.Save();

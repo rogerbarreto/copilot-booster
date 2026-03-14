@@ -846,16 +846,13 @@ internal partial class MainForm : Form
         this._windowHookService.ForegroundChanged += hwnd =>
         {
             // When a window gains focus, try to capture its HWND for tracked processes (IDEs).
-            // This catches IDE windows that weren't visible when EVENT_OBJECT_CREATE fired.
             var sessionId = this._activeTracker.OnWindowCreated(hwnd);
             if (sessionId != null)
             {
                 this.RequestRefresh(sessionId: sessionId, trackingChanged: true);
             }
 
-            // Also check title for Terminal/Copilot CLI patterns.
-            // This catches Windows Terminal windows where EVENT_OBJECT_NAMECHANGE
-            // doesn't fire on the top-level HWND when a new tab with --suppressApplicationTitle opens.
+            // Check title for Terminal/Copilot CLI patterns.
             var title = WindowFocusService.GetWindowTitle(hwnd);
             if (!string.IsNullOrEmpty(title))
             {
@@ -863,6 +860,19 @@ internal partial class MainForm : Form
                 foreach (var id in affected)
                 {
                     this.RequestRefresh(sessionId: id, trackingChanged: true);
+                }
+            }
+
+            // Track active session: select the session row when its window gains focus
+            if (Program._settings.TrackActiveSession && this.IsHandleCreated)
+            {
+                var focusedSession = sessionId ?? this._activeTracker.ResolveSessionForHwnd(hwnd);
+                if (focusedSession != null)
+                {
+                    this.BeginInvoke(() =>
+                    {
+                        this._sessionsVisuals.SelectSessionById(focusedSession, this._cachedSessions);
+                    });
                 }
             }
         };

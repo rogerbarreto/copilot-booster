@@ -13,20 +13,33 @@ internal static class GitHubLinkService
     /// </summary>
     internal static void OpenUrl(string url, string? sessionId, bool useEdgeSession, ActiveStatusTracker? tracker)
     {
-        // TODO: When useEdgeSession is true and an Edge workspace is active,
-        // open in that workspace. For now, always open in OS default browser.
-        _ = sessionId;
-        _ = useEdgeSession;
-        _ = tracker;
+        // Try opening in the session's Edge workspace if enabled and available
+        if (useEdgeSession && sessionId != null && tracker != null
+            && tracker.TryGetEdge(sessionId, out var ws) && ws.IsOpen)
+        {
+            var edgePath = EdgeWorkspaceService.FindEdgePath();
+            if (edgePath != null)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = edgePath,
+                        Arguments = $"\"{url}\"",
+                        UseShellExecute = false
+                    });
+                    return;
+                }
+                catch { }
+            }
+        }
 
+        // Fallback: OS default browser
         try
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
-        catch
-        {
-            // Ignore errors opening URL
-        }
+        catch { }
     }
 
     /// <summary>

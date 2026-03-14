@@ -91,6 +91,53 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
+    /// Resolves which session owns the given window HWND by checking all tracking collections.
+    /// Returns the session ID or null if the window is not tracked.
+    /// </summary>
+    internal string? ResolveSessionForHwnd(IntPtr hwnd)
+    {
+        int pid = WindowFocusService.GetWindowProcessId(hwnd);
+
+        // Check tracked windows (Terminal, Copilot CLI)
+        foreach (var kvp in this._activeTrackedWindows)
+        {
+            if (kvp.Value.Any(t => t.Hwnd == hwnd))
+            {
+                return kvp.Key;
+            }
+        }
+
+        // Check tracked processes (IDEs)
+        foreach (var kvp in this._trackedProcesses)
+        {
+            if (kvp.Value.Any(p => p.Hwnd == hwnd || (p.Pid > 0 && p.Pid == pid)))
+            {
+                return kvp.Key;
+            }
+        }
+
+        // Check Edge workspaces
+        foreach (var kvp in this._edgeWorkspaces)
+        {
+            if (kvp.Value.CachedHwnd == hwnd)
+            {
+                return kvp.Key;
+            }
+        }
+
+        // Check Explorer windows
+        foreach (var kvp in this._explorerWindows)
+        {
+            if (kvp.Value.Any(e => e.Hwnd == hwnd))
+            {
+                return kvp.Key;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Reloads <see cref="_activeSessionIds"/> from the PID registry so that the
     /// PID-based fallback in <see cref="BuildActiveText"/> is current during
     /// incremental refreshes (which otherwise skip this reload).

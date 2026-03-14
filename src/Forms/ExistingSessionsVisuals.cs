@@ -52,6 +52,58 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when the user double-clicks a session row. Arg = session id.</summary>
     internal event Action<string>? OnSessionDoubleClicked;
 
+    /// <summary>
+    /// Selects a session row by ID. If the session is on a different tab, switches to that tab first.
+    /// Returns true if the session was found and selected.
+    /// </summary>
+    internal bool SelectSessionById(string sessionId, List<NamedSession> allSessions)
+    {
+        // Check if session is on current tab
+        for (int i = 0; i < this.SessionGrid.Rows.Count; i++)
+        {
+            if (this.SessionGrid.Rows[i].Tag is string sid && string.Equals(sid, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                this.GridVisuals.SelectRowByIndex(i);
+                return true;
+            }
+        }
+
+        // Session not on current tab — find its tab and switch
+        var session = allSessions.FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (session == null)
+        {
+            return false;
+        }
+
+        var targetTab = session.Tab;
+        if (string.Equals(targetTab, this.SelectedTabName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false; // Same tab but not visible (filtered out by search?)
+        }
+
+        // Switch tab
+        foreach (TabPage page in this.SessionTabs.TabPages)
+        {
+            if (string.Equals(page.Tag as string, targetTab, StringComparison.OrdinalIgnoreCase))
+            {
+                this.SessionTabs.SelectedTab = page;
+                break;
+            }
+        }
+
+        // After tab switch, the grid will be repopulated — try selecting again
+        for (int i = 0; i < this.SessionGrid.Rows.Count; i++)
+        {
+            if (this.SessionGrid.Rows[i].Tag is string sid2 && string.Equals(sid2, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                this.GridVisuals.SelectRowByIndex(i);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Fired when the user filters sessions via the search box.</summary>
     internal event Action? OnSearchChanged;
 

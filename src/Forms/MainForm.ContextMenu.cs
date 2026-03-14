@@ -42,14 +42,6 @@ internal partial class MainForm
             {
                 SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
 
-                // Update Edge tab title if workspace is open and setting is enabled
-                if (Program._settings.UpdateEdgeTabOnRename
-                    && this._activeTracker.TryGetEdge(sid, out var edgeWs) && edgeWs.IsOpen)
-                {
-                    var displayName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
-                    edgeWs.UpdateSessionName(displayName);
-                }
-
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
                 SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd);
 
