@@ -204,6 +204,13 @@ internal class SessionGridVisuals
                     return;
                 }
             }
+            if (e.RowIndex >= 0 && this._grid.Columns[e.ColumnIndex].Name == "GitHub"
+                && this._grid.Rows[e.RowIndex].Tag is string ghSid)
+            {
+                this._grid.Cursor = Cursors.Hand;
+                this.UpdateGitHubTooltip(e.RowIndex, e.ColumnIndex, e.Location, ghSid);
+                return;
+            }
             this._grid.Cursor = Cursors.Default;
         };
 
@@ -890,24 +897,51 @@ internal class SessionGridVisuals
                 GitHubIconRenderer.DrawNotificationDot(e.Graphics!, ix, iy, IconSize);
             }
 
-            // Tooltip
-            var cell = this._grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
-            var prefix = item.IsPr ? "PR" : "Issue";
-            var tooltip = $"{prefix} #{item.Number}: {item.Title}\nState: {item.State}";
-            if (item.IsPr && item.Approvals > 0)
-            {
-                tooltip += $"\nApprovals: {item.Approvals} ({string.Join(", ", item.Approvers)})";
-            }
-
-            if (item.IsPr && !string.IsNullOrEmpty(item.Checks))
-            {
-                tooltip += $"\nCI: {item.Checks}";
-            }
-
-            cell.ToolTipText = tooltip;
-
             ix += IconSize + Spacing;
         }
+    }
+
+    private void UpdateGitHubTooltip(int rowIndex, int colIndex, Point mousePos, string sessionId)
+    {
+        var data = GitHubTrackingService.Load(sessionId);
+        if (data == null || data.Items.Count == 0)
+        {
+            return;
+        }
+
+        const int IconSize = 16;
+        const int Spacing = 4;
+        var cellBounds = this._grid.GetCellDisplayRectangle(colIndex, rowIndex, false);
+        int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
+        int startX = (cellBounds.Width - totalWidth) / 2;
+        int relativeX = mousePos.X - startX;
+
+        int index = relativeX / (IconSize + Spacing);
+        if (index < 0 || index >= data.Items.Count)
+        {
+            this._grid.Rows[rowIndex].Cells[colIndex].ToolTipText = "";
+            return;
+        }
+
+        var item = data.Items[index];
+        var prefix = item.IsPr ? "PR" : "Issue";
+        var tooltip = $"{prefix} #{item.Number}: {item.Title}\nState: {item.State}";
+        if (item.IsPr && item.Approvals > 0)
+        {
+            tooltip += $"\nApprovals: {item.Approvals} ({string.Join(", ", item.Approvers)})";
+        }
+
+        if (item.IsPr && !string.IsNullOrEmpty(item.Checks))
+        {
+            tooltip += $"\nCI: {item.Checks}";
+        }
+
+        if (!string.IsNullOrEmpty(item.Author))
+        {
+            tooltip += $"\nAuthor: {item.Author}";
+        }
+
+        this._grid.Rows[rowIndex].Cells[colIndex].ToolTipText = tooltip;
     }
 
     /// <summary>
