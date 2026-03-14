@@ -70,6 +70,7 @@ public sealed class SingleProcessIdeTrackingTests : IDisposable
         grid.Columns.Add("LastModified", "");
         grid.Columns.Add("Context", "");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
         return grid;
     }
 

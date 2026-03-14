@@ -56,6 +56,11 @@ internal class SessionGridVisuals
     internal Func<string, (int Files, int Tabs)>? GetContextCounts;
 
     /// <summary>
+    /// Callback to get the GitHub tracking display value for a session (serialized item summary).
+    /// </summary>
+    internal Func<string, string>? GetGitHubValue;
+
+    /// <summary>
     /// Set to true when the user manually resizes the CWD column, preventing auto-fit from overriding it.
     /// </summary>
     internal bool CwdManuallyResized;
@@ -419,7 +424,10 @@ internal class SessionGridVisuals
                 var (fileCount, tabCount) = this.GetContextCounts?.Invoke(session.Id) ?? (0, 0);
                 var contextValue = BuildContextValue(fileCount, tabCount);
 
-                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, contextValue, activeText);
+                // Build GitHub tracking indicator
+                var githubValue = this.GetGitHubValue?.Invoke(session.Id) ?? "";
+
+                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, contextValue, activeText, githubValue);
                 var row = this._grid.Rows[rowIndex];
                 row.Tag = session.Id;
 
@@ -635,6 +643,14 @@ internal class SessionGridVisuals
                 row.Cells[4].ToolTipText = string.IsNullOrEmpty(newContextValue)
                     ? ""
                     : BuildContextTooltip(fileCount, tabCount);
+            }
+
+            // Update GitHub column if changed
+            var newGitHub = this.GetGitHubValue?.Invoke(sessionId) ?? "";
+            var currentGitHub = row.Cells[6].Value?.ToString() ?? "";
+            if (currentGitHub != newGitHub)
+            {
+                row.Cells[6].Value = newGitHub;
             }
         }
     }

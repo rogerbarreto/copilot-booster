@@ -215,6 +215,20 @@ internal class LauncherSettings
     public string? LogLevel { get; set; }
 
     /// <summary>
+    /// Gets or sets the GitHub Personal Access Token (stored encrypted via DPAPI).
+    /// Used as fallback when <c>gh auth token</c> is unavailable and unauthenticated API is rate-limited.
+    /// </summary>
+    [JsonPropertyName("githubToken")]
+    public string? GitHubToken { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to open GitHub links (PRs, Issues, CI runs) in the session's
+    /// Edge workspace browser instead of the OS default browser.
+    /// </summary>
+    [JsonPropertyName("openLinksInEdgeSession")]
+    public bool OpenLinksInEdgeSession { get; set; } = true;
+
+    /// <summary>
     /// Loads the launcher settings from the default settings file.
     /// </summary>
     /// <returns>The deserialized <see cref="LauncherSettings"/> instance.</returns>

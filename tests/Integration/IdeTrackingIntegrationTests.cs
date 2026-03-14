@@ -59,6 +59,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Context", "Context");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
         return grid;
     }
 

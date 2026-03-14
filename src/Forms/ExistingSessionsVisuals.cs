@@ -294,13 +294,26 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["RunningApps"]!.Width = 110;
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
         this.SessionGrid.Columns["RunningApps"]!.Resizable = DataGridViewTriState.False;
+        var githubCol = new DataGridViewTextBoxColumn
+        {
+            Name = "GitHub",
+            HeaderText = "GitHub",
+            ToolTipText = "Tracked PRs and Issues",
+            Width = 80,
+            MinimumWidth = 50,
+            Resizable = DataGridViewTriState.False,
+            SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter }
+        };
+        githubCol.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        this.SessionGrid.Columns.Add(githubCol);
 
         // Restore saved column display order
         var savedOrder = this._settings.SessionColumnOrder;
         if (savedOrder.Count > 0)
         {
             // Default column order (non-frozen) for inserting new columns at correct positions
-            var defaultOrder = new List<string> { "Session", "CWD", "Date", "Context", "RunningApps" };
+            var defaultOrder = new List<string> { "Session", "CWD", "Date", "Context", "RunningApps", "GitHub" };
 
             // Build full order: start from saved, insert missing columns at their default position
             var fullOrder = new List<string>(savedOrder);
@@ -413,6 +426,7 @@ internal class ExistingSessionsVisuals
                     + this.SessionGrid.Columns["Date"]!.Width
                     + ctxCol.Width
                     + this.SessionGrid.Columns["RunningApps"]!.Width
+                    + this.SessionGrid.Columns["GitHub"]!.Width
                     + (this.SessionGrid.RowHeadersVisible ? this.SessionGrid.RowHeadersWidth : 0)
                     + SystemInformation.VerticalScrollBarWidth + 2;
                 var fill = this.SessionGrid.ClientSize.Width - otherWidth;

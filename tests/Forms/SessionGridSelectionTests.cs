@@ -46,6 +46,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         var tracker = new ActiveStatusTracker();
         var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
@@ -102,6 +103,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         var tracker = new ActiveStatusTracker();
         var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
@@ -146,6 +148,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         form.Controls.Add(grid);
         form.Show();
@@ -209,6 +212,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         form.Controls.Add(grid);
         form.Show();
@@ -271,6 +275,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         form.Controls.Add(grid);
         form.Show();
@@ -321,6 +326,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         var tracker = new ActiveStatusTracker();
         var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
@@ -348,6 +354,7 @@
         grid.Columns.Add("CWD", "CWD");
         grid.Columns.Add("LastModified", "LastModified");
         grid.Columns.Add("Active", "Active");
+        grid.Columns.Add("GitHub", "GitHub");
 
         var tracker = new ActiveStatusTracker();
         var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
