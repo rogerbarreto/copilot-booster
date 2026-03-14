@@ -45,6 +45,11 @@ internal partial class MainForm : Form
     private readonly GitHubApiService _githubApi;
     private GitHubPollingService? _githubPoller;
 
+    // Window pin mode state
+    private bool _pinMode;
+    private IntPtr _pinHwnd;
+    private string _pinTitle = "";
+
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
 
@@ -594,7 +599,6 @@ internal partial class MainForm : Form
             return;
         }
 
-        // Get cursor position and find the window under it
         if (!GetCursorPos(out var cursorPos))
         {
             return;
@@ -606,14 +610,12 @@ internal partial class MainForm : Form
             return;
         }
 
-        // Get the top-level window
         var rootHwnd = GetAncestor(hwnd, GA_ROOT);
         if (rootHwnd != IntPtr.Zero)
         {
             hwnd = rootHwnd;
         }
 
-        // Skip our own window
         if (hwnd == this.Handle)
         {
             return;
@@ -625,10 +627,7 @@ internal partial class MainForm : Form
             return;
         }
 
-        // Check if window is already tracked
         var existingSession = this._activeTracker.ResolveSessionForHwnd(hwnd);
-
-        // Build and show context menu at cursor position
         var menu = new ContextMenuStrip();
 
         if (existingSession != null)
@@ -638,8 +637,7 @@ internal partial class MainForm : Form
                 ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
                 : existingSession[..Math.Min(8, existingSession.Length)];
 
-            var headerItem = new ToolStripMenuItem($"📌 Pinned to: {sessionName}") { Enabled = false };
-            menu.Items.Add(headerItem);
+            menu.Items.Add(new ToolStripMenuItem($"📌 Pinned to: {sessionName}") { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
 
             var detachItem = new ToolStripMenuItem("Detach from Session");
@@ -647,44 +645,54 @@ internal partial class MainForm : Form
             {
                 this._activeTracker.DetachWindow(existingSession, hwnd);
                 this.RequestRefresh(sessionId: existingSession, trackingChanged: true);
-                this._toast.Show($"✅ Window detached from session");
+                this._toast.Show("✅ Window detached from session");
             };
             menu.Items.Add(detachItem);
         }
         else
         {
-            var titleItem = new ToolStripMenuItem($"🪟 {title}") { Enabled = false };
-            menu.Items.Add(titleItem);
+            menu.Items.Add(new ToolStripMenuItem($"🪟 {title}") { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
 
-            var pinItem = new ToolStripMenuItem("Pin to Session (drag to grid)...");
             var capturedHwnd = hwnd;
             var capturedTitle = title;
+            var pinItem = new ToolStripMenuItem("Pin to Session...");
             pinItem.Click += (s, e) =>
             {
-                // Show Copilot Booster and start drag
-                this.ShowToast();
-                this.Activate();
-
-                // Small delay to let the form appear before starting drag
-                var dragTimer = new System.Windows.Forms.Timer { Interval = 200 };
-                dragTimer.Tick += (s2, e2) =>
-                {
-                    dragTimer.Stop();
-                    dragTimer.Dispose();
-
-                    var data = new DataObject();
-                    data.SetData("WindowPin_Hwnd", capturedHwnd);
-                    data.SetData("WindowPin_Title", capturedTitle);
-
-                    this._sessionsVisuals.SessionGrid.DoDragDrop(data, DragDropEffects.Link);
-                };
-                dragTimer.Start();
+                this.EnterPinMode(capturedHwnd, capturedTitle);
             };
             menu.Items.Add(pinItem);
         }
 
+        menu.Items.Add(new ToolStripSeparator());
+        var cancelItem = new ToolStripMenuItem("Cancel");
+        cancelItem.Click += (s, e) => menu.Close();
+        menu.Items.Add(cancelItem);
+
         menu.Show(cursorPos);
+    }
+
+    private void EnterPinMode(IntPtr hwnd, string title)
+    {
+        this._pinMode = true;
+        this._pinHwnd = hwnd;
+        this._pinTitle = title;
+
+        // Show Copilot Booster
+        this.ShowToast();
+        this.Activate();
+
+        // Change cursor to crosshair
+        this._sessionsVisuals.SessionGrid.Cursor = Cursors.Cross;
+        this._toast.Show($"🎯 Click a session to pin: {title}");
+    }
+
+    private void ExitPinMode()
+    {
+        this._pinMode = false;
+        this._pinHwnd = IntPtr.Zero;
+        this._pinTitle = "";
+        this._sessionsVisuals.SessionGrid.Cursor = Cursors.Default;
     }
 
     private void OnToastDeactivate(object? sender, EventArgs e)
@@ -847,6 +855,52 @@ internal partial class MainForm : Form
         };
 
         this.WireContextMenuEvents();
+
+        // Pin mode: intercept grid clicks to pin a window to the clicked session
+        this._sessionsVisuals.SessionGrid.CellMouseClick += (s, e) =>
+        {
+            if (!this._pinMode || e.RowIndex < 0 || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var sessionId = this._sessionsVisuals.SessionGrid.Rows[e.RowIndex].Tag as string;
+            if (sessionId == null)
+            {
+                return;
+            }
+
+            var session = this._cachedSessions.FirstOrDefault(x => x.Id == sessionId);
+            var sessionName = session != null
+                ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                : sessionId[..Math.Min(8, sessionId.Length)];
+
+            var label = this._pinTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "Window";
+            var result = MessageBox.Show(
+                $"Pin \"{label}\" to session \"{sessionName}\"?",
+                "Pin Window to Session",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                var proc = new ActiveProcess(label, 0, null) { Hwnd = this._pinHwnd, HwndEverCaptured = true };
+                this._activeTracker.TrackProcess(sessionId, proc);
+                this.RequestRefresh(sessionId: sessionId, trackingChanged: true);
+                this._toast.Show($"📌 {label} pinned to session");
+                this.ExitPinMode();
+            }
+        };
+
+        // Esc cancels pin mode
+        this._sessionsVisuals.SessionGrid.KeyDown += (s, e) =>
+        {
+            if (this._pinMode && e.KeyCode == Keys.Escape)
+            {
+                this.ExitPinMode();
+                this._toast.Show("Pin cancelled");
+            }
+        };
     }
 
     private void BuildAndShowSettingsDialog()
