@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Threading.Tasks;
 
 namespace CopilotBooster.Services;
 
@@ -15,60 +14,31 @@ internal static class GitHubLinkService
     /// </summary>
     internal static void OpenUrl(string url, string? sessionId, bool useEdgeSession, ActiveStatusTracker? tracker)
     {
-        if (useEdgeSession && sessionId != null && tracker != null)
+        // Try opening in the session's Edge workspace if enabled and running
+        if (useEdgeSession && sessionId != null && tracker != null
+            && tracker.TryGetEdge(sessionId, out var ws) && ws.IsOpen)
         {
-            if (tracker.TryGetEdge(sessionId, out var ws) && ws.IsOpen)
+            // Focus the session's Edge workspace first so the new tab opens in it
+            if (ws.CachedHwnd != IntPtr.Zero)
             {
-                // Focus the session's Edge workspace first so the new tab opens in it
-                if (ws.CachedHwnd != IntPtr.Zero)
-                {
-                    WindowFocusService.TryFocusWindowHandle(ws.CachedHwnd);
-                    WindowFocusService.WaitForForeground(ws.CachedHwnd, 500);
-                }
-
-                var edgePath = EdgeWorkspaceService.FindEdgePath();
-                if (edgePath != null)
-                {
-                    try
-                    {
-                        Process.Start(new ProcessStartInfo
-                        {
-                            FileName = edgePath,
-                            Arguments = $"\"{url}\"",
-                            UseShellExecute = false
-                        });
-                        return;
-                    }
-                    catch { }
-                }
+                WindowFocusService.TryFocusWindowHandle(ws.CachedHwnd);
+                WindowFocusService.WaitForForeground(ws.CachedHwnd, 500);
             }
-            else
-            {
-                // No Edge workspace running — start one and navigate to the URL
-                _ = Task.Run(async () =>
-                {
-                    if (await ws.OpenAsync().ConfigureAwait(false))
-                    {
-                        // Wait a moment for the workspace to fully load
-                        await Task.Delay(1500).ConfigureAwait(false);
 
-                        var edgePath = EdgeWorkspaceService.FindEdgePath();
-                        if (edgePath != null)
-                        {
-                            try
-                            {
-                                Process.Start(new ProcessStartInfo
-                                {
-                                    FileName = edgePath,
-                                    Arguments = $"\"{url}\"",
-                                    UseShellExecute = false
-                                });
-                            }
-                            catch { }
-                        }
-                    }
-                });
-                return;
+            var edgePath = EdgeWorkspaceService.FindEdgePath();
+            if (edgePath != null)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = edgePath,
+                        Arguments = $"\"{url}\"",
+                        UseShellExecute = false
+                    });
+                    return;
+                }
+                catch { }
             }
         }
 
