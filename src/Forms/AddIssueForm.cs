@@ -158,6 +158,17 @@ internal static class AddIssueForm
                 return;
             }
 
+            // Check for duplicate
+            var existing = GitHubTrackingService.Load(sessionId);
+            if (existing?.Items.Any(i => i.Type == "issue" && i.Number == issueNum) == true)
+            {
+                lblInfo.Text = $"⚠ Issue #{issueNum} is already tracked in this session.";
+                lblInfo.ForeColor = Color.OrangeRed;
+                btnAdd.Enabled = false;
+                validated = false;
+                return;
+            }
+
             lblInfo.Text = "Checking...";
             lblInfo.ForeColor = Color.Gray;
             btnAdd.Enabled = false;
@@ -218,6 +229,14 @@ internal static class AddIssueForm
             if (e.KeyCode == Keys.Enter)
             {
                 e.SuppressKeyPress = true;
+                await ValidateAsync();
+            }
+        };
+
+        txtIssue.Leave += async (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(txtIssue.Text) && !validated)
+            {
                 await ValidateAsync();
             }
         };

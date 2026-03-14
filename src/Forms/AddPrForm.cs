@@ -170,6 +170,17 @@ internal static class AddPrForm
                 return;
             }
 
+            // Check for duplicate
+            var existing = GitHubTrackingService.Load(sessionId);
+            if (existing?.Items.Any(i => i.Type == "pr" && i.Number == prNum) == true)
+            {
+                lblInfo.Text = $"⚠ PR #{prNum} is already tracked in this session.";
+                lblInfo.ForeColor = Color.OrangeRed;
+                btnAdd.Enabled = false;
+                validated = false;
+                return;
+            }
+
             lblInfo.Text = "Checking...";
             lblInfo.ForeColor = Color.Gray;
             btnAdd.Enabled = false;
@@ -227,13 +238,16 @@ internal static class AddPrForm
             }
         };
 
+        txtPr.Leave += async (s, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(txtPr.Text) && !validated)
+            {
+                await ValidateAsync();
+            }
+        };
+
         btnDiscover.Click += async (s, e) =>
         {
-            var (owner, repo) = GetSelectedRemote();
-            lblInfo.Text = "Discovering PR for current branch...";
-            lblInfo.ForeColor = Color.Gray;
-            btnAdd.Enabled = false;
-
             var (discOwner, discRepo) = GetSelectedRemote();
             var branch = GitService.GetCurrentBranch(gitRoot);
 
