@@ -43,6 +43,7 @@ internal partial class MainForm : Form
     private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly GitHubApiService _githubApi;
+    private GitHubPollingService? _githubPoller;
 
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
@@ -690,6 +691,7 @@ internal partial class MainForm : Form
         this._activeTracker.EventsJournal.Dispose();
         this._workspaceWatcher?.Dispose();
         this._contextWatcher?.Dispose();
+        this._githubPoller?.Dispose();
         this._activeTracker.SaveWindowHandleCache();
 
         base.OnFormClosing(e);
@@ -891,6 +893,18 @@ internal partial class MainForm : Form
             // Start event-driven refresh after initial data is loaded
             this._windowHookService?.Start();
             this._fullRefreshTimer?.Start();
+
+            // Start GitHub polling
+            this._githubPoller = new GitHubPollingService(this._githubApi,
+                () => this._cachedSessions.Select(s => s.Id).ToList());
+            this._githubPoller.ItemUpdated += sid =>
+            {
+                if (this.IsHandleCreated)
+                {
+                    this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
+                }
+            };
+            this._githubPoller.Start();
 
             this.CheckForMissingAllowedDirs();
             this.CheckForMissingSessionCwds();
