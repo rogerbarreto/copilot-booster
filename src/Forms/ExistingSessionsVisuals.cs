@@ -299,7 +299,7 @@ internal class ExistingSessionsVisuals
             {
                 WrapMode = DataGridViewTriState.True,
                 Padding = new Padding(4, 4, 4, 4),
-                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245),
+                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x38, 0x38, 0x38) : Color.FromArgb(200, 220, 245),
                 SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : Color.Black
             },
             EnableHeadersVisualStyles = false,
