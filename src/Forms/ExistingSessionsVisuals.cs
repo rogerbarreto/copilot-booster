@@ -169,6 +169,9 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when user selects "Remove" for a tracked item. Args: sessionId, type, number.</summary>
     internal event Action<string, string, int>? OnRemoveGitHubItem;
 
+    /// <summary>Fired when a window is pinned to a session via drag-drop. Args: sessionId, hwnd, title.</summary>
+    internal event Action<string, IntPtr, string>? OnWindowPinned;
+
     /// <summary>
     /// Callback to determine git-root visibility for context menu.
     /// Returns (hasGitRoot, isSubfolder).
@@ -479,6 +482,108 @@ internal class ExistingSessionsVisuals
 
             this.OnSortChanged?.Invoke();
         };
+
+        // Window pin drag-and-drop: accept HWND drops from Win+Alt+C context menu
+        this.SessionGrid.AllowDrop = true;
+        this.SessionGrid.DragEnter += (s, e) =>
+        {
+            e.Effect = e.Data?.GetDataPresent("WindowPin_Hwnd") == true
+                ? DragDropEffects.Link
+                : DragDropEffects.None;
+        };
+
+        this.SessionGrid.DragOver += (s, e) =>
+        {
+            if (e.Data?.GetDataPresent("WindowPin_Hwnd") != true)
+            {
+                e.Effect = DragDropEffects.None;
+                return;
+            }
+
+            e.Effect = DragDropEffects.Link;
+
+            // Highlight the row under the cursor
+            var clientPoint = this.SessionGrid.PointToClient(new Point(e.X, e.Y));
+            var hitTest = this.SessionGrid.HitTest(clientPoint.X, clientPoint.Y);
+            if (hitTest.RowIndex >= 0)
+            {
+                this.SessionGrid.ClearSelection();
+                this.SessionGrid.Rows[hitTest.RowIndex].Selected = true;
+            }
+        };
+
+        this.SessionGrid.DragDrop += (s, e) =>
+        {
+            if (e.Data?.GetDataPresent("WindowPin_Hwnd") != true)
+            {
+                return;
+            }
+
+            var clientPoint = this.SessionGrid.PointToClient(new Point(e.X, e.Y));
+            var hitTest = this.SessionGrid.HitTest(clientPoint.X, clientPoint.Y);
+            if (hitTest.RowIndex < 0)
+            {
+                return;
+            }
+
+            var sessionId = this.SessionGrid.Rows[hitTest.RowIndex].Tag as string;
+            if (sessionId == null)
+            {
+                return;
+            }
+
+            var hwnd = (IntPtr)e.Data.GetData("WindowPin_Hwnd")!;
+            var title = e.Data.GetData("WindowPin_Title") as string ?? "";
+
+            this.OnWindowPinned?.Invoke(sessionId, hwnd, title);
+        };
+
+        // Tab hover auto-switch during drag (1s delay)
+        if (this.SessionTabs != null)
+        {
+            Timer? tabHoverTimer = null;
+            int lastHoveredTabIndex = -1;
+
+            this.SessionTabs.DragOver += (s, e) =>
+            {
+                if (e.Data?.GetDataPresent("WindowPin_Hwnd") != true)
+                {
+                    return;
+                }
+
+                e.Effect = DragDropEffects.Link;
+
+                var tabPoint = this.SessionTabs.PointToClient(new Point(e.X, e.Y));
+                for (int i = 0; i < this.SessionTabs.TabCount; i++)
+                {
+                    if (this.SessionTabs.GetTabRect(i).Contains(tabPoint))
+                    {
+                        if (i != lastHoveredTabIndex)
+                        {
+                            lastHoveredTabIndex = i;
+                            tabHoverTimer?.Stop();
+                            tabHoverTimer?.Dispose();
+                            tabHoverTimer = new Timer { Interval = 1000 };
+                            var capturedIndex = i;
+                            tabHoverTimer.Tick += (s2, e2) =>
+                            {
+                                tabHoverTimer.Stop();
+                                if (capturedIndex < this.SessionTabs.TabCount)
+                                {
+                                    this.SessionTabs.SelectedIndex = capturedIndex;
+                                }
+                            };
+                            tabHoverTimer.Start();
+                        }
+
+                        return;
+                    }
+                }
+
+                lastHoveredTabIndex = -1;
+                tabHoverTimer?.Stop();
+            };
+        }
 
         bool adjustingSessionWidth = false;
         void AdjustSessionColumnWidth()

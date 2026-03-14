@@ -1172,6 +1172,17 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
+    /// Detaches a window from a session by removing it from <see cref="_trackedProcesses"/>.
+    /// </summary>
+    internal void DetachWindow(string sessionId, IntPtr hwnd)
+    {
+        if (this._trackedProcesses.TryGetValue(sessionId, out var procs))
+        {
+            procs.RemoveAll(p => p.Hwnd == hwnd);
+        }
+    }
+
+    /// <summary>
     /// Tracks an Explorer window HWND for a session by matching the folder path
     /// via Shell COM ShellWindows. Explorer.exe is single-instance so PID-based
     /// lookup doesn't work — the spawned process exits immediately.

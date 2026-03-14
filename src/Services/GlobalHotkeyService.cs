@@ -13,16 +13,19 @@ namespace CopilotBooster.Services;
 internal sealed class GlobalHotkeyService : IDisposable
 {
     private const int WM_HOTKEY = 0x0312;
-    private const int HOTKEY_ID = 0xB001;
+    private const int HOTKEY_ID_SPOTLIGHT = 0xB001;
+    private const int HOTKEY_ID_WINDOW_PIN = 0xB002;
 
     private const uint MOD_NOREPEAT = 0x4000;
 #if DEBUG
     private const uint VK_F1 = 0x70;
+    private const uint VK_F2 = 0x71;
 #else
     // Modifier flags for RegisterHotKey
     private const uint MOD_ALT = 0x0001;
     private const uint MOD_WIN = 0x0008;
     private const uint VK_X = 0x58;
+    private const uint VK_C = 0x43;
 #endif
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -37,14 +40,18 @@ internal sealed class GlobalHotkeyService : IDisposable
     private bool _registered;
 
     /// <summary>
-    /// Raised when the registered global hotkey is pressed.
+    /// Raised when Win+Alt+X (spotlight) is pressed.
     /// </summary>
     internal event Action? HotkeyPressed;
 
     /// <summary>
-    /// Registers the global hotkey (Win+Alt+Space). Must be called from the UI thread.
+    /// Raised when Win+Alt+C (window pin) is pressed.
     /// </summary>
-    /// <returns><c>true</c> if registration succeeded; otherwise <c>false</c>.</returns>
+    internal event Action? WindowPinHotkeyPressed;
+
+    /// <summary>
+    /// Registers the global hotkeys. Must be called from the UI thread.
+    /// </summary>
     internal bool Register()
     {
         if (this._registered)
@@ -55,15 +62,15 @@ internal sealed class GlobalHotkeyService : IDisposable
         this._window = new HotkeyWindow(this);
         this._window.CreateHandle(new CreateParams
         {
-            // HWND_MESSAGE parent creates a message-only window
             Parent = new IntPtr(-3)
         });
 
 #if DEBUG
-        // Use F1 with no modifiers in Debug to avoid stuck modifier keys when breaking in debugger
-        this._registered = RegisterHotKey(this._window.Handle, HOTKEY_ID, MOD_NOREPEAT, VK_F1);
+        this._registered = RegisterHotKey(this._window.Handle, HOTKEY_ID_SPOTLIGHT, MOD_NOREPEAT, VK_F1);
+        _ = RegisterHotKey(this._window.Handle, HOTKEY_ID_WINDOW_PIN, MOD_NOREPEAT, VK_F2);
 #else
-        this._registered = RegisterHotKey(this._window.Handle, HOTKEY_ID, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_X);
+        this._registered = RegisterHotKey(this._window.Handle, HOTKEY_ID_SPOTLIGHT, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_X);
+        _ = RegisterHotKey(this._window.Handle, HOTKEY_ID_WINDOW_PIN, MOD_WIN | MOD_ALT | MOD_NOREPEAT, VK_C);
 #endif
         if (!this._registered)
         {
@@ -74,29 +81,23 @@ internal sealed class GlobalHotkeyService : IDisposable
         return this._registered;
     }
 
-    /// <summary>
-    /// Unregisters the global hotkey and destroys the message window.
-    /// </summary>
     internal void Unregister()
     {
         if (this._registered && this._window != null)
         {
-            UnregisterHotKey(this._window.Handle, HOTKEY_ID);
+            UnregisterHotKey(this._window.Handle, HOTKEY_ID_SPOTLIGHT);
+            UnregisterHotKey(this._window.Handle, HOTKEY_ID_WINDOW_PIN);
             this._window.DestroyHandle();
             this._window = null;
             this._registered = false;
         }
     }
 
-    /// <inheritdoc/>
     public void Dispose()
     {
         this.Unregister();
     }
 
-    /// <summary>
-    /// Hidden NativeWindow that receives WM_HOTKEY messages.
-    /// </summary>
     private sealed class HotkeyWindow : NativeWindow
     {
         private readonly GlobalHotkeyService _owner;
@@ -108,9 +109,16 @@ internal sealed class GlobalHotkeyService : IDisposable
 
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == WM_HOTKEY && m.WParam == HOTKEY_ID)
+            if (m.Msg == WM_HOTKEY)
             {
-                this._owner.HotkeyPressed?.Invoke();
+                if (m.WParam == HOTKEY_ID_SPOTLIGHT)
+                {
+                    this._owner.HotkeyPressed?.Invoke();
+                }
+                else if (m.WParam == HOTKEY_ID_WINDOW_PIN)
+                {
+                    this._owner.WindowPinHotkeyPressed?.Invoke();
+                }
             }
 
             base.WndProc(ref m);

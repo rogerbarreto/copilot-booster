@@ -291,6 +291,7 @@ internal partial class MainForm : Form
         }
 
         this._hotkeyService.HotkeyPressed += this.OnToastHotkeyPressed;
+        this._hotkeyService.WindowPinHotkeyPressed += this.OnWindowPinHotkeyPressed;
 
         this._toastAnimTimer = new System.Windows.Forms.Timer { Interval = 15 };
         this._toastAnimTimer.Tick += this.OnToastAnimationTick;
@@ -572,6 +573,119 @@ internal partial class MainForm : Form
 
     [DllImport("user32.dll")]
     private static extern int GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out Point lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    private const uint GA_ROOT = 2;
+
+    private void OnWindowPinHotkeyPressed()
+    {
+        if (this.InvokeRequired)
+        {
+            this.BeginInvoke(this.OnWindowPinHotkeyPressed);
+            return;
+        }
+
+        // Get cursor position and find the window under it
+        if (!GetCursorPos(out var cursorPos))
+        {
+            return;
+        }
+
+        var hwnd = WindowFromPoint(cursorPos);
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // Get the top-level window
+        var rootHwnd = GetAncestor(hwnd, GA_ROOT);
+        if (rootHwnd != IntPtr.Zero)
+        {
+            hwnd = rootHwnd;
+        }
+
+        // Skip our own window
+        if (hwnd == this.Handle)
+        {
+            return;
+        }
+
+        var title = WindowFocusService.GetWindowTitle(hwnd);
+        if (string.IsNullOrEmpty(title))
+        {
+            return;
+        }
+
+        // Check if window is already tracked
+        var existingSession = this._activeTracker.ResolveSessionForHwnd(hwnd);
+
+        // Build and show context menu at cursor position
+        var menu = new ContextMenuStrip();
+
+        if (existingSession != null)
+        {
+            var session = this._cachedSessions.FirstOrDefault(s => s.Id == existingSession);
+            var sessionName = session != null
+                ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                : existingSession[..Math.Min(8, existingSession.Length)];
+
+            var headerItem = new ToolStripMenuItem($"📌 Pinned to: {sessionName}") { Enabled = false };
+            menu.Items.Add(headerItem);
+            menu.Items.Add(new ToolStripSeparator());
+
+            var detachItem = new ToolStripMenuItem("Detach from Session");
+            detachItem.Click += (s, e) =>
+            {
+                this._activeTracker.DetachWindow(existingSession, hwnd);
+                this.RequestRefresh(sessionId: existingSession, trackingChanged: true);
+                this._toast.Show($"✅ Window detached from session");
+            };
+            menu.Items.Add(detachItem);
+        }
+        else
+        {
+            var titleItem = new ToolStripMenuItem($"🪟 {title}") { Enabled = false };
+            menu.Items.Add(titleItem);
+            menu.Items.Add(new ToolStripSeparator());
+
+            var pinItem = new ToolStripMenuItem("Pin to Session (drag to grid)...");
+            var capturedHwnd = hwnd;
+            var capturedTitle = title;
+            pinItem.Click += (s, e) =>
+            {
+                // Show Copilot Booster and start drag
+                this.ShowToast();
+                this.Activate();
+
+                // Small delay to let the form appear before starting drag
+                var dragTimer = new System.Windows.Forms.Timer { Interval = 200 };
+                dragTimer.Tick += (s2, e2) =>
+                {
+                    dragTimer.Stop();
+                    dragTimer.Dispose();
+
+                    var data = new DataObject();
+                    data.SetData("WindowPin_Hwnd", capturedHwnd);
+                    data.SetData("WindowPin_Title", capturedTitle);
+
+                    this._sessionsVisuals.SessionGrid.DoDragDrop(data, DragDropEffects.Link);
+                };
+                dragTimer.Start();
+            };
+            menu.Items.Add(pinItem);
+        }
+
+        menu.Show(cursorPos);
+    }
 
     private void OnToastDeactivate(object? sender, EventArgs e)
     {
