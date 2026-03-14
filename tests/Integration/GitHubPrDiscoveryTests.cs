@@ -7,7 +7,33 @@
 /// </summary>
 public sealed class GitHubPrDiscoveryTests
 {
-    private static GitHubApiService CreateApi() => new(() => null);
+    private static GitHubApiService CreateApi()
+    {
+        // Try gh CLI token for tests (avoids unauthenticated rate limits)
+        string? ghToken = null;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("gh", "auth token")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                ghToken = proc.StandardOutput.ReadToEnd().Trim();
+                proc.WaitForExit(3000);
+                if (proc.ExitCode != 0 || string.IsNullOrEmpty(ghToken))
+                {
+                    ghToken = null;
+                }
+            }
+        }
+        catch { }
+
+        return new GitHubApiService(() => ghToken);
+    }
 
     /// <summary>
     /// Discovers a PR from a fork on dotnet/runtime.
@@ -102,11 +128,29 @@ public sealed class GitHubPrDiscoveryTests
     public async Task GetIssue_PrNumber_ReturnsNull()
     {
         var api = CreateApi();
-
-        // PR #125557 is a PR, not an issue — GetIssueAsync should return null
         var doc = await api.GetIssueAsync("dotnet", "runtime", 125557);
-
         Assert.Null(doc);
+    }
+
+    /// <summary>
+    /// Issue #4702 on microsoft/agent-framework is a real public issue.
+    /// GetIssueAsync must NOT return null — it's an issue, not a PR.
+    /// This catches false 404s from rate limiting or auth cascade bugs.
+    /// </summary>
+    [Fact]
+    public async Task GetIssue_PublicIssue_ReturnsData()
+    {
+        var api = CreateApi();
+        var doc = await api.GetIssueAsync("microsoft", "agent-framework", 4702);
+
+        Assert.NotNull(doc);
+        using (doc)
+        {
+            Assert.Equal(4702, doc.RootElement.GetProperty("number").GetInt32());
+            // Must NOT have pull_request property (it's a real issue)
+            Assert.False(doc.RootElement.TryGetProperty("pull_request", out _),
+                "Issue #4702 should not have pull_request property");
+        }
     }
 
     /// <summary>
