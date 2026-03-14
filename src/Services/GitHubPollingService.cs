@@ -36,11 +36,58 @@ internal class GitHubPollingService : IDisposable
     }
 
     /// <summary>
-    /// Starts the background polling timer.
+    /// Starts the background polling timer with an immediate full poll on startup.
     /// </summary>
     internal void Start()
     {
-        this._timer = new Timer(_ => _ = this.PollAsync(), null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30));
+        // Immediate full poll on startup (ignores backoff — items may have changed while app was closed)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var sessionIds = this._getSessionIds();
+                foreach (var sessionId in sessionIds)
+                {
+                    var data = GitHubTrackingService.Load(sessionId);
+                    if (data == null || data.Items.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    foreach (var item in data.Items.ToList())
+                    {
+                        // Skip truly final items (merged PRs, closed issues with StateReason already set)
+                        if (item.IsFinal && (item.IsPr || item.StateReason != null))
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (item.IsPr)
+                            {
+                                await this.PollPrAsync(sessionId, data.Owner, data.Repo, item).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                await this.PollIssueAsync(sessionId, data.Owner, data.Repo, item).ConfigureAwait(false);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Program.Logger.LogDebug("Startup poll error for {Type}#{Number}: {Error}", item.Type, item.Number, ex.Message);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.Logger.LogDebug("Startup poll error: {Error}", ex.Message);
+            }
+        });
+
+        // Then continue with periodic polling
+        this._timer = new Timer(_ => _ = this.PollAsync(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
     /// <summary>
