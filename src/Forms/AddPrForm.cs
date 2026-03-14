@@ -222,7 +222,8 @@ internal static class AddPrForm
             }
             else
             {
-                lblInfo.Text = $"❌ PR #{prNum} not found in {owner}/{repo}";
+                var errorDetail = api.LastError != null ? $"\n({api.LastError})" : "";
+                lblInfo.Text = $"❌ PR #{prNum} not found in {owner}/{repo}{errorDetail}";
                 lblInfo.ForeColor = Color.OrangeRed;
                 btnAdd.Enabled = false;
                 validated = false;

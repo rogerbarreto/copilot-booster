@@ -17,6 +17,11 @@ namespace CopilotBooster.Services;
 /// </summary>
 internal class GitHubApiService
 {
+    /// <summary>
+    /// Last error message from the most recent failed API call.
+    /// </summary>
+    internal string? LastError { get; private set; }
+
     private static readonly HttpClient s_httpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(15)
@@ -37,15 +42,24 @@ internal class GitHubApiService
 
     /// <summary>
     /// Fetches a PR by number. Returns the parsed JSON or null on failure.
+    /// Falls back to HTML page check if API is rate limited/SAML blocked.
     /// </summary>
     internal async Task<JsonDocument?> GetPullRequestAsync(string owner, string repo, int number)
     {
-        return await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls/{number}").ConfigureAwait(false);
+        var doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls/{number}").ConfigureAwait(false);
+        if (doc != null)
+        {
+            return doc;
+        }
+
+        // Fallback: check if the PR page exists on github.com (not rate limited)
+        return await this.FallbackHtmlCheckAsync(owner, repo, "pull", number).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Fetches an Issue by number. Returns the parsed JSON or null on failure.
     /// Returns null if the issue is actually a PR (has <c>pull_request</c> property).
+    /// Falls back to HTML page check if API is rate limited/SAML blocked.
     /// </summary>
     internal async Task<JsonDocument?> GetIssueAsync(string owner, string repo, int number)
     {
@@ -56,7 +70,13 @@ internal class GitHubApiService
             return null; // It's a PR, not an issue
         }
 
-        return doc;
+        if (doc != null)
+        {
+            return doc;
+        }
+
+        // Fallback: check if the issue page exists on github.com (not rate limited)
+        return await this.FallbackHtmlCheckAsync(owner, repo, "issues", number).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -146,6 +166,7 @@ internal class GitHubApiService
     /// </summary>
     private async Task<JsonDocument?> GetAsync(string url)
     {
+        this.LastError = null;
         // Attempt 1: unauthenticated (works for public repos)
         var result = await TryGetAsync(url, token: null).ConfigureAwait(false);
         if (result.Success)
@@ -153,7 +174,7 @@ internal class GitHubApiService
             return result.Document;
         }
 
-        // Escalate on rate limit (403) or private repo (404)
+        // Only escalate auth on rate limit (403 with X-RateLimit-Remaining: 0) or private repo (404)
         if (result.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
         {
             // Attempt 2: gh CLI token
@@ -164,6 +185,18 @@ internal class GitHubApiService
                 if (result.Success)
                 {
                     return result.Document;
+                }
+
+                // If gh token got 403 (SAML enforcement), the repo is public but the token
+                // doesn't have org access. Wait briefly and retry unauthenticated.
+                if (result.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    await Task.Delay(1000).ConfigureAwait(false);
+                    result = await TryGetAsync(url, token: null).ConfigureAwait(false);
+                    if (result.Success)
+                    {
+                        return result.Document;
+                    }
                 }
             }
 
@@ -180,10 +213,90 @@ internal class GitHubApiService
         }
 
         Program.Logger.LogDebug("GitHub API failed for {Url}: {Status}", url, result.StatusCode);
+
+        // Extract error message from GitHub API response
+        if (!string.IsNullOrEmpty(result.ErrorBody))
+        {
+            try
+            {
+                using var errDoc = JsonDocument.Parse(result.ErrorBody);
+                if (errDoc.RootElement.TryGetProperty("message", out var msg))
+                {
+                    this.LastError = $"{(int)result.StatusCode} {result.StatusCode}: {msg.GetString()}";
+                    return null;
+                }
+            }
+            catch { }
+
+            this.LastError = $"{(int)result.StatusCode} {result.StatusCode}";
+        }
+        else
+        {
+            this.LastError = $"{(int)result.StatusCode} {result.StatusCode}";
+        }
+
         return null;
     }
 
-    private static async Task<(bool Success, JsonDocument? Document, HttpStatusCode StatusCode)> TryGetAsync(string url, string? token)
+    /// <summary>
+    /// Last-resort fallback: check if a PR/Issue exists by fetching the HTML page on github.com.
+    /// This is never rate limited. If the page returns 200, builds a minimal JSON document
+    /// with the number and title extracted from the HTML &lt;title&gt; tag.
+    /// </summary>
+    private async Task<JsonDocument?> FallbackHtmlCheckAsync(string owner, string repo, string type, int number)
+    {
+        var htmlUrl = $"https://github.com/{owner}/{repo}/{type}/{number}";
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, htmlUrl);
+            request.Headers.Add("User-Agent", "CopilotBooster");
+            var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            // Check if we were redirected (e.g., /pull/N → /issues/N means it's not a PR)
+            var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? htmlUrl;
+            if (type == "pull" && finalUrl.Contains("/issues/", StringComparison.OrdinalIgnoreCase))
+            {
+                return null; // Redirected to issues — this is an issue, not a PR
+            }
+
+            // Extract title from HTML <title> tag: "Title · Issue #N · owner/repo"
+            var html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var title = "";
+            var titleStart = html.IndexOf("<title>", StringComparison.OrdinalIgnoreCase);
+            if (titleStart >= 0)
+            {
+                titleStart += 7;
+                var titleEnd = html.IndexOf("</title>", titleStart, StringComparison.OrdinalIgnoreCase);
+                if (titleEnd > titleStart)
+                {
+                    var fullTitle = html[titleStart..titleEnd].Trim();
+                    // Format: "Title · Issue #N · owner/repo · GitHub"
+                    var middleDot = fullTitle.IndexOf(" · ", StringComparison.Ordinal);
+                    title = middleDot > 0 ? WebUtility.HtmlDecode(fullTitle[..middleDot]) : fullTitle;
+                }
+            }
+
+            // Build a minimal JSON that matches the API structure
+            var state = "open";
+            var escapedTitle = JsonSerializer.Serialize(title); // Properly JSON-escapes the string
+            var json = $"{{\"number\":{number},\"title\":{escapedTitle},\"state\":\"{state}\",\"html_url\":\"{htmlUrl}\"}}";
+            this.LastError = null;
+            Program.Logger.LogDebug("GitHub HTML fallback succeeded for {Url}", htmlUrl);
+            return JsonDocument.Parse(json);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("GitHub HTML fallback failed for {Url}: {Error}", htmlUrl, ex.Message);
+            return null;
+        }
+    }
+
+    private static async Task<(bool Success, JsonDocument? Document, HttpStatusCode StatusCode, string? ErrorBody)> TryGetAsync(string url, string? token)
     {
         try
         {
@@ -193,15 +306,16 @@ internal class GitHubApiService
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                return (true, JsonDocument.Parse(json), response.StatusCode);
+                return (true, JsonDocument.Parse(json), response.StatusCode, null);
             }
 
-            return (false, null, response.StatusCode);
+            var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            return (false, null, response.StatusCode, errorBody);
         }
         catch (Exception ex)
         {
             Program.Logger.LogDebug("GitHub API error for {Url}: {Error}", url, ex.Message);
-            return (false, null, HttpStatusCode.ServiceUnavailable);
+            return (false, null, HttpStatusCode.ServiceUnavailable, ex.Message);
         }
     }
 

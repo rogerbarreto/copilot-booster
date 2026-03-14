@@ -171,4 +171,67 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Real-world scenario: agent-framework worktree with upstream remote pointing to
+    /// microsoft/agent-framework. Issue #4702 exists but was returning false 404.
+    /// This test uses the actual local worktree path to reproduce the exact app flow.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "LocalOnly")]
+    public async Task AddIssue_AgentFramework_UpstreamRemote_FindsIssue4702()
+    {
+        const string WorktreePath = @"S:\repo\worktrees\agent-framework-roger-test";
+        if (!Directory.Exists(WorktreePath))
+        {
+            return; // Skip if worktree doesn't exist
+        }
+
+        var api = CreateApi();
+
+        // Step 1: Find git root
+        var gitRoot = SessionService.FindGitRoot(WorktreePath);
+        Assert.NotNull(gitRoot);
+
+        // Step 2: Get upstream remote URL
+        var remoteUrl = GitService.GetRemoteUrl(gitRoot, "upstream");
+        Assert.NotNull(remoteUrl);
+
+        // Step 3: Parse owner/repo
+        var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
+        Assert.NotNull(parsed);
+        var (owner, repo) = parsed.Value;
+        Assert.Equal("microsoft", owner);
+        Assert.Equal("agent-framework", repo);
+
+        // Step 4: Fetch issue #4702 — THIS IS THE BUG: returns null instead of the issue
+        var doc = await api.GetIssueAsync(owner, repo, 4702);
+        Assert.NotNull(doc);
+        using (doc)
+        {
+            Assert.Equal(4702, doc.RootElement.GetProperty("number").GetInt32());
+        }
+    }
+
+    /// <summary>
+    /// Same scenario but without the local worktree dependency — uses API directly.
+    /// Verifies that microsoft/agent-framework issue #4702 is accessible via cascading auth.
+    /// May fail when unauthenticated rate limit is exhausted and gh token lacks SAML for microsoft org.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "LocalOnly")]
+    public async Task AddIssue_MicrosoftAgentFramework_Issue4702_Found()
+    {
+        var api = CreateApi();
+
+        // Direct API call — same as what AddIssueForm does after resolving remote
+        var doc = await api.GetIssueAsync("microsoft", "agent-framework", 4702);
+        Assert.NotNull(doc);
+        using (doc)
+        {
+            Assert.Equal(4702, doc.RootElement.GetProperty("number").GetInt32());
+            Assert.False(doc.RootElement.TryGetProperty("pull_request", out _),
+                "Issue #4702 should not be a PR");
+        }
+    }
 }

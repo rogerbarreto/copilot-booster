@@ -221,7 +221,8 @@ internal static class AddIssueForm
             }
             else
             {
-                lblInfo.Text = $"❌ Issue #{issueNum} not found in {owner}/{repo}\n(Note: if this is a PR, use \"Add PR\" instead)";
+                var errorDetail = api.LastError != null ? $"\n({api.LastError})" : "";
+                lblInfo.Text = $"❌ Issue #{issueNum} not found in {owner}/{repo}{errorDetail}\n(Note: if this is a PR, use \"Add PR\" instead)";
                 lblInfo.ForeColor = Color.OrangeRed;
                 btnAdd.Enabled = false;
                 validated = false;
