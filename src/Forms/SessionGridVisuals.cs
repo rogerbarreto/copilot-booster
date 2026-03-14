@@ -61,6 +61,11 @@ internal class SessionGridVisuals
     internal Func<string, string>? GetGitHubValue;
 
     /// <summary>
+    /// Fired when user clicks the GitHub column. Args: sessionId, click position, cell bounds.
+    /// </summary>
+    internal event Action<string, Point, Rectangle>? OnGitHubColumnClick;
+
+    /// <summary>
     /// Set to true when the user manually resizes the CWD column, preventing auto-fit from overriding it.
     /// </summary>
     internal bool CwdManuallyResized;
@@ -140,6 +145,14 @@ internal class SessionGridVisuals
             if (e.ColumnIndex == 4 && row.Tag is string ctxSessionId)
             {
                 this.HandleContextClick(row, ctxSessionId, e);
+                return;
+            }
+
+            // GitHub column — handle PR/Issue icon clicks
+            if (this._grid.Columns[e.ColumnIndex].Name == "GitHub" && row.Tag is string ghSessionId)
+            {
+                var cellBounds = this._grid.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+                this.OnGitHubColumnClick?.Invoke(ghSessionId, e.Location, cellBounds);
                 return;
             }
 
@@ -821,7 +834,7 @@ internal class SessionGridVisuals
 
         const int IconSize = 16;
         const int Spacing = 4;
-        const int OverlaySize = 10;
+        const int OverlaySize = 14;
 
         int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
         int ix = e.CellBounds.X + ((e.CellBounds.Width - totalWidth) / 2);
@@ -841,22 +854,32 @@ internal class SessionGridVisuals
 
             e.Graphics!.DrawImage(icon, ix, iy, IconSize, IconSize);
 
-            // PR overlays: CI failures (✗) or approvals (✓)
+            // PR overlays — two positions:
+            // Top-LEFT: Pipeline CI status (❌ red failure, ✓ blue success)
+            // Bottom-RIGHT: Approval count (✓ green with number)
             if (item.IsPr)
             {
+                // Pipeline CI overlay — top-left of the icon
                 if (item.Checks == "failure")
                 {
                     var xIcon = GitHubIconRenderer.GetXIcon(OverlaySize);
-                    e.Graphics.DrawImage(xIcon, ix + IconSize - OverlaySize + 2, iy - 2, OverlaySize, OverlaySize);
+                    e.Graphics.DrawImage(xIcon, ix - 4, iy - 4, OverlaySize, OverlaySize);
                 }
-                else if (item.Approvals > 0)
+                else if (item.Checks == "success")
                 {
-                    var checkIcon = GitHubIconRenderer.GetCheckIcon(OverlaySize);
-                    e.Graphics.DrawImage(checkIcon, ix + IconSize - OverlaySize + 2, iy - 2, OverlaySize, OverlaySize);
+                    var pipelineIcon = GitHubIconRenderer.GetPipelineCheckIcon(OverlaySize);
+                    e.Graphics.DrawImage(pipelineIcon, ix - 4, iy - 4, OverlaySize, OverlaySize);
+                }
 
-                    using var approvalFont = new Font(this._grid.Font.FontFamily, 6f, FontStyle.Bold);
+                // Approval overlay — bottom-right of the icon
+                if (item.Approvals > 0)
+                {
+                    var approvalIcon = GitHubIconRenderer.GetCheckIcon(OverlaySize - 2);
+                    e.Graphics.DrawImage(approvalIcon, ix + IconSize - OverlaySize + 5, iy + IconSize - OverlaySize + 3, OverlaySize - 2, OverlaySize - 2);
+
+                    using var approvalFont = new Font(this._grid.Font.FontFamily, 6.5f, FontStyle.Bold);
                     TextRenderer.DrawText(e.Graphics, item.Approvals.ToString(), approvalFont,
-                        new Point(ix + IconSize - 3, iy + IconSize - 10),
+                        new Point(ix + IconSize, iy + IconSize - 11),
                         GitHubIconRenderer.CheckGreen);
                 }
             }

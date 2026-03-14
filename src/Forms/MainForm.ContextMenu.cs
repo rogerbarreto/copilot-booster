@@ -542,6 +542,73 @@ internal partial class MainForm
             return string.Join(" ", parts);
         };
 
+        this._sessionsVisuals.GridVisuals.OnGitHubColumnClick += (sid, clickPos, cellBounds) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null || data.Items.Count == 0)
+            {
+                return;
+            }
+
+            // Determine which icon was clicked based on X position
+            const int IconSize = 16;
+            const int Spacing = 4;
+            int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
+            int startX = (cellBounds.Width - totalWidth) / 2;
+            int relativeX = clickPos.X - cellBounds.X - startX;
+
+            int index = relativeX / (IconSize + Spacing);
+            if (index < 0 || index >= data.Items.Count)
+            {
+                return;
+            }
+
+            var item = data.Items[index];
+
+            if (item.IsPr && (item.Checks == "failure" || item.Checks == "success"))
+            {
+                // Open CI Information Form
+                var headSha = ""; // Need to fetch from API
+                _ = Task.Run(async () =>
+                {
+                    var prDoc = await this._githubApi.GetPullRequestAsync(data.Owner, data.Repo, item.Number);
+                    if (prDoc != null)
+                    {
+                        using (prDoc)
+                        {
+                            if (prDoc.RootElement.TryGetProperty("head", out var head)
+                                && head.TryGetProperty("sha", out var sha))
+                            {
+                                headSha = sha.GetString() ?? "";
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(headSha))
+                    {
+                        this.BeginInvoke(async () =>
+                        {
+                            await CiInformationForm.ShowAsync(
+                                data.Owner, data.Repo, item.Number, headSha,
+                                sid, this._githubApi, this._activeTracker);
+                        });
+                    }
+                });
+            }
+            else
+            {
+                // Open PR/Issue in browser
+                var url = item.IsPr
+                    ? GitHubLinkService.GetPrUrl(data.Owner, data.Repo, item.Number)
+                    : GitHubLinkService.GetIssueUrl(data.Owner, data.Repo, item.Number);
+                GitHubLinkService.OpenUrl(url, sid, Program._settings.OpenLinksInEdgeSession, this._activeTracker);
+
+                // Mark as seen (clear red dot)
+                GitHubTrackingService.MarkSeen(sid, item.Type, item.Number);
+                this.RequestRefresh(sessionId: sid, trackingChanged: true);
+            }
+        };
+
         this._sessionsVisuals.GridVisuals.GetSessionFiles = (sid) =>
         {
             return GetSessionFiles(Program.SessionStateDir, sid);

@@ -16,8 +16,9 @@ internal static class GitHubIconRenderer
     internal static readonly Color ClosedRed = Color.FromArgb(248, 81, 73);    // #f85149
     internal static readonly Color MergedPurple = Color.FromArgb(163, 113, 247); // #a371f7
     internal static readonly Color DraftGray = Color.FromArgb(139, 148, 158);  // #8b949e
-    internal static readonly Color CheckGreen = Color.FromArgb(63, 185, 80);
-    internal static readonly Color CheckRed = Color.FromArgb(248, 81, 73);
+    internal static readonly Color CheckGreen = Color.FromArgb(63, 185, 80);   // approval ✓
+    internal static readonly Color CheckRed = Color.FromArgb(248, 81, 73);     // pipeline ❌
+    internal static readonly Color PipelineBlue = Color.FromArgb(56, 132, 244); // pipeline ✓ (distinct from approval green)
     internal static readonly Color PendingYellow = Color.FromArgb(210, 153, 34); // #d2992a
     internal static readonly Color NotificationRed = Color.FromArgb(218, 54, 51); // red dot
 
@@ -89,6 +90,22 @@ internal static class GitHubIconRenderer
         }
 
         var bmp = RenderIcon(DrawXIcon, CheckRed, size);
+        s_cache[key] = bmp;
+        return bmp;
+    }
+
+    /// <summary>
+    /// Gets a blue pipeline check icon (distinct from green approval check).
+    /// </summary>
+    internal static Bitmap GetPipelineCheckIcon(int size = 12)
+    {
+        var key = $"pipeline_check_{size}";
+        if (s_cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var bmp = RenderIcon(DrawCheckIcon, PipelineBlue, size);
         s_cache[key] = bmp;
         return bmp;
     }
