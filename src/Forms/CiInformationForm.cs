@@ -154,13 +154,6 @@ internal static class CiInformationForm
             Font = new Font("Consolas", 9f)
         };
 
-        var btnOpenBrowser = new Button
-        {
-            Text = "Open in Browser",
-            Dock = DockStyle.Bottom,
-            Height = 30
-        };
-
         CheckRunInfo? selectedCheck = null;
         string? fullLog = null;
 
@@ -205,22 +198,53 @@ internal static class CiInformationForm
             }
         };
 
-        btnOpenBrowser.Click += (s, e) =>
+        var btnPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 35,
+            FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(4, 2, 4, 2)
+        };
+
+        var btnOpenPr = new Button
+        {
+            Text = "Open PR in Browser",
+            Width = 140,
+            Height = 28
+        };
+        btnOpenPr.Click += (s, e) =>
+        {
+            var prUrl = GitHubLinkService.GetPrUrl(owner, repo, prNumber);
+            GitHubLinkService.OpenUrl(prUrl, sessionId, Program._settings.OpenLinksInEdgeSession, tracker);
+        };
+
+        var btnOpenJob = new Button
+        {
+            Text = "Open Job/Run in Browser",
+            Width = 160,
+            Height = 28,
+            Enabled = false
+        };
+        btnOpenJob.Click += (s, e) =>
         {
             if (selectedCheck != null && !string.IsNullOrEmpty(selectedCheck.HtmlUrl))
             {
-                GitHubLinkService.OpenUrl(
-                    selectedCheck.HtmlUrl,
-                    sessionId,
-                    Program._settings.OpenLinksInEdgeSession,
-                    tracker);
+                GitHubLinkService.OpenUrl(selectedCheck.HtmlUrl, sessionId, Program._settings.OpenLinksInEdgeSession, tracker);
             }
         };
+
+        checkList.SelectedIndexChanged += (s2, e2) =>
+        {
+            btnOpenJob.Enabled = checkList.SelectedItems.Count > 0;
+        };
+
+        btnPanel.Controls.Add(btnOpenPr);
+        btnPanel.Controls.Add(btnOpenJob);
 
         logPanel.Controls.Add(logBox);
         logPanel.Controls.Add(searchBox);
         splitContainer.Panel2.Controls.Add(logPanel);
-        splitContainer.Panel2.Controls.Add(btnOpenBrowser);
+        splitContainer.Panel2.Controls.Add(btnPanel);
 
         form.Controls.Add(splitContainer);
 
