@@ -172,7 +172,7 @@ internal static class CiInformationForm
 
             logBox.Text = "Loading log...";
             fullLog = await api.GetJobLogAsync(owner, repo, selectedCheck.JobId);
-            logBox.Text = fullLog ?? "(Log not available)";
+            logBox.Text = fullLog ?? $"(Log not available{(api.LastError != null ? $" — {api.LastError}" : "")})";
         };
 
         searchBox.TextChanged += (s, e) =>

@@ -375,7 +375,7 @@ internal partial class MainForm
             this._activeTracker.TrackEdge(sid, workspace);
 
             var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
-            await workspace.OpenAsync(sessionName, savedTabs.Count > 0).ConfigureAwait(true);
+            await workspace.OpenAsync(sessionName).ConfigureAwait(true);
 
             // Restore previously saved tabs
             if (savedTabs.Count > 0)
@@ -696,7 +696,7 @@ internal partial class MainForm
             this._activeTracker.TrackEdge(sid, workspace);
 
             var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
-            await workspace.OpenAsync(sessionName, savedTabs.Count > 0).ConfigureAwait(true);
+            await workspace.OpenAsync(sessionName).ConfigureAwait(true);
 
             if (savedTabs.Count > 0)
             {

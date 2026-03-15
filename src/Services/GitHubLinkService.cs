@@ -29,7 +29,14 @@ internal static class GitHubLinkService
             {
                 var workspace = SessionInteractionManager.CreateEdgeWorkspace(sessionId);
                 tracker.TrackEdge(sessionId, workspace);
+                var savedTabs = EdgeTabPersistenceService.LoadTabs(sessionId);
                 await workspace.OpenAsync(initialUrl: url).ConfigureAwait(false);
+
+                // Restore previously saved tabs
+                if (savedTabs.Count > 0)
+                {
+                    workspace.RestoreTabs(savedTabs);
+                }
             }, System.Threading.CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance);
             return;
         }

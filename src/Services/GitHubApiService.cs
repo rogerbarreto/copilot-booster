@@ -138,25 +138,42 @@ internal class GitHubApiService
     }
 
     /// <summary>
-    /// Fetches a workflow job log by job ID.
+    /// Fetches a workflow job log by job ID. Tries unauthenticated first (public repos),
+    /// then cascades to gh CLI / PAT.
     /// </summary>
     internal async Task<string?> GetJobLogAsync(string owner, string repo, long jobId)
     {
         var url = $"https://api.github.com/repos/{owner}/{repo}/actions/jobs/{jobId}/logs";
+
+        // Try unauthenticated first (works for public repos)
         try
         {
-            var request = CreateRequest(HttpMethod.Get, url, this.ResolveToken());
+            var request = CreateRequest(HttpMethod.Get, url, token: null);
             var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
                 return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             }
         }
-        catch (Exception ex)
+        catch { }
+
+        // Try with token
+        var token = this.ResolveToken();
+        if (!string.IsNullOrEmpty(token))
         {
-            Program.Logger.LogDebug("GitHub API job log error: {Error}", ex.Message);
+            try
+            {
+                var request = CreateRequest(HttpMethod.Get, url, token);
+                var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+                if (response.IsSuccessStatusCode)
+                {
+                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                }
+            }
+            catch { }
         }
 
+        this.LastError = "Job log not available (may require authentication)";
         return null;
     }
 

@@ -80,7 +80,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
     /// call GetIssueAsync for issue #8 → verify it's found and is a real issue.
     /// </summary>
     [Fact]
-    public async Task AddIssue_RealPath_ClonedRepo_FindsIssue()
+    public async Task AddIssue_RealPath_ClonedRepo_FindsIssueAsync()
     {
         var repoDir = this.CloneRepo();
         var api = CreateApi();
