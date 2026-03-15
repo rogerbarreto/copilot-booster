@@ -20,3 +20,21 @@
 - WinForms ProgressBar doesn't support dark theming natively — it uses the system accent color. Acceptable for this project.
 - Found **10 user-facing strings** to rename (not 9 as originally estimated) — the four error messages at lines 1156, 1199, 1224, 1242 were undercounted.
 - Settings form has `"Workspaces Dir:"` which refers to the directory setting, not the creation feature — should NOT be renamed.
+
+### 2026-03-15 — Phase 4: String Renames (Workspace → Worktree)
+
+- Completed all 10 user-facing string renames across 3 files: `WorkspaceCreatorVisuals.cs` (8 strings), `NewSessionVisuals.cs` (1 string), `ExistingSessionsVisuals.cs` (1 string).
+- No class names, method names, variable names, or file names were changed — only string literals visible to users.
+- The 4 identical `"Failed to create workspace:"` error messages required surrounding context in the edit to disambiguate each occurrence.
+- Main project builds clean after changes. Pre-existing test errors (RunGitAsync not yet implemented, Playwright missing) are unrelated.
+
+### 2026-03-15 — Phase 3: Wire Async Creation Modes + FormClosing Guard
+
+- Wired all 4 creation modes (PR, Issue, New Branch, Existing Branch) to use async service methods (`CreateWorkspaceFromPrAsync`, `CreateWorkspaceAsync`, `CreateWorkspaceFromExistingBranchAsync`).
+- PR mode: Removed `Task.Run` wrapper — the service method is now truly async. Added `isCreating` flag.
+- Issue, New Branch, Existing Branch modes: Converted from synchronous `CreateWorkspace`/`CreateWorkspaceFromExistingBranch` calls to async equivalents.
+- Added `isCreating` bool flag and `FormClosing` guard that prevents the user from closing the form via the X button while creation is in progress.
+- Pattern: `isCreating = true` before await, `isCreating = false` after await (before any MessageBox or form.Close). Button disabled + "Creating..." text during operation.
+- New Branch and Existing Branch error paths now restore button state (`btnCreate.Enabled = true; btnCreate.Text = "Create"`) — previously they had no restore on error.
+- All awaits use `.ConfigureAwait(true)` per WinForms UI thread convention.
+- Main project builds clean. Pre-existing Playwright integration test error remains unrelated.

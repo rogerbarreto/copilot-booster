@@ -3,121 +3,165 @@
 ## Issue #12: Async Worktree Creation with Cancellation
 
 **Date:** 2026-03-15  
-**Status:** Design Consensus  
-**Contributors:** Neo, Trinity, Morpheus  
+**Status:** Simplified Implementation (Revised 2026-03-15T163600Z)  
+**Contributors:** Neo, Trinity, Morpheus, Tank  
+**Directed by:** Roger Barreto
+
+### Problem Statement
+
+The `RunGit` method has a default 10-second timeout. When `git worktree add` runs against a large repository (or one requiring network operations), the timeout fires and **kills the git process mid-operation** — leaving a corrupted or partial worktree. This is the actual bug.
+
+Three of the four creation modes (Issue, New Branch, Existing Branch) also run synchronously on the UI thread, freezing the app during creation.
+
+### Design Philosophy (Simplified per Roger's UX Directive)
+
+> "We can actually just show 'In Progress...' without a progress bar, but don't drop the process if it has not finished."
+
+- **No progress bar, elapsed timer, or cancel button overlay.**
+- The PR mode already shows `btnCreate.Text = "Creating..."` with the button disabled — this UX pattern is sufficient for all modes.
+- The real fix is: **stop killing the git process prematurely**.
 
 ### Architecture
 
-- Add `RunGitAsync(repoPath, arguments, stderrProgress, cancellationToken)` as internal static method in `GitService.cs`
-- Default timeout: **120 seconds** (generous for large repos; existing `RunGit` stays at 10s for fast ops)
-- Process cancellation via `process.Kill(entireProcessTree: true)` on `CancellationToken` signal
-- Post-cancellation cleanup: sync `git worktree remove --force` then delete leftover directory
-- **Backward compatibility:** All existing sync methods (`RunGit`, `CreateWorktree`, etc.) remain untouched
+#### 1. `RunGitAsync` — New Async Method in `GitService.cs`
 
-### Service Layer
+```csharp
+internal static async Task<(int exitCode, string stdout, string stderr)> RunGitAsync(
+    string repoPath, string arguments, CancellationToken cancellationToken = default)
+```
 
-- Introduce `GitResult` record: `readonly record struct GitResult(int ExitCode, string Stdout, string Stderr)`
-- Add async overloads to `GitService`: `CreateWorktreeAsync`, `CheckoutExistingBranchWorktreeAsync`, `CheckoutLocalBranchWorktreeAsync`, `FetchPrRefAsync`
-- `IProgress<string>` parameter for stderr line-by-line reporting (live progress without buffering)
-- Add async overloads to `WorkspaceCreationService`: mirror sync versions, call async `GitService` methods
-- Error handling: Let `OperationCanceledException` propagate; callers use linked CTS to distinguish timeout from user cancel
+**Key design decisions:**
+- **No hard timeout.** The method waits for the process to complete naturally. Callers can pass a `CancellationToken` with a timeout if desired, but the default is indefinite wait.
+- **Concurrent stdout/stderr reading.** Both streams are read with `ReadToEndAsync()` concurrently to prevent the well-known .NET deadlock when a child process fills one stream buffer while the parent blocks reading the other.
+- **Process tree kill on cancellation.** If the token is cancelled, call `process.Kill(entireProcessTree: true)` wrapped in try/catch.
+- **Returns the same tuple shape** as `RunGit` for easy adoption.
 
-### UI & UX
+#### 2. Existing `RunGit` — Unchanged
 
-- **Progress Panel:** Overlay (marquee bar, elapsed timer label, cancel button) shown during creation
-- **Elapsed Timer:** `System.Windows.Forms.Timer` fires every 1s, displays `M:SS` format
-- **All 4 Creation Modes Async:** PR (already async) + Issue, New Branch, Existing Branch wrapped in `await Task.Run()`
-- **Cancellation UX:** New `btnCancelCreation` triggers `CancellationTokenSource.Cancel()`. Original `btnCancel` (Escape) disabled during creation
-- **String Renames:** 10 user-facing strings "Workspace" → "Worktree" (dialog title, hints, error messages); internal code identifiers unchanged
+The synchronous `RunGit` method stays as-is. It's well-tested, used by dozens of callers for fast operations, and its 10s timeout is appropriate for those use cases.
+
+#### 3. Async Worktree Methods in `GitService.cs`
+
+Add async overloads for the three worktree-creation methods:
+
+```csharp
+internal static async Task<(bool success, string error)> CreateWorktreeAsync(...)
+internal static async Task<(bool success, string error)> CheckoutExistingBranchWorktreeAsync(...)
+internal static async Task<(bool success, string error)> CheckoutLocalBranchWorktreeAsync(...)
+```
+
+Each calls `RunGitAsync` instead of `RunGit` with the same arguments. Sync versions remain for backward compatibility.
+
+#### 4. Async Methods in `WorkspaceCreationService.cs`
+
+Add async overloads mirroring the existing sync methods:
+
+```csharp
+internal static async Task<(string path, bool success, string? error)> CreateWorkspaceAsync(...)
+internal static async Task<(string path, bool success, string? error)> CreateWorkspaceFromExistingBranchAsync(...)
+internal static async Task<(string path, bool success, string? error)> CreateWorkspaceFromPrAsync(...)
+```
+
+These call the new `*Async` GitService methods. `FetchPrRef` gets a new `FetchPrRefAsync` using `RunGitAsync` with no timeout.
+
+#### 5. UI Changes in `WorkspaceCreatorVisuals.cs`
+
+**All 4 modes use the same pattern the PR mode already uses:**
+
+```csharp
+btnCreate.Enabled = false;
+btnCreate.Text = "Creating...";
+
+var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceAsync(...)
+    .ConfigureAwait(true);
+```
+
+**FormClosing guard (Niobe's correction #2):**
+
+Instead of disabling `ControlBox` during creation:
+
+```csharp
+bool isCreating = false;
+
+form.FormClosing += (s, e) =>
+{
+    if (isCreating && e.CloseReason == CloseReason.UserClosing)
+    {
+        e.Cancel = true;  // Prevent close while operation is in progress
+    }
+};
+```
+
+Set `isCreating = true` before the await, `false` after. This preserves minimize/maximize and form icon while blocking closure.
+
+#### 6. Cleanup Fallback (Niobe's correction #3)
+
+When a worktree creation fails or is cancelled:
+
+```csharp
+RunGit(repoPath, $"worktree remove --force \"{worktreePath}\"");
+RunGit(repoPath, "worktree prune");  // Fallback: clean stale worktree entries
+if (Directory.Exists(worktreePath))
+{
+    Directory.Delete(worktreePath, recursive: true);
+}
+```
+
+The `worktree prune` ensures git's internal worktree list stays clean even if the `worktree remove` partially fails.
+
+#### 7. String Renames — "Workspace" → "Worktree"
+
+10 user-facing string changes (internal code identifiers unchanged):
+
+| # | File | Current | New |
+|---|------|---------|-----|
+| 1 | `WorkspaceCreatorVisuals.cs:58` | `"Create New Workspace"` | `"Create New Worktree"` |
+| 2 | `WorkspaceCreatorVisuals.cs:79` | `"Set up a new isolated workspace..."` | `"Set up a new isolated worktree..."` |
+| 3 | `WorkspaceCreatorVisuals.cs:197` | `"...name for your workspace..."` | `"...name for your worktree..."` |
+| 4 | `WorkspaceCreatorVisuals.cs:246` | `"...create the workspace from"` | `"...create the worktree from"` |
+| 5 | `WorkspaceCreatorVisuals.cs:1156` | `"Failed to create workspace:\n..."` | `"Failed to create worktree:\n..."` |
+| 6 | `WorkspaceCreatorVisuals.cs:1199` | `"Failed to create workspace:\n..."` | `"Failed to create worktree:\n..."` |
+| 7 | `WorkspaceCreatorVisuals.cs:1224` | `"Failed to create workspace:\n..."` | `"Failed to create worktree:\n..."` |
+| 8 | `WorkspaceCreatorVisuals.cs:1242` | `"Failed to create workspace:\n..."` | `"Failed to create worktree:\n..."` |
+| 9 | `SettingsForm.cs:277` | `"Workspaces Dir:"` | `"Worktrees Dir:"` |
+| 10 | `SettingsForm.cs:713` | `"...session's Edge workspace..."` | `"...session's Edge worktree..."` |
 
 ### Implementation Phases
 
-1. **Phase 1 (GitService):** `RunGitAsync`, `GitResult`, async worktree methods, unit tests
+1. **Phase 1 (GitService):** `RunGitAsync`, async worktree methods, unit tests
 2. **Phase 2 (WorkspaceCreationService):** Async service method overloads, unit tests
-3. **Phase 3 (UI):** Progress panel, all 4 modes async, cancel button wiring, elapsed timer
-4. **Phase 4 (Naming):** 10 string renames (can be parallel with 1-3 or after)
+3. **Phase 3 (UI):** All 4 modes async, FormClosing guard
+4. **Phase 4 (Naming):** 10 string renames (parallel or after Phases 1–3)
+
+### Status — Phases 1–4 Complete
+
+✅ **Trinity (Phase 1+2):** All async methods added, concurrent stream reading implemented, cleanup fallback with `worktree prune`  
+✅ **Morpheus (Phase 4):** All 10 strings renamed  
+✅ **Tank:** 5 anticipatory async unit tests written, all 497 pass  
+✅ **Neo:** Simplified architecture proposal documented  
 
 ### Risk Mitigation
 
 | Risk | Mitigation |
 |------|-----------|
-| Partial worktree on cancel | Sync cleanup: `git worktree remove --force`, then delete directory |
-| UI thread deadlock | All await calls use `.ConfigureAwait(true)` (WinForms pattern) |
-| Race condition in cancel | Check `cancellationToken.IsCancellationRequested` after await |
-| Process zombie on kill | Wrap `Kill(true)` in try/catch; log and continue worst-case |
-| 120s still too short | Error message tells user what happened; they retry or check network |
+| Partial worktree on error | Cleanup: `worktree remove --force` → `worktree prune` → `Directory.Delete` |
+| UI thread deadlock | All await calls use `.ConfigureAwait(true)` (WinForms SynchronizationContext) |
+| User closes dialog during creation | `FormClosing` event cancellation prevents close while `isCreating` is true |
+| Git process hangs forever | Acceptable tradeoff — user can always close the app. Future: add optional soft timeout with user prompt |
+| Process zombie on error | `process.Kill(entireProcessTree: true)` in catch, wrapped in try/catch |
 
-### Testing
+### Testing Strategy
 
-- Test `RunGitAsync` directly via `InternalsVisibleTo` (change visibility from private to internal)
-- Integration tests: run actual git commands in temp directories (async variants of existing sync tests)
-- Cancellation test: cancel token immediately before call, expect `OperationCanceledException`
-- Sync `RunGit` left unchanged — well-tested indirectly through dozens of callers
+- **Unit tests:** Test `RunGitAsync` directly via `InternalsVisibleTo` — verify correct exit codes, stdout, stderr
+- **Cancellation test:** Cancel token immediately, expect `OperationCanceledException`
+- **Integration tests:** Actual git commands in temp directories for async variants
+- **Regression:** Existing sync `RunGit` tests remain untouched — sync path unchanged
+- **Manual:** Test all 4 creation modes on a large repo to confirm no UI freezing
 
-### Open Questions
+### Open Questions (Deferred)
 
-1. Should the elapsed timer show milliseconds after 1 minute? (Proposed: `M:SS` format)
-2. Should we show the git command being executed in the progress panel? (Deferred — can revisit)
-3. Future: Propagate `CancellationToken` deeper into `RunGit` to kill hung git processes? (Separate issue)
-
-### Validation Outcome (2026-03-15)
-
-**By:** Niobe (Researcher)
-
-Comprehensive technical validation completed:
-
-#### Confirmed Correct
-
-- All 5 proposed .NET APIs exist and work as described
-- `git worktree add` has **NO `--progress` flag** (verified via docs, source code, help text, empirical test)
-- Marquee progress bar design is correct — no determinate progress data available
-- Community patterns (CancellationToken + Process, WinForms async/progress) align with proposals
-- `readonly record struct GitResult`, linked CTS, overlay panel patterns all valid
-
-#### Corrections Required
-
-1. **Trinity (Service Layer): Deadlock Risk**
-   - If `RunGitAsync` redirects both stdout and stderr, reading only stderr via `ReadLineAsync` can deadlock
-   - **Fix:** Read both streams concurrently (parallel tasks) OR use event-based `BeginOutputReadLine()`/`BeginErrorReadLine()` OR redirect only stderr
-   - **Critical:** Since `GitResult` captures both `Stdout` and `Stderr`, concurrent reading is necessary
-
-2. **Morpheus (UI): ControlBox Overcorrection**
-   - `form.ControlBox = false` removes ALL title bar buttons (Close, Minimize, Maximize), not just the X
-   - **Better approach:** Handle `FormClosing` event during creation:
-     ```csharp
-     private void Form_FormClosing(object sender, FormClosingEventArgs e)
-     {
-         if (_isCreatingWorktree)
-             e.Cancel = true;
-     }
-     ```
-   - This preserves minimize/maximize and form icon while blocking closure
-
-3. **Neo (Architecture): Cleanup Fallback**
-   - Add `git worktree prune` as secondary cleanup step
-   - If `git worktree remove --force` fails (partial directory, stale metadata), `prune` clears `.git/worktrees` entries
-   - Sequence: Try `remove --force` → fallback to `prune` + directory delete
-
-#### Minor Considerations
-
-- `Application.IsDarkModeEnabled`/`SetColorMode` only works on Windows 11+ — ensure graceful fallback
-- `MarqueeAnimationSpeed` may be overridden by Windows visual effects (systems with animation disabled)
-
-### User Directive: Simplified UX (2026-03-15T16:28:03Z)
-
-**By:** Roger Barreto
-
-**Priority:** High
-
-The current "progress panel overlay" design may be over-engineered. **User preference:**
-
-- Don't need a fancy progress bar for worktree creation
-- Show simple "In Progress..." state (like current "Creating..." button text)
-- **Critical:** DO NOT kill the git process if it hasn't finished
-- **Root problem:** The timeout (120s) that KILLS the process, not lack of visual feedback
-- **Focus:** Fix the actual bug (timeout killing viable operations), simplify UX
-
-**Implication:** Progress panel, elapsed timer, marquee animation may be deferred or removed. Priority is extending the timeout and ensuring graceful operation cancellation vs. process termination.
+1. Should we add a soft timeout (e.g., 5 minutes) that shows a "Still working..." message instead of killing the process? (Future enhancement)
+2. Future: Propagate `CancellationToken` deeper into `RunGit` to kill hung git processes? (Separate issue)
 
 ---
 
