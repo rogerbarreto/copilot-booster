@@ -88,7 +88,8 @@ internal static class CiInformationForm
             FormBorderStyle = FormBorderStyle.Sizable,
             MinimizeBox = false,
             StartPosition = FormStartPosition.CenterParent,
-            TopMost = Program._settings.AlwaysOnTop
+            TopMost = Program._settings.AlwaysOnTop,
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath)
         };
 
         var splitContainer = new SplitContainer
@@ -172,6 +173,12 @@ internal static class CiInformationForm
 
             logBox.Text = "Loading log...";
             fullLog = await api.GetJobLogAsync(owner, repo, selectedCheck.JobId);
+            if (fullLog != null)
+            {
+                // Normalize line endings for WinForms TextBox
+                fullLog = fullLog.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+            }
+
             logBox.Text = fullLog ?? $"(Log not available{(api.LastError != null ? $" — {api.LastError}" : "")})";
         };
 
