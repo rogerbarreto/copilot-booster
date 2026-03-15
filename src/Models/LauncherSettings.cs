@@ -87,10 +87,11 @@ internal class LauncherSettings
     public string PinnedOrder { get; set; } = "running";
 
     /// <summary>
-    /// Gets or sets whether renaming a session also updates the Edge anchor tab title.
+    /// Gets or sets whether focusing a tracked window (IDE, Terminal, Edge) automatically
+    /// selects the corresponding session in the grid and switches tabs if needed.
     /// </summary>
-    [JsonPropertyName("updateEdgeTabOnRename")]
-    public bool UpdateEdgeTabOnRename { get; set; }
+    [JsonPropertyName("trackActiveSession")]
+    public bool TrackActiveSession { get; set; } = true;
 
     /// <summary>
     /// Gets or sets the list of directory names to skip during IDE file pattern search (non-git fallback).
@@ -213,6 +214,20 @@ internal class LauncherSettings
     /// </summary>
     [JsonPropertyName("logLevel")]
     public string? LogLevel { get; set; }
+
+    /// <summary>
+    /// Gets or sets the GitHub Personal Access Token (stored encrypted via DPAPI).
+    /// Used as fallback when <c>gh auth token</c> is unavailable and unauthenticated API is rate-limited.
+    /// </summary>
+    [JsonPropertyName("githubToken")]
+    public string? GitHubToken { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to open GitHub links (PRs, Issues, CI runs) in the session's
+    /// Edge workspace browser instead of the OS default browser.
+    /// </summary>
+    [JsonPropertyName("openLinksInEdgeSession")]
+    public bool OpenLinksInEdgeSession { get; set; } = true;
 
     /// <summary>
     /// Loads the launcher settings from the default settings file.

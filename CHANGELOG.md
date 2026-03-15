@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.0] - 2026-03-15
+
+### Added
+
+- **GitHub Integration Column** — new "GitHub" column in the session grid for tracking PRs and Issues per session.
+  - **Add PR / Add Issue** dialogs with API validation, remote selection, and "Discover from Branch" auto-detection.
+  - **PR/Issue icons** with GitHub state colors (green=open, red=closed, purple=merged, gray=draft/not-planned).
+  - **Pipeline CI overlay** (top-left, blue ✓ / red ✗) and **approval overlay** (bottom-right, green ✓ + count) on PR icons.
+  - **Red notification dot** when new activity is detected on tracked items.
+  - **GitHub submenu** in context menu: Add PR, Add Issue, per-item Show CI Jobs / Open in Browser / Remove.
+  - **CI Information Form** — lists all check runs (PR Checks + Merge Queue Checks) with log viewer, search, and Open in Browser buttons.
+  - **Background polling** with exponential backoff (30s/5min/30min) and immediate poll on startup.
+  - **Toast and tray notifications** when tracked PRs/Issues have new activity.
+  - **Cascading auth**: unauthenticated → `gh` CLI token → PAT, with HTML fallback for rate-limited/SAML-blocked repos.
+- **Track Active Session** — focusing a tracked window (IDE, Terminal, Edge) auto-selects the session row and switches tabs. Configurable in Settings → General.
+- **Win+Alt+C Window Pin** — press Win+Alt+C to pin any window to a session via click-to-pin with crosshair cursor and confirmation dialog.
+- **GitHub settings section** in Settings with "Open GitHub links in session Edge browser" toggle.
+
+### Fixed
+
+- **Fork-based PR discovery** — "Discover from Branch" now finds PRs from forks by scanning all open PRs when the `head` filter misses.
+- **SAML-blocked repos** — HTML page fallback when API returns 403 for SAML-enforced orgs (e.g., microsoft/).
+- **Selected remote stored correctly** — owner/repo from user-selected remote is stored, not the first remote.
+- **Dark mode row contrast** — unselected rows are near-black (#111111), selected rows are dark blue (#384659).
+- **Edge session URL opening** — focuses workspace window before launching URL so new tab opens in correct browser profile.
+- **CI form buttons visible** — moved button panel to form level so it's not hidden behind the log panel.
+- **CI form log line breaks** — normalized `\n` to `\r\n` for proper WinForms TextBox display.
+- **CI form app icon** — shows Copilot Booster icon.
+- **Job log fetch** — tries unauthenticated first for public repos.
+- **Closed issue colors** — "not_planned" issues show gray, "completed" show purple. StateReason backfilled for old data.
+- **Test native handle exhaustion** — tests explicitly dispose SessionGrid/SessionTabs to prevent IndexOutOfRangeException.
+- **Removed obsolete `UpdateEdgeTabOnRename` setting** (replaced by session.js).
+
 ## [0.18.4] - 2026-03-10
 
 ### Fixed

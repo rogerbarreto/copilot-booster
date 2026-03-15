@@ -56,6 +56,21 @@ internal class SessionGridVisuals
     internal Func<string, (int Files, int Tabs)>? GetContextCounts;
 
     /// <summary>
+    /// Callback to get the GitHub tracking display value for a session (serialized item summary).
+    /// </summary>
+    internal Func<string, string>? GetGitHubValue;
+
+    /// <summary>
+    /// Fired when user clicks the GitHub column. Args: sessionId, click position, cell bounds.
+    /// </summary>
+    internal event Action<string, Point, Rectangle>? OnGitHubColumnClick;
+
+    /// <summary>
+    /// When true, the grid cursor is locked to <see cref="Cursors.Cross"/> (pin mode).
+    /// </summary>
+    internal bool PinMode { get; set; }
+
+    /// <summary>
     /// Set to true when the user manually resizes the CWD column, preventing auto-fit from overriding it.
     /// </summary>
     internal bool CwdManuallyResized;
@@ -104,6 +119,11 @@ internal class SessionGridVisuals
         // Select the row under the cursor on right-click so context menu targets it
         this._grid.CellMouseDown += (s, e) =>
         {
+            if (this.PinMode)
+            {
+                return;
+            }
+
             if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
             {
                 var row = this._grid.Rows[e.RowIndex];
@@ -123,6 +143,12 @@ internal class SessionGridVisuals
                 return;
             }
 
+            // In pin mode, only the MainForm pin click handler should process clicks
+            if (this.PinMode)
+            {
+                return;
+            }
+
             var row = this._grid.Rows[e.RowIndex];
 
             // Dismiss bell on any left-click
@@ -135,6 +161,14 @@ internal class SessionGridVisuals
             if (e.ColumnIndex == 4 && row.Tag is string ctxSessionId)
             {
                 this.HandleContextClick(row, ctxSessionId, e);
+                return;
+            }
+
+            // GitHub column — handle PR/Issue icon clicks
+            if (this._grid.Columns[e.ColumnIndex].Name == "GitHub" && row.Tag is string ghSessionId)
+            {
+                var cellBounds = this._grid.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+                this.OnGitHubColumnClick?.Invoke(ghSessionId, e.Location, cellBounds);
                 return;
             }
 
@@ -166,6 +200,12 @@ internal class SessionGridVisuals
 
         this._grid.CellMouseMove += (s, e) =>
         {
+            if (this.PinMode)
+            {
+                this._grid.Cursor = Cursors.Cross;
+                return;
+            }
+
             if (e.RowIndex >= 0 && e.ColumnIndex == 4)
             {
                 var contextValue = this._grid.Rows[e.RowIndex].Cells[4].Value as string;
@@ -186,12 +226,19 @@ internal class SessionGridVisuals
                     return;
                 }
             }
-            this._grid.Cursor = Cursors.Default;
+            if (e.RowIndex >= 0 && this._grid.Columns[e.ColumnIndex].Name == "GitHub"
+                && this._grid.Rows[e.RowIndex].Tag is string ghSid)
+            {
+                this._grid.Cursor = Cursors.Hand;
+                this.UpdateGitHubTooltip(e.RowIndex, e.ColumnIndex, e.Location, ghSid);
+                return;
+            }
+            this._grid.Cursor = this.PinMode ? Cursors.Cross : Cursors.Default;
         };
 
         this._grid.CellMouseLeave += (s, e) =>
         {
-            this._grid.Cursor = Cursors.Default;
+            this._grid.Cursor = this.PinMode ? Cursors.Cross : Cursors.Default;
         };
 
         this._grid.CellPainting += (s, e) =>
@@ -234,6 +281,20 @@ internal class SessionGridVisuals
                 if (!string.IsNullOrEmpty(contextValue))
                 {
                     this.PaintContextIcons(e, contextValue);
+                }
+                e.Handled = true;
+                return;
+            }
+
+            // GitHub column — draw PR/Issue icons with state colors and overlays
+            if (this._grid.Columns[e.ColumnIndex].Name == "GitHub")
+            {
+                e.PaintBackground(e.ClipBounds, true);
+                var githubValue = e.Value as string;
+                if (!string.IsNullOrEmpty(githubValue) && e.RowIndex >= 0
+                    && this._grid.Rows[e.RowIndex].Tag is string sessionId)
+                {
+                    this.PaintGitHubIcons(e, sessionId);
                 }
                 e.Handled = true;
                 return;
@@ -419,7 +480,10 @@ internal class SessionGridVisuals
                 var (fileCount, tabCount) = this.GetContextCounts?.Invoke(session.Id) ?? (0, 0);
                 var contextValue = BuildContextValue(fileCount, tabCount);
 
-                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, contextValue, activeText);
+                // Build GitHub tracking indicator
+                var githubValue = this.GetGitHubValue?.Invoke(session.Id) ?? "";
+
+                var rowIndex = this._grid.Rows.Add(statusIcon, displayName, cwdText, dateText, contextValue, activeText, githubValue);
                 var row = this._grid.Rows[rowIndex];
                 row.Tag = session.Id;
 
@@ -636,6 +700,14 @@ internal class SessionGridVisuals
                     ? ""
                     : BuildContextTooltip(fileCount, tabCount);
             }
+
+            // Update GitHub column if changed
+            var newGitHub = this.GetGitHubValue?.Invoke(sessionId) ?? "";
+            var currentGitHub = row.Cells[6].Value?.ToString() ?? "";
+            if (currentGitHub != newGitHub)
+            {
+                row.Cells[6].Value = newGitHub;
+            }
         }
     }
 
@@ -779,6 +851,119 @@ internal class SessionGridVisuals
             e.Graphics!.DrawImage(icon, ix, iy, icon.Width, icon.Height);
             ix += icon.Width + Spacing;
         }
+    }
+
+    private void PaintGitHubIcons(DataGridViewCellPaintingEventArgs e, string sessionId)
+    {
+        var data = GitHubTrackingService.Load(sessionId);
+        if (data == null || data.Items.Count == 0)
+        {
+            return;
+        }
+
+        const int IconSize = 16;
+        const int Spacing = 4;
+        const int OverlaySize = 14;
+
+        int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
+        int ix = e.CellBounds.X + ((e.CellBounds.Width - totalWidth) / 2);
+        int iy = e.CellBounds.Y + ((e.CellBounds.Height - IconSize) / 2);
+
+        foreach (var item in data.Items)
+        {
+            Bitmap icon;
+            if (item.IsPr)
+            {
+                icon = GitHubIconRenderer.GetPrIcon(item.State, item.Draft, IconSize);
+            }
+            else
+            {
+                icon = GitHubIconRenderer.GetIssueIcon(item.State, item.StateReason, IconSize);
+            }
+
+            e.Graphics!.DrawImage(icon, ix, iy, IconSize, IconSize);
+
+            // PR overlays — only for open/draft PRs (not merged/closed)
+            if (item.IsPr && !item.IsFinal)
+            {
+                // Pipeline CI overlay — top-left of the icon
+                if (item.Checks == "failure")
+                {
+                    var xIcon = GitHubIconRenderer.GetXIcon(OverlaySize);
+                    e.Graphics.DrawImage(xIcon, ix - 4, iy - 4, OverlaySize, OverlaySize);
+                }
+                else if (item.Checks == "success")
+                {
+                    var pipelineIcon = GitHubIconRenderer.GetPipelineCheckIcon(OverlaySize);
+                    e.Graphics.DrawImage(pipelineIcon, ix - 4, iy - 4, OverlaySize, OverlaySize);
+                }
+
+                // Approval overlay — green ✓ above the count number, bottom-right
+                if (item.Approvals > 0)
+                {
+                    var approvalIcon = GitHubIconRenderer.GetCheckIcon(OverlaySize - 4);
+                    int ax = ix + IconSize - 2;
+                    int ay = iy + 1;
+                    e.Graphics.DrawImage(approvalIcon, ax, ay, OverlaySize - 4, OverlaySize - 4);
+
+                    using var approvalFont = new Font(this._grid.Font.FontFamily, 6.5f, FontStyle.Bold);
+                    TextRenderer.DrawText(e.Graphics, item.Approvals.ToString(), approvalFont,
+                        new Point(ax, ay + OverlaySize - 5),
+                        GitHubIconRenderer.CheckGreen);
+                }
+            }
+
+            // Red notification dot for new activity
+            if (item.HasNewActivity)
+            {
+                GitHubIconRenderer.DrawNotificationDot(e.Graphics!, ix, iy, IconSize);
+            }
+
+            ix += IconSize + Spacing;
+        }
+    }
+
+    private void UpdateGitHubTooltip(int rowIndex, int colIndex, Point mousePos, string sessionId)
+    {
+        var data = GitHubTrackingService.Load(sessionId);
+        if (data == null || data.Items.Count == 0)
+        {
+            return;
+        }
+
+        const int IconSize = 16;
+        const int Spacing = 4;
+        var cellBounds = this._grid.GetCellDisplayRectangle(colIndex, rowIndex, false);
+        int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
+        int startX = (cellBounds.Width - totalWidth) / 2;
+        int relativeX = mousePos.X - startX;
+
+        int index = relativeX / (IconSize + Spacing);
+        if (index < 0 || index >= data.Items.Count)
+        {
+            this._grid.Rows[rowIndex].Cells[colIndex].ToolTipText = "";
+            return;
+        }
+
+        var item = data.Items[index];
+        var prefix = item.IsPr ? "PR" : "Issue";
+        var tooltip = $"{prefix} #{item.Number}: {item.Title}\nState: {item.State}";
+        if (item.IsPr && item.Approvals > 0)
+        {
+            tooltip += $"\nApprovals: {item.Approvals} ({string.Join(", ", item.Approvers)})";
+        }
+
+        if (item.IsPr && !string.IsNullOrEmpty(item.Checks))
+        {
+            tooltip += $"\nCI: {item.Checks}";
+        }
+
+        if (!string.IsNullOrEmpty(item.Author))
+        {
+            tooltip += $"\nAuthor: {item.Author}";
+        }
+
+        this._grid.Rows[rowIndex].Cells[colIndex].ToolTipText = tooltip;
     }
 
     /// <summary>

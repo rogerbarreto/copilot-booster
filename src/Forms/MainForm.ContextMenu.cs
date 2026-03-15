@@ -42,14 +42,6 @@ internal partial class MainForm
             {
                 SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
 
-                // Update Edge tab title if workspace is open and setting is enabled
-                if (Program._settings.UpdateEdgeTabOnRename
-                    && this._activeTracker.TryGetEdge(sid, out var edgeWs) && edgeWs.IsOpen)
-                {
-                    var displayName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
-                    edgeWs.UpdateSessionName(displayName);
-                }
-
                 var sessionDir = Path.Combine(Program.SessionStateDir, sid);
                 SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd);
 
@@ -266,6 +258,92 @@ internal partial class MainForm
             return (session.Cwd, SessionService.FindGitRoot(session.Cwd));
         };
 
+        this._sessionsVisuals.OnAddPr += (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            var (item, owner, repo) = AddPrForm.Show(sid, session?.Cwd, this._githubApi);
+            if (item != null && owner != null && repo != null)
+            {
+                GitHubTrackingService.AddItem(sid, owner, repo, item);
+                this._githubPoller?.PollSessionNow(sid);
+                this.RequestRefresh(sessionId: sid, trackingChanged: true);
+                this._toast.Show($"✅ PR #{item.Number} added to session");
+            }
+        };
+
+        this._sessionsVisuals.OnAddIssue += (sid) =>
+        {
+            var session = this._cachedSessions.Find(x => x.Id == sid);
+            var (item, owner, repo) = AddIssueForm.Show(sid, session?.Cwd, this._githubApi);
+            if (item != null && owner != null && repo != null)
+            {
+                GitHubTrackingService.AddItem(sid, owner, repo, item);
+                this._githubPoller?.PollSessionNow(sid);
+                this.RequestRefresh(sessionId: sid, trackingChanged: true);
+                this._toast.Show($"✅ Issue #{item.Number} added to session");
+            }
+        };
+
+        this._sessionsVisuals.OnShowCiJobs += (sid, prNumber) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null)
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                var prDoc = await this._githubApi.GetPullRequestAsync(data.Owner, data.Repo, prNumber);
+                string headSha = "";
+                if (prDoc != null)
+                {
+                    using (prDoc)
+                    {
+                        if (prDoc.RootElement.TryGetProperty("head", out var head)
+                            && head.TryGetProperty("sha", out var sha))
+                        {
+                            headSha = sha.GetString() ?? "";
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(headSha))
+                {
+                    this.BeginInvoke(async () =>
+                    {
+                        await CiInformationForm.ShowAsync(
+                            data.Owner, data.Repo, prNumber, headSha,
+                            sid, this._githubApi, this._activeTracker);
+                    });
+                }
+            });
+        };
+
+        this._sessionsVisuals.OnOpenGitHubItem += (sid, type, number) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null)
+            {
+                return;
+            }
+
+            var url = type == "pr"
+                ? GitHubLinkService.GetPrUrl(data.Owner, data.Repo, number)
+                : GitHubLinkService.GetIssueUrl(data.Owner, data.Repo, number);
+            GitHubLinkService.OpenUrl(url, sid, Program._settings.OpenLinksInEdgeSession, this._activeTracker);
+            GitHubTrackingService.MarkSeen(sid, type, number);
+            this.RequestRefresh(sessionId: sid, trackingChanged: true);
+        };
+
+        this._sessionsVisuals.OnRemoveGitHubItem += (sid, type, number) =>
+        {
+            GitHubTrackingService.RemoveItem(sid, type, number);
+            this.RequestRefresh(sessionId: sid, trackingChanged: true);
+            var prefix = type == "pr" ? "PR" : "Issue";
+            this._toast.Show($"✅ {prefix} #{number} removed from session");
+        };
+
         this._sessionsVisuals.OnOpenEdge += async (sid) =>
         {
             if (this._activeTracker.TryGetEdge(sid, out var existing) && existing.IsOpen)
@@ -297,7 +375,7 @@ internal partial class MainForm
             this._activeTracker.TrackEdge(sid, workspace);
 
             var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
-            await workspace.OpenAsync(sessionName, savedTabs.Count > 0).ConfigureAwait(true);
+            await workspace.OpenAsync(sessionName).ConfigureAwait(true);
 
             // Restore previously saved tabs
             if (savedTabs.Count > 0)
@@ -487,6 +565,93 @@ internal partial class MainForm
             return this._contextWatcher?.GetCounts(sid) ?? (0, 0);
         };
 
+        this._sessionsVisuals.GridVisuals.GetGitHubValue = (sid) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null || data.Items.Count == 0)
+            {
+                return "";
+            }
+
+            // Build a compact display: "PR#42 I#15"
+            var parts = new System.Collections.Generic.List<string>();
+            foreach (var item in data.Items)
+            {
+                var prefix = item.IsPr ? "PR" : "I";
+                parts.Add($"{prefix}#{item.Number}");
+            }
+
+            return string.Join(" ", parts);
+        };
+
+        this._sessionsVisuals.GridVisuals.OnGitHubColumnClick += (sid, clickPos, cellBounds) =>
+        {
+            var data = GitHubTrackingService.Load(sid);
+            if (data == null || data.Items.Count == 0)
+            {
+                return;
+            }
+
+            // Determine which icon was clicked based on X position
+            // clickPos is cell-relative (from CellMouseClick event)
+            const int IconSize = 16;
+            const int Spacing = 4;
+            int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
+            int startX = (cellBounds.Width - totalWidth) / 2;
+            int relativeX = clickPos.X - startX;
+
+            int index = relativeX / (IconSize + Spacing);
+            if (index < 0 || index >= data.Items.Count)
+            {
+                return;
+            }
+
+            var item = data.Items[index];
+
+            if (item.IsPr && (item.Checks == "failure" || item.Checks == "success"))
+            {
+                // Open CI Information Form
+                var headSha = ""; // Need to fetch from API
+                _ = Task.Run(async () =>
+                {
+                    var prDoc = await this._githubApi.GetPullRequestAsync(data.Owner, data.Repo, item.Number);
+                    if (prDoc != null)
+                    {
+                        using (prDoc)
+                        {
+                            if (prDoc.RootElement.TryGetProperty("head", out var head)
+                                && head.TryGetProperty("sha", out var sha))
+                            {
+                                headSha = sha.GetString() ?? "";
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(headSha))
+                    {
+                        this.BeginInvoke(async () =>
+                        {
+                            await CiInformationForm.ShowAsync(
+                                data.Owner, data.Repo, item.Number, headSha,
+                                sid, this._githubApi, this._activeTracker);
+                        });
+                    }
+                });
+            }
+            else
+            {
+                // Open PR/Issue in browser
+                var url = item.IsPr
+                    ? GitHubLinkService.GetPrUrl(data.Owner, data.Repo, item.Number)
+                    : GitHubLinkService.GetIssueUrl(data.Owner, data.Repo, item.Number);
+                GitHubLinkService.OpenUrl(url, sid, Program._settings.OpenLinksInEdgeSession, this._activeTracker);
+
+                // Mark as seen (clear red dot)
+                GitHubTrackingService.MarkSeen(sid, item.Type, item.Number);
+                this.RequestRefresh(sessionId: sid, trackingChanged: true);
+            }
+        };
+
         this._sessionsVisuals.GridVisuals.GetSessionFiles = (sid) =>
         {
             return GetSessionFiles(Program.SessionStateDir, sid);
@@ -531,7 +696,7 @@ internal partial class MainForm
             this._activeTracker.TrackEdge(sid, workspace);
 
             var savedTabs = EdgeTabPersistenceService.LoadTabs(sid);
-            await workspace.OpenAsync(sessionName, savedTabs.Count > 0).ConfigureAwait(true);
+            await workspace.OpenAsync(sessionName).ConfigureAwait(true);
 
             if (savedTabs.Count > 0)
             {

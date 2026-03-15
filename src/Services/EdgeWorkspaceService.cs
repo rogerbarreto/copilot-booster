@@ -84,7 +84,7 @@ internal partial class EdgeWorkspaceService
     /// Waits up to <paramref name="timeoutMs"/> milliseconds for the tab to appear.
     /// </summary>
     /// <returns>True if the tab was detected; false on timeout.</returns>
-    internal async Task<bool> OpenAsync(string? sessionName = null, bool hasSavedTabs = false, int timeoutMs = 10000)
+    internal async Task<bool> OpenAsync(string? sessionName = null, int timeoutMs = 10000, string? initialUrl = null)
     {
         var sessionHtml = GetSessionHtmlPath();
         if (sessionHtml == null)
@@ -130,11 +130,33 @@ internal partial class EdgeWorkspaceService
             {
                 // Open a new tab so the session anchor tab is not navigated away,
                 // unless saved tabs will be restored (they serve the same purpose).
-                if (!hasSavedTabs && this.CachedHwnd != IntPtr.Zero)
+                if (this.CachedHwnd != IntPtr.Zero)
                 {
                     WindowFocusService.TryFocusWindowHandle(this.CachedHwnd);
                     WindowFocusService.WaitForForeground(this.CachedHwnd);
-                    WindowFocusService.SendCtrlT(this.CachedHwnd);
+
+                    if (!string.IsNullOrEmpty(initialUrl))
+                    {
+                        // Navigate directly — Edge opens the URL in a new tab automatically
+                        var edgePath2 = FindEdgePath();
+                        if (edgePath2 != null)
+                        {
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo
+                                {
+                                    FileName = edgePath2,
+                                    Arguments = $"\"{initialUrl}\"",
+                                    UseShellExecute = false
+                                });
+                            }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        WindowFocusService.SendCtrlT(this.CachedHwnd);
+                    }
                 }
 
                 return true;

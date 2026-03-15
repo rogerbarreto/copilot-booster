@@ -42,6 +42,13 @@ internal partial class MainForm : Form
     private readonly SessionContextWatcherService? _contextWatcher;
     private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
+    private readonly GitHubApiService _githubApi;
+    private GitHubPollingService? _githubPoller;
+
+    // Window pin mode state
+    private bool _pinMode;
+    private IntPtr _pinHwnd;
+    private string _pinTitle = "";
 
     // New Session support
     private readonly SessionDataService _sessionDataService = new();
@@ -108,6 +115,7 @@ internal partial class MainForm : Form
 
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
+        this._githubApi = new GitHubApiService(() => Program._settings.GitHubToken);
         this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
         this._activeTracker.EventsJournal.StartWatching();
@@ -288,6 +296,7 @@ internal partial class MainForm : Form
         }
 
         this._hotkeyService.HotkeyPressed += this.OnToastHotkeyPressed;
+        this._hotkeyService.WindowPinHotkeyPressed += this.OnWindowPinHotkeyPressed;
 
         this._toastAnimTimer = new System.Windows.Forms.Timer { Interval = 15 };
         this._toastAnimTimer.Tick += this.OnToastAnimationTick;
@@ -570,6 +579,123 @@ internal partial class MainForm : Form
     [DllImport("user32.dll")]
     private static extern int GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out Point lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    private const uint GA_ROOT = 2;
+
+    private void OnWindowPinHotkeyPressed()
+    {
+        if (this.InvokeRequired)
+        {
+            this.BeginInvoke(this.OnWindowPinHotkeyPressed);
+            return;
+        }
+
+        if (!GetCursorPos(out var cursorPos))
+        {
+            return;
+        }
+
+        var hwnd = WindowFromPoint(cursorPos);
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var rootHwnd = GetAncestor(hwnd, GA_ROOT);
+        if (rootHwnd != IntPtr.Zero)
+        {
+            hwnd = rootHwnd;
+        }
+
+        if (hwnd == this.Handle)
+        {
+            return;
+        }
+
+        var title = WindowFocusService.GetWindowTitle(hwnd);
+        if (string.IsNullOrEmpty(title))
+        {
+            return;
+        }
+
+        var existingSession = this._activeTracker.ResolveSessionForHwnd(hwnd);
+        var menu = new ContextMenuStrip();
+
+        if (existingSession != null)
+        {
+            var session = this._cachedSessions.FirstOrDefault(s => s.Id == existingSession);
+            var sessionName = session != null
+                ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                : existingSession[..Math.Min(8, existingSession.Length)];
+
+            menu.Items.Add(new ToolStripMenuItem($"📌 Pinned to: {sessionName}") { Enabled = false });
+            menu.Items.Add(new ToolStripSeparator());
+
+            var detachItem = new ToolStripMenuItem("Detach from Session");
+            detachItem.Click += (s, e) =>
+            {
+                this._activeTracker.DetachWindow(existingSession, hwnd);
+                this.RequestRefresh(sessionId: existingSession, trackingChanged: true);
+                this._toast.Show("✅ Window detached from session");
+            };
+            menu.Items.Add(detachItem);
+        }
+        else
+        {
+            var displayTitle = title.Length > 60 ? title[..57] + "..." : title;
+            menu.Items.Add(new ToolStripMenuItem($"🪟 {displayTitle}") { Enabled = false, ForeColor = Color.Gray });
+            menu.Items.Add(new ToolStripSeparator());
+
+            var capturedHwnd = hwnd;
+            var capturedTitle = title;
+            var pinItem = new ToolStripMenuItem("Pin to Session...");
+            pinItem.Click += (s, e) =>
+            {
+                this.EnterPinMode(capturedHwnd, capturedTitle);
+            };
+            menu.Items.Add(pinItem);
+        }
+
+        menu.Items.Add(new ToolStripSeparator());
+        var cancelItem = new ToolStripMenuItem("Cancel");
+        cancelItem.Click += (s, e) => menu.Close();
+        menu.Items.Add(cancelItem);
+
+        menu.Show(cursorPos);
+    }
+
+    private void EnterPinMode(IntPtr hwnd, string title)
+    {
+        this._pinMode = true;
+        this._pinHwnd = hwnd;
+        this._pinTitle = title;
+
+        this.ShowToast();
+        this.Activate();
+
+        this._sessionsVisuals.GridVisuals.PinMode = true;
+        this._sessionsVisuals.SessionGrid.Cursor = Cursors.Cross;
+        this._toast.Show($"🎯 Click a session to pin: {title}");
+    }
+
+    private void ExitPinMode()
+    {
+        this._pinMode = false;
+        this._pinHwnd = IntPtr.Zero;
+        this._pinTitle = "";
+        this._sessionsVisuals.GridVisuals.PinMode = false;
+        this._sessionsVisuals.SessionGrid.Cursor = Cursors.Default;
+    }
+
     private void OnToastDeactivate(object? sender, EventArgs e)
     {
         if (!Program._settings.ToastMode || !Program._settings.SpotlightAutoHide || !this.IsToastVisible || this._toastAnimating)
@@ -688,6 +814,7 @@ internal partial class MainForm : Form
         this._activeTracker.EventsJournal.Dispose();
         this._workspaceWatcher?.Dispose();
         this._contextWatcher?.Dispose();
+        this._githubPoller?.Dispose();
         this._activeTracker.SaveWindowHandleCache();
 
         base.OnFormClosing(e);
@@ -729,6 +856,52 @@ internal partial class MainForm : Form
         };
 
         this.WireContextMenuEvents();
+
+        // Pin mode: intercept grid clicks to pin a window to the clicked session
+        this._sessionsVisuals.SessionGrid.CellMouseClick += (s, e) =>
+        {
+            if (!this._pinMode || e.RowIndex < 0 || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var sessionId = this._sessionsVisuals.SessionGrid.Rows[e.RowIndex].Tag as string;
+            if (sessionId == null)
+            {
+                return;
+            }
+
+            var session = this._cachedSessions.FirstOrDefault(x => x.Id == sessionId);
+            var sessionName = session != null
+                ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                : sessionId[..Math.Min(8, sessionId.Length)];
+
+            var label = this._pinTitle.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "Window";
+            var result = MessageBox.Show(
+                $"Pin \"{label}\" to session \"{sessionName}\"?",
+                "Pin Window to Session",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.Yes)
+            {
+                var proc = new ActiveProcess(label, 0, null) { Hwnd = this._pinHwnd, HwndEverCaptured = true };
+                this._activeTracker.TrackProcess(sessionId, proc);
+                this.RequestRefresh(sessionId: sessionId, trackingChanged: true);
+                this._toast.Show($"📌 {label} pinned to session");
+                this.ExitPinMode();
+            }
+        };
+
+        // Esc cancels pin mode
+        this._sessionsVisuals.SessionGrid.KeyDown += (s, e) =>
+        {
+            if (this._pinMode && e.KeyCode == Keys.Escape)
+            {
+                this.ExitPinMode();
+                this._toast.Show("Pin cancelled");
+            }
+        };
     }
 
     private void BuildAndShowSettingsDialog()
@@ -842,16 +1015,13 @@ internal partial class MainForm : Form
         this._windowHookService.ForegroundChanged += hwnd =>
         {
             // When a window gains focus, try to capture its HWND for tracked processes (IDEs).
-            // This catches IDE windows that weren't visible when EVENT_OBJECT_CREATE fired.
             var sessionId = this._activeTracker.OnWindowCreated(hwnd);
             if (sessionId != null)
             {
                 this.RequestRefresh(sessionId: sessionId, trackingChanged: true);
             }
 
-            // Also check title for Terminal/Copilot CLI patterns.
-            // This catches Windows Terminal windows where EVENT_OBJECT_NAMECHANGE
-            // doesn't fire on the top-level HWND when a new tab with --suppressApplicationTitle opens.
+            // Check title for Terminal/Copilot CLI patterns.
             var title = WindowFocusService.GetWindowTitle(hwnd);
             if (!string.IsNullOrEmpty(title))
             {
@@ -859,6 +1029,19 @@ internal partial class MainForm : Form
                 foreach (var id in affected)
                 {
                     this.RequestRefresh(sessionId: id, trackingChanged: true);
+                }
+            }
+
+            // Track active session: select the session row when its window gains focus
+            if (Program._settings.TrackActiveSession && this.IsHandleCreated)
+            {
+                var focusedSession = sessionId ?? this._activeTracker.ResolveSessionForHwnd(hwnd);
+                if (focusedSession != null)
+                {
+                    this.BeginInvoke(() =>
+                    {
+                        this._sessionsVisuals.SelectSessionById(focusedSession, this._cachedSessions);
+                    });
                 }
             }
         };
@@ -889,6 +1072,35 @@ internal partial class MainForm : Form
             // Start event-driven refresh after initial data is loaded
             this._windowHookService?.Start();
             this._fullRefreshTimer?.Start();
+
+            // Start GitHub polling
+            this._githubPoller = new GitHubPollingService(this._githubApi,
+                () => this._cachedSessions.Select(s => s.Id).ToList());
+            this._githubPoller.ItemUpdated += sid =>
+            {
+                if (this.IsHandleCreated)
+                {
+                    this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
+                }
+            };
+            this._githubPoller.NewActivityDetected += (sid, type, number, title) =>
+            {
+                var prefix = type == "pr" ? "PR" : "Issue";
+                var session = this._cachedSessions.FirstOrDefault(s => s.Id == sid);
+                var sessionName = session != null
+                    ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                    : sid[..Math.Min(8, sid.Length)];
+
+                var message = $"🔔 {prefix} #{number} has new activity\n{title}";
+
+                if (this.IsHandleCreated)
+                {
+                    this.BeginInvoke(() => this._toast.Show(message));
+                }
+
+                this._trayIcon?.ShowBalloonTip(5000, $"GitHub: {prefix} #{number}", title, ToolTipIcon.Info);
+            };
+            this._githubPoller.Start();
 
             this.CheckForMissingAllowedDirs();
             this.CheckForMissingSessionCwds();

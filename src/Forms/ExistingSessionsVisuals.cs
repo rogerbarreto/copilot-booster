@@ -52,6 +52,58 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when the user double-clicks a session row. Arg = session id.</summary>
     internal event Action<string>? OnSessionDoubleClicked;
 
+    /// <summary>
+    /// Selects a session row by ID. If the session is on a different tab, switches to that tab first.
+    /// Returns true if the session was found and selected.
+    /// </summary>
+    internal bool SelectSessionById(string sessionId, List<NamedSession> allSessions)
+    {
+        // Check if session is on current tab
+        for (int i = 0; i < this.SessionGrid.Rows.Count; i++)
+        {
+            if (this.SessionGrid.Rows[i].Tag is string sid && string.Equals(sid, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                this.GridVisuals.SelectRowByIndex(i);
+                return true;
+            }
+        }
+
+        // Session not on current tab — find its tab and switch
+        var session = allSessions.FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (session == null)
+        {
+            return false;
+        }
+
+        var targetTab = session.Tab;
+        if (string.Equals(targetTab, this.SelectedTabName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false; // Same tab but not visible (filtered out by search?)
+        }
+
+        // Switch tab
+        foreach (TabPage page in this.SessionTabs.TabPages)
+        {
+            if (string.Equals(page.Tag as string, targetTab, StringComparison.OrdinalIgnoreCase))
+            {
+                this.SessionTabs.SelectedTab = page;
+                break;
+            }
+        }
+
+        // After tab switch, the grid will be repopulated — try selecting again
+        for (int i = 0; i < this.SessionGrid.Rows.Count; i++)
+        {
+            if (this.SessionGrid.Rows[i].Tag is string sid2 && string.Equals(sid2, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                this.GridVisuals.SelectRowByIndex(i);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Fired when the user filters sessions via the search box.</summary>
     internal event Action? OnSearchChanged;
 
@@ -101,6 +153,21 @@ internal class ExistingSessionsVisuals
     /// Args: sessionId, IDE entry, file full path.
     /// </summary>
     internal event Action<string, IdeEntry, string>? OnOpenInIdeFile;
+
+    /// <summary>Fired when user selects "Add PR..." from context menu. Args: sessionId.</summary>
+    internal event Action<string>? OnAddPr;
+
+    /// <summary>Fired when user selects "Add Issue..." from context menu. Args: sessionId.</summary>
+    internal event Action<string>? OnAddIssue;
+
+    /// <summary>Fired when user selects "Show CI Jobs" for a tracked PR. Args: sessionId, prNumber.</summary>
+    internal event Action<string, int>? OnShowCiJobs;
+
+    /// <summary>Fired when user selects "Open in Edge" for a tracked item. Args: sessionId, type, number.</summary>
+    internal event Action<string, string, int>? OnOpenGitHubItem;
+
+    /// <summary>Fired when user selects "Remove" for a tracked item. Args: sessionId, type, number.</summary>
+    internal event Action<string, string, int>? OnRemoveGitHubItem;
 
     /// <summary>
     /// Callback to determine git-root visibility for context menu.
@@ -227,12 +294,15 @@ internal class ExistingSessionsVisuals
             BorderStyle = BorderStyle.None,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
             CellBorderStyle = DataGridViewCellBorderStyle.Single,
-            GridColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark,
+            GridColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x2A, 0x2A, 0x2A) : SystemColors.ControlDark,
+            BackgroundColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : SystemColors.Window,
             DefaultCellStyle = new DataGridViewCellStyle
             {
                 WrapMode = DataGridViewTriState.True,
                 Padding = new Padding(4, 4, 4, 4),
-                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : Color.FromArgb(200, 220, 245),
+                BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x11, 0x11, 0x11) : SystemColors.Window,
+                ForeColor = Application.IsDarkModeEnabled ? Color.FromArgb(0xCC, 0xCC, 0xCC) : SystemColors.ControlText,
+                SelectionBackColor = Application.IsDarkModeEnabled ? Color.FromArgb(0x38, 0x46, 0x59) : Color.FromArgb(200, 220, 245),
                 SelectionForeColor = Application.IsDarkModeEnabled ? Color.White : Color.Black
             },
             EnableHeadersVisualStyles = false,
@@ -294,13 +364,26 @@ internal class ExistingSessionsVisuals
         this.SessionGrid.Columns["RunningApps"]!.Width = 110;
         this.SessionGrid.Columns["RunningApps"]!.MinimumWidth = 60;
         this.SessionGrid.Columns["RunningApps"]!.Resizable = DataGridViewTriState.False;
+        var githubCol = new DataGridViewTextBoxColumn
+        {
+            Name = "GitHub",
+            HeaderText = "GitHub",
+            ToolTipText = "Tracked PRs and Issues",
+            Width = 80,
+            MinimumWidth = 50,
+            Resizable = DataGridViewTriState.False,
+            SortMode = DataGridViewColumnSortMode.NotSortable,
+            DefaultCellStyle = { Alignment = DataGridViewContentAlignment.MiddleCenter }
+        };
+        githubCol.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+        this.SessionGrid.Columns.Add(githubCol);
 
         // Restore saved column display order
         var savedOrder = this._settings.SessionColumnOrder;
         if (savedOrder.Count > 0)
         {
             // Default column order (non-frozen) for inserting new columns at correct positions
-            var defaultOrder = new List<string> { "Session", "CWD", "Date", "Context", "RunningApps" };
+            var defaultOrder = new List<string> { "Session", "CWD", "Date", "Context", "RunningApps", "GitHub" };
 
             // Build full order: start from saved, insert missing columns at their default position
             var fullOrder = new List<string>(savedOrder);
@@ -397,6 +480,7 @@ internal class ExistingSessionsVisuals
             this.OnSortChanged?.Invoke();
         };
 
+        // Window pin drag-and-drop: accept HWND drops from Win+Alt+C context menu
         bool adjustingSessionWidth = false;
         void AdjustSessionColumnWidth()
         {
@@ -413,6 +497,7 @@ internal class ExistingSessionsVisuals
                     + this.SessionGrid.Columns["Date"]!.Width
                     + ctxCol.Width
                     + this.SessionGrid.Columns["RunningApps"]!.Width
+                    + this.SessionGrid.Columns["GitHub"]!.Width
                     + (this.SessionGrid.RowHeadersVisible ? this.SessionGrid.RowHeadersWidth : 0)
                     + SystemInformation.VerticalScrollBarWidth + 2;
                 var fill = this.SessionGrid.ClientSize.Width - otherWidth;
@@ -1019,6 +1104,69 @@ internal class ExistingSessionsVisuals
 
         var menuMoveToTab = new ToolStripMenuItem("Move to") { Image = TryExtractIcon(shell32, 265) };
         gridContextMenu.Items.Add(menuMoveToTab);
+
+        // --- GitHub tracking ---
+        gridContextMenu.Items.Add(new ToolStripSeparator());
+
+        var menuGitHub = new ToolStripMenuItem("GitHub");
+        gridContextMenu.Items.Add(menuGitHub);
+
+        // Populate GitHub submenu dynamically when opening
+        gridContextMenu.Opening += (s, e) =>
+        {
+            menuGitHub.DropDownItems.Clear();
+
+            var sid = this.GridVisuals.GetSelectedSessionId();
+            if (sid == null)
+            {
+                return;
+            }
+
+            // Add PR / Add Issue
+            var addPr = new ToolStripMenuItem("Add PR...");
+            addPr.Click += (_, _) => this.OnAddPr?.Invoke(sid);
+            menuGitHub.DropDownItems.Add(addPr);
+
+            var addIssue = new ToolStripMenuItem("Add Issue...");
+            addIssue.Click += (_, _) => this.OnAddIssue?.Invoke(sid);
+            menuGitHub.DropDownItems.Add(addIssue);
+
+            // List tracked items
+            var data = GitHubTrackingService.Load(sid);
+            if (data != null && data.Items.Count > 0)
+            {
+                menuGitHub.DropDownItems.Add(new ToolStripSeparator());
+
+                foreach (var item in data.Items)
+                {
+                    var prefix = item.IsPr ? "PR" : "Issue";
+                    var stateHint = item.State != "open" ? $" ({item.State})" : "";
+                    var itemMenu = new ToolStripMenuItem($"{prefix} #{item.Number}{stateHint} — {item.Title}");
+
+                    if (item.IsPr)
+                    {
+                        var showCi = new ToolStripMenuItem("Show CI Jobs");
+                        var capturedNumber = item.Number;
+                        showCi.Click += (_, _) => this.OnShowCiJobs?.Invoke(sid, capturedNumber);
+                        itemMenu.DropDownItems.Add(showCi);
+                    }
+
+                    var openInBrowser = new ToolStripMenuItem("Open in Browser");
+                    var capturedType = item.Type;
+                    var capturedNum = item.Number;
+                    openInBrowser.Click += (_, _) => this.OnOpenGitHubItem?.Invoke(sid, capturedType, capturedNum);
+                    itemMenu.DropDownItems.Add(openInBrowser);
+
+                    itemMenu.DropDownItems.Add(new ToolStripSeparator());
+
+                    var remove = new ToolStripMenuItem("Remove");
+                    remove.Click += (_, _) => this.OnRemoveGitHubItem?.Invoke(sid, capturedType, capturedNum);
+                    itemMenu.DropDownItems.Add(remove);
+
+                    menuGitHub.DropDownItems.Add(itemMenu);
+                }
+            }
+        };
 
         // --- New session operations ---
         gridContextMenu.Items.Add(new ToolStripSeparator());
