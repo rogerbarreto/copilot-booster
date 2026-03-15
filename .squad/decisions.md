@@ -60,6 +60,65 @@
 2. Should we show the git command being executed in the progress panel? (Deferred — can revisit)
 3. Future: Propagate `CancellationToken` deeper into `RunGit` to kill hung git processes? (Separate issue)
 
+### Validation Outcome (2026-03-15)
+
+**By:** Niobe (Researcher)
+
+Comprehensive technical validation completed:
+
+#### Confirmed Correct
+
+- All 5 proposed .NET APIs exist and work as described
+- `git worktree add` has **NO `--progress` flag** (verified via docs, source code, help text, empirical test)
+- Marquee progress bar design is correct — no determinate progress data available
+- Community patterns (CancellationToken + Process, WinForms async/progress) align with proposals
+- `readonly record struct GitResult`, linked CTS, overlay panel patterns all valid
+
+#### Corrections Required
+
+1. **Trinity (Service Layer): Deadlock Risk**
+   - If `RunGitAsync` redirects both stdout and stderr, reading only stderr via `ReadLineAsync` can deadlock
+   - **Fix:** Read both streams concurrently (parallel tasks) OR use event-based `BeginOutputReadLine()`/`BeginErrorReadLine()` OR redirect only stderr
+   - **Critical:** Since `GitResult` captures both `Stdout` and `Stderr`, concurrent reading is necessary
+
+2. **Morpheus (UI): ControlBox Overcorrection**
+   - `form.ControlBox = false` removes ALL title bar buttons (Close, Minimize, Maximize), not just the X
+   - **Better approach:** Handle `FormClosing` event during creation:
+     ```csharp
+     private void Form_FormClosing(object sender, FormClosingEventArgs e)
+     {
+         if (_isCreatingWorktree)
+             e.Cancel = true;
+     }
+     ```
+   - This preserves minimize/maximize and form icon while blocking closure
+
+3. **Neo (Architecture): Cleanup Fallback**
+   - Add `git worktree prune` as secondary cleanup step
+   - If `git worktree remove --force` fails (partial directory, stale metadata), `prune` clears `.git/worktrees` entries
+   - Sequence: Try `remove --force` → fallback to `prune` + directory delete
+
+#### Minor Considerations
+
+- `Application.IsDarkModeEnabled`/`SetColorMode` only works on Windows 11+ — ensure graceful fallback
+- `MarqueeAnimationSpeed` may be overridden by Windows visual effects (systems with animation disabled)
+
+### User Directive: Simplified UX (2026-03-15T16:28:03Z)
+
+**By:** Roger Barreto
+
+**Priority:** High
+
+The current "progress panel overlay" design may be over-engineered. **User preference:**
+
+- Don't need a fancy progress bar for worktree creation
+- Show simple "In Progress..." state (like current "Creating..." button text)
+- **Critical:** DO NOT kill the git process if it hasn't finished
+- **Root problem:** The timeout (120s) that KILLS the process, not lack of visual feedback
+- **Focus:** Fix the actual bug (timeout killing viable operations), simplify UX
+
+**Implication:** Progress panel, elapsed timer, marquee animation may be deferred or removed. Priority is extending the timeout and ensuring graceful operation cancellation vs. process termination.
+
 ---
 
 ## Governance

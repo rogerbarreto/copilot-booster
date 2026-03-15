@@ -62,4 +62,5 @@ When triaging, the Lead should ask:
 | WinForms, components, theming | Morpheus | — |
 | TDD, unit & integration tests | Tank | — |
 | SOLID, refactoring, performance | Oracle | — |
+| Research, docs validation, community patterns | Niobe | — |
 

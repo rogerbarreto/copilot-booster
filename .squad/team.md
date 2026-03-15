@@ -17,6 +17,7 @@
 | Morpheus | UI Dev | `.squad/agents/morpheus/charter.md` | ✅ Active |
 | Tank | Tester | `.squad/agents/tank/charter.md` | ✅ Active |
 | Oracle | Quality Architect | `.squad/agents/oracle/charter.md` | ✅ Active |
+| Niobe | Researcher | `.squad/agents/niobe/charter.md` | ✅ Active |
 | Scribe | Session Logger | `.squad/agents/scribe/charter.md` | 📋 Silent |
 | Ralph | Work Monitor | `.squad/agents/ralph/charter.md` | 🔄 Monitor |
 

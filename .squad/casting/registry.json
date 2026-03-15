@@ -30,6 +30,12 @@
       "universe": "The Matrix",
       "status": "active"
     },
+    "niobe": {
+      "created_at": "2026-03-15T16:05:27.000Z",
+      "persistent_name": "Niobe",
+      "universe": "The Matrix",
+      "status": "active"
+    },
     "scribe": {
       "created_at": "2026-03-15T15:50:59.660Z",
       "persistent_name": "Scribe",
