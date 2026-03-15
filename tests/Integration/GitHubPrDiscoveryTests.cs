@@ -42,7 +42,7 @@ public sealed class GitHubPrDiscoveryTests
     /// NOT just the first PR in the repo.
     /// </summary>
     [Fact]
-    public async Task DiscoverPr_ForkBranch_ReturnsPrMatchingBranch()
+    public async Task DiscoverPr_ForkBranch_ReturnsPrMatchingBranchAsync()
     {
         var api = CreateApi();
 
@@ -66,7 +66,7 @@ public sealed class GitHubPrDiscoveryTests
     /// The returned PR's head.ref must match the searched branch.
     /// </summary>
     [Fact]
-    public async Task DiscoverPr_SameRepoBranch_ReturnsPrMatchingBranch()
+    public async Task DiscoverPr_SameRepoBranch_ReturnsPrMatchingBranchAsync()
     {
         var api = CreateApi();
 
@@ -87,7 +87,7 @@ public sealed class GitHubPrDiscoveryTests
     /// Discovery for a nonexistent branch returns null or empty array.
     /// </summary>
     [Fact]
-    public async Task DiscoverPr_NonexistentBranch_ReturnsNullOrEmpty()
+    public async Task DiscoverPr_NonexistentBranch_ReturnsNullOrEmptyAsync()
     {
         var api = CreateApi();
 
@@ -106,7 +106,7 @@ public sealed class GitHubPrDiscoveryTests
     /// Fetching a known PR by number returns correct data.
     /// </summary>
     [Fact]
-    public async Task GetPr_KnownNumber_ReturnsData()
+    public async Task GetPr_KnownNumber_ReturnsDataAsync()
     {
         var api = CreateApi();
 
@@ -125,7 +125,7 @@ public sealed class GitHubPrDiscoveryTests
     /// GetIssueAsync should return null for PRs (they have pull_request property).
     /// </summary>
     [Fact]
-    public async Task GetIssue_PrNumber_ReturnsNull()
+    public async Task GetIssue_PrNumber_ReturnsNullAsync()
     {
         var api = CreateApi();
         var doc = await api.GetIssueAsync("dotnet", "runtime", 125557);
@@ -138,7 +138,7 @@ public sealed class GitHubPrDiscoveryTests
     /// This catches false 404s from rate limiting or auth cascade bugs.
     /// </summary>
     [Fact]
-    public async Task GetIssue_PublicIssue_ReturnsData()
+    public async Task GetIssue_PublicIssue_ReturnsDataAsync()
     {
         var api = CreateApi();
         var doc = await api.GetIssueAsync("microsoft", "agent-framework", 4702);
@@ -158,7 +158,7 @@ public sealed class GitHubPrDiscoveryTests
     /// The API response must include state_reason so the icon shows gray (not purple).
     /// </summary>
     [Fact]
-    public async Task GetIssue_ClosedNotPlanned_HasStateReason()
+    public async Task GetIssue_ClosedNotPlanned_HasStateReasonAsync()
     {
         var api = CreateApi();
 
@@ -179,7 +179,7 @@ public sealed class GitHubPrDiscoveryTests
     /// the resulting GitHubTrackedItem must have StateReason = "not_planned".
     /// </summary>
     [Fact]
-    public async Task ParseIssue_ClosedNotPlanned_StateReasonPreserved()
+    public async Task ParseIssue_ClosedNotPlanned_StateReasonPreservedAsync()
     {
         var api = CreateApi();
 
@@ -218,7 +218,7 @@ public sealed class GitHubPrDiscoveryTests
     /// Without the fix, IsFinal skips the item and StateReason stays null → purple icon.
     /// </summary>
     [Fact]
-    public async Task Polling_ClosedIssue_MissingStateReason_BackfillsFromApi()
+    public async Task Polling_ClosedIssue_MissingStateReason_BackfillsFromApiAsync()
     {
         var api = CreateApi();
         const string SessionId = "e2e-stale-state-reason";
@@ -253,7 +253,7 @@ public sealed class GitHubPrDiscoveryTests
             // Actually poll via PollSessionNow and verify backfill
             using var poller = new GitHubPollingService(api, () => [SessionId]);
             poller.PollSessionNow(SessionId);
-            await Task.Delay(3000);
+            await Task.Delay(3000, TestContext.Current.CancellationToken);
 
             var updated = GitHubTrackingService.Load(SessionId);
             Assert.NotNull(updated);
@@ -275,7 +275,7 @@ public sealed class GitHubPrDiscoveryTests
     /// Merged PRs should NOT be re-polled (they're truly final).
     /// </summary>
     [Fact]
-    public async Task Polling_MergedPr_NotRepolled()
+    public async Task Polling_MergedPr_NotRepolledAsync()
     {
         var api = CreateApi();
         const string SessionId = "e2e-merged-pr-nopoll";
@@ -301,7 +301,7 @@ public sealed class GitHubPrDiscoveryTests
         {
             using var poller = new GitHubPollingService(api, () => [SessionId]);
             poller.PollSessionNow(SessionId);
-            await Task.Delay(2000);
+            await Task.Delay(2000, TestContext.Current.CancellationToken);
 
             // Merged PR should NOT have been changed (still merged, no re-poll)
             var updated = GitHubTrackingService.Load(SessionId);
@@ -320,3 +320,4 @@ public sealed class GitHubPrDiscoveryTests
         }
     }
 }
+

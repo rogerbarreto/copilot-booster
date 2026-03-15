@@ -31,6 +31,10 @@
         Assert.Equal(4, visuals.SessionTabs.TabPages.Count);
         Assert.Equal("Work", visuals.SessionTabs.TabPages[2].Tag);
 
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -55,6 +59,10 @@
         visuals.BuildSessionTabs();
 
         Assert.Equal("Archived", visuals.SelectedTabName);
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -78,6 +86,10 @@
         Assert.True(
             selectedTab.Controls.Contains(visuals.SessionGrid),
             "Grid should be parented on the first tab after construction");
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -106,6 +118,10 @@
         Assert.True(
             selectedTab.Controls.Contains(visuals.SessionGrid),
             "Grid should be parented on the previously selected tab after rebuild");
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -128,6 +144,10 @@
         var plusTab = visuals.SessionTabs.TabPages[2];
         Assert.Equal("+", plusTab.Text);
         Assert.Null(plusTab.Tag);
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -148,6 +168,10 @@
 
         Assert.Equal(2, visuals.SessionTabs.TabPages.Count);
         Assert.All(visuals.SessionTabs.TabPages.Cast<TabPage>(), p => Assert.NotNull(p.Tag));
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -172,6 +196,10 @@
 
         var plusTab = visuals.SessionTabs.TabPages[1];
         Assert.Equal("+", plusTab.Text);
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -190,6 +218,10 @@
         var visuals = new ExistingSessionsVisuals(panel, tracker, settings);
 
         Assert.Equal("Active", visuals.SelectedTabName);
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -290,6 +322,10 @@
         Assert.Equal("Todo", visuals.SessionTabs.TabPages[2].Tag);
         Assert.Equal("Archived", visuals.SessionTabs.TabPages[3].Tag);
         Assert.Null(visuals.SessionTabs.TabPages[4].Tag);
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -318,6 +354,10 @@
         Assert.Equal("Active", visuals.SessionTabs.TabPages[1].Tag);
         Assert.Equal("Done", visuals.SessionTabs.TabPages[2].Tag);
         Assert.Equal("Archived", visuals.SessionTabs.TabPages[3].Tag);
+        visuals.SessionGrid.Dispose();
+
+        visuals.SessionTabs.Dispose();
+
         form.Close();
     }
 
@@ -349,3 +389,4 @@
         Assert.Contains("Todo", settings.SessionTabs);
     }
 }
+

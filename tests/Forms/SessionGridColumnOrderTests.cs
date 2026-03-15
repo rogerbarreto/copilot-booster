@@ -173,6 +173,8 @@
 
         Assert.Equal(cwdBefore, visuals.SessionGrid.Columns["CWD"]!.DisplayIndex);
         Assert.Equal(sessionBefore, visuals.SessionGrid.Columns["Session"]!.DisplayIndex);
+        visuals.SessionGrid.Dispose();
+        visuals.SessionTabs.Dispose();
         form.Close();
     }
 
@@ -207,6 +209,8 @@
 
         Assert.Equal(cwdBefore, visuals.SessionGrid.Columns["CWD"]!.DisplayIndex);
         Assert.Equal(sessionBefore, visuals.SessionGrid.Columns["Session"]!.DisplayIndex);
+        visuals.SessionGrid.Dispose();
+        visuals.SessionTabs.Dispose();
         form.Close();
     }
 }

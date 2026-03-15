@@ -119,7 +119,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
     /// Uses a known merged PR if one exists, otherwise creates a synthetic test.
     /// </summary>
     [Fact]
-    public async Task AddPr_RealPath_ClonedRepo_FindsPrByNumber()
+    public async Task AddPr_RealPath_ClonedRepo_FindsPrByNumberAsync()
     {
         var repoDir = this.CloneRepo();
         var api = CreateApi();
@@ -179,7 +179,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
     /// </summary>
     [Fact]
     [Trait("Category", "LocalOnly")]
-    public async Task AddIssue_AgentFramework_UpstreamRemote_FindsIssue4702()
+    public async Task AddIssue_AgentFramework_UpstreamRemote_FindsIssue4702Async()
     {
         const string WorktreePath = @"S:\repo\worktrees\agent-framework-roger-test";
         if (!Directory.Exists(WorktreePath))
@@ -220,7 +220,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
     /// </summary>
     [Fact]
     [Trait("Category", "LocalOnly")]
-    public async Task AddIssue_MicrosoftAgentFramework_Issue4702_Found()
+    public async Task AddIssue_MicrosoftAgentFramework_Issue4702_FoundAsync()
     {
         var api = CreateApi();
 
@@ -235,3 +235,4 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
         }
     }
 }
+
