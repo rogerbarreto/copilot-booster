@@ -1182,7 +1182,7 @@ internal class ExistingSessionsVisuals
         };
         gridContextMenu.Items.Add(menuOpenNewSession);
 
-        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Workspace") { Image = copilotIcon?.Clone() as Image };
+        var menuOpenNewSessionWorkspace = new ToolStripMenuItem("Open as New Copilot Session Worktree") { Image = copilotIcon?.Clone() as Image };
         menuOpenNewSessionWorkspace.Click += (s, e) =>
         {
             var sid = this.GridVisuals.GetSelectedSessionId();

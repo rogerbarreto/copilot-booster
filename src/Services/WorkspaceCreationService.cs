@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CopilotBooster.Services;
 
@@ -57,6 +59,23 @@ internal static class WorkspaceCreationService
     }
 
     /// <summary>
+    /// Asynchronous version of <see cref="CreateWorkspace"/> with cancellation support.
+    /// Waits for the git worktree operation to complete naturally — no hard timeout.
+    /// </summary>
+    internal static async Task<(string path, bool success, string? error)> CreateWorkspaceAsync(
+        string repoPath, string repoFolderName, string workspaceName, string baseBranch, CancellationToken cancellationToken = default)
+    {
+        var worktreePath = BuildWorkspacePath(repoFolderName, workspaceName);
+
+        Directory.CreateDirectory(GitService.GetWorkspacesDir());
+
+        var (success, errorMsg) = await GitService.CreateWorktreeAsync(repoPath, worktreePath, workspaceName, baseBranch, cancellationToken).ConfigureAwait(false);
+        return success
+            ? (worktreePath, true, null)
+            : (worktreePath, false, errorMsg);
+    }
+
+    /// <summary>
     /// Creates a new workspace with a local branch tracking the specified ref.
     /// If a local branch with the same name already exists, appends an incrementing suffix (001, 002, etc.).
     /// </summary>
@@ -84,6 +103,30 @@ internal static class WorkspaceCreationService
     }
 
     /// <summary>
+    /// Asynchronous version of <see cref="CreateWorkspaceFromExistingBranch"/> with cancellation support.
+    /// Waits for the git worktree operation to complete naturally — no hard timeout.
+    /// Sync helper calls (GetRemotes, LocalBranchExists, GetLocalBranchName, ResolveUniqueBranchName) remain synchronous.
+    /// </summary>
+    internal static async Task<(string path, bool success, string? error)> CreateWorkspaceFromExistingBranchAsync(
+        string repoPath, string repoFolderName, string sourceRef, CancellationToken cancellationToken = default)
+    {
+        var remotes = GitService.GetRemotes(repoPath);
+        var localBranchName = GitService.GetLocalBranchName(sourceRef, remotes);
+        var uniqueBranchName = ResolveUniqueBranchName(repoPath, localBranchName);
+        var worktreePath = BuildWorkspacePath(repoFolderName, uniqueBranchName);
+
+        Directory.CreateDirectory(GitService.GetWorkspacesDir());
+
+        // If the local branch already exists, check it out directly; otherwise create it from the source ref.
+        var (success, errorMsg) = GitService.LocalBranchExists(repoPath, uniqueBranchName)
+            ? await GitService.CheckoutLocalBranchWorktreeAsync(repoPath, worktreePath, uniqueBranchName, cancellationToken).ConfigureAwait(false)
+            : await GitService.CheckoutExistingBranchWorktreeAsync(repoPath, worktreePath, uniqueBranchName, sourceRef, cancellationToken).ConfigureAwait(false);
+        return success
+            ? (worktreePath, true, null)
+            : (worktreePath, false, errorMsg);
+    }
+
+    /// <summary>
     /// Creates a new workspace from a pull request number by fetching the PR ref and creating a worktree.
     /// </summary>
     internal static (string path, bool success, string? error) CreateWorkspaceFromPr(
@@ -105,6 +148,35 @@ internal static class WorkspaceCreationService
         var (success, errorMsg) = GitService.LocalBranchExists(repoPath, uniqueBranchName)
             ? GitService.CheckoutLocalBranchWorktree(repoPath, worktreePath, uniqueBranchName)
             : GitService.CheckoutExistingBranchWorktree(repoPath, worktreePath, uniqueBranchName, "FETCH_HEAD");
+        return success
+            ? (worktreePath, true, null)
+            : (worktreePath, false, errorMsg);
+    }
+
+    /// <summary>
+    /// Asynchronous version of <see cref="CreateWorkspaceFromPr"/> with cancellation support.
+    /// Waits for the git fetch and worktree operations to complete naturally — no hard timeout.
+    /// Sync helper calls (LocalBranchExists, ResolveUniqueBranchName) remain synchronous.
+    /// </summary>
+    internal static async Task<(string path, bool success, string? error)> CreateWorkspaceFromPrAsync(
+        string repoPath, string repoFolderName, string remote, int prNumber, GitService.HostingPlatform platform, string? headBranch = null, CancellationToken cancellationToken = default)
+    {
+        var baseBranchName = headBranch ?? $"pr-{prNumber}";
+        var uniqueBranchName = ResolveUniqueBranchName(repoPath, baseBranchName);
+        var worktreePath = BuildWorkspacePath(repoFolderName, uniqueBranchName);
+
+        Directory.CreateDirectory(GitService.GetWorkspacesDir());
+
+        var (fetchSuccess, fetchError) = await GitService.FetchPrRefAsync(repoPath, remote, platform, prNumber, cancellationToken).ConfigureAwait(false);
+        if (!fetchSuccess)
+        {
+            return (worktreePath, false, $"Failed to fetch PR #{prNumber}: {fetchError}");
+        }
+
+        // If the local branch already exists, check it out directly; otherwise create it from FETCH_HEAD.
+        var (success, errorMsg) = GitService.LocalBranchExists(repoPath, uniqueBranchName)
+            ? await GitService.CheckoutLocalBranchWorktreeAsync(repoPath, worktreePath, uniqueBranchName, cancellationToken).ConfigureAwait(false)
+            : await GitService.CheckoutExistingBranchWorktreeAsync(repoPath, worktreePath, uniqueBranchName, "FETCH_HEAD", cancellationToken).ConfigureAwait(false);
         return success
             ? (worktreePath, true, null)
             : (worktreePath, false, errorMsg);

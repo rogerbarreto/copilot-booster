@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
@@ -112,6 +114,17 @@ internal static partial class GitService
     }
 
     /// <summary>
+    /// Asynchronous version of <see cref="CreateWorktree"/> with cancellation support.
+    /// Waits for the process to complete naturally — no hard timeout.
+    /// </summary>
+    internal static async Task<(bool success, string error)> CreateWorktreeAsync(
+        string repoPath, string worktreePath, string branchName, string baseBranch, CancellationToken cancellationToken = default)
+    {
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, $"worktree add -b {branchName} {worktreePath} {baseBranch}", cancellationToken).ConfigureAwait(false);
+        return exitCode == 0 ? (true, "") : (false, stderr.Trim());
+    }
+
+    /// <summary>
     /// Creates a new Git worktree with a local branch tracking the specified ref.
     /// </summary>
     /// <param name="repoPath">The root directory of the Git repository.</param>
@@ -126,12 +139,34 @@ internal static partial class GitService
     }
 
     /// <summary>
+    /// Asynchronous version of <see cref="CheckoutExistingBranchWorktree"/> with cancellation support.
+    /// Waits for the process to complete naturally — no hard timeout.
+    /// </summary>
+    internal static async Task<(bool success, string error)> CheckoutExistingBranchWorktreeAsync(
+        string repoPath, string worktreePath, string localBranchName, string sourceRef, CancellationToken cancellationToken = default)
+    {
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, $"worktree add -b {localBranchName} \"{worktreePath}\" {sourceRef}", cancellationToken).ConfigureAwait(false);
+        return exitCode == 0 ? (true, "") : (false, stderr.Trim());
+    }
+
+    /// <summary>
     /// Creates a worktree by checking out an existing local branch.
     /// Use when the local branch already exists and is not in another worktree.
     /// </summary>
     internal static (bool success, string error) CheckoutLocalBranchWorktree(string repoPath, string worktreePath, string localBranchName)
     {
         var (exitCode, _, stderr) = RunGit(repoPath, $"worktree add \"{worktreePath}\" {localBranchName}");
+        return exitCode == 0 ? (true, "") : (false, stderr.Trim());
+    }
+
+    /// <summary>
+    /// Asynchronous version of <see cref="CheckoutLocalBranchWorktree"/> with cancellation support.
+    /// Waits for the process to complete naturally — no hard timeout.
+    /// </summary>
+    internal static async Task<(bool success, string error)> CheckoutLocalBranchWorktreeAsync(
+        string repoPath, string worktreePath, string localBranchName, CancellationToken cancellationToken = default)
+    {
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, $"worktree add \"{worktreePath}\" {localBranchName}", cancellationToken).ConfigureAwait(false);
         return exitCode == 0 ? (true, "") : (false, stderr.Trim());
     }
 
@@ -452,6 +487,23 @@ internal static partial class GitService
     }
 
     /// <summary>
+    /// Asynchronous version of <see cref="FetchPrRef"/> with cancellation support.
+    /// Waits for the fetch to complete naturally — no hard timeout (replaces the 60s sync timeout).
+    /// </summary>
+    internal static async Task<(bool success, string error)> FetchPrRefAsync(
+        string repoPath, string remote, HostingPlatform platform, int prNumber, CancellationToken cancellationToken = default)
+    {
+        var refPattern = GetPrRefPattern(platform, prNumber);
+        if (refPattern is null)
+        {
+            return (false, "Unsupported hosting platform.");
+        }
+
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, $"fetch {remote} {refPattern}", cancellationToken).ConfigureAwait(false);
+        return exitCode == 0 ? (true, "") : (false, stderr.Trim());
+    }
+
+    /// <summary>
     /// Parses the owner and repo from a GitHub remote URL.
     /// Supports HTTPS and SSH formats.
     /// </summary>
@@ -532,6 +584,65 @@ internal static partial class GitService
             var stderr = stderrTask.GetAwaiter().GetResult();
 
             return (process.ExitCode, stdout, stderr);
+        }
+        catch (Exception ex)
+        {
+            return (-1, "", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Asynchronous version of <see cref="RunGit"/> with cancellation support.
+    /// Waits for the process to complete naturally — no hard timeout.
+    /// On cancellation, kills the entire process tree.
+    /// </summary>
+    /// <param name="repoPath">The working directory for the Git process.</param>
+    /// <param name="arguments">The arguments to pass to the <c>git</c> executable.</param>
+    /// <param name="cancellationToken">Token to cancel the operation and kill the process.</param>
+    /// <returns>A tuple containing the exit code, standard output, and standard error.</returns>
+    internal static async Task<(int exitCode, string stdout, string stderr)> RunGitAsync(
+        string repoPath, string arguments, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = arguments,
+                WorkingDirectory = repoPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            process.Start();
+
+            // Register cancellation callback to kill the process tree BEFORE awaiting,
+            // so cancellation is handled even if the process is blocked.
+            using var registration = cancellationToken.Register(() =>
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (Exception ex) { Program.Logger.LogDebug("Failed to kill git process on cancellation: {Error}", ex.Message); }
+            });
+
+            // Read both streams concurrently to prevent deadlock when
+            // a git command (e.g. fetch) fills the stderr buffer with progress output.
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
+
+            return (process.ExitCode, stdout, stderr);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

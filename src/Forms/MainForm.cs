@@ -40,6 +40,7 @@ internal partial class MainForm : Form
     private BellNotificationService? _bellService;
     private readonly WorkspaceYamlWatcherService? _workspaceWatcher;
     private readonly SessionContextWatcherService? _contextWatcher;
+    private readonly CopilotLogWatcherService? _logWatcher;
     private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly GitHubApiService _githubApi;
@@ -151,6 +152,17 @@ internal partial class MainForm : Form
             }
         };
         this._contextWatcher.StartWatching();
+
+        this._logWatcher = new CopilotLogWatcherService();
+        this._logWatcher.ExternalSessionDiscovered += sid =>
+        {
+            if (this.IsHandleCreated)
+            {
+                Program.Logger.LogInformation("External session discovered via log watcher: {SessionId}", sid);
+                this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, dataChanged: true));
+            }
+        };
+        this._logWatcher.StartWatching();
 
         this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
@@ -814,6 +826,7 @@ internal partial class MainForm : Form
         this._activeTracker.EventsJournal.Dispose();
         this._workspaceWatcher?.Dispose();
         this._contextWatcher?.Dispose();
+        this._logWatcher?.Dispose();
         this._githubPoller?.Dispose();
         this._activeTracker.SaveWindowHandleCache();
 

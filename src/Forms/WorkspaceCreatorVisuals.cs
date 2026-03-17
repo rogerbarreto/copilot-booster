@@ -55,7 +55,7 @@ internal static class WorkspaceCreatorVisuals
 
         var form = new Form
         {
-            Text = "Create New Workspace",
+            Text = "Create New Worktree",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
@@ -65,6 +65,16 @@ internal static class WorkspaceCreatorVisuals
             TopMost = Program._settings.AlwaysOnTop
         };
         SettingsVisuals.AlignWithParent(form);
+
+        bool isCreating = false;
+
+        form.FormClosing += (s, e) =>
+        {
+            if (isCreating && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+            }
+        };
 
         if (Program.AppIcon != null)
         {
@@ -76,7 +86,7 @@ internal static class WorkspaceCreatorVisuals
         // Subtitle
         var lblSubtitle = new Label
         {
-            Text = "Set up a new isolated workspace for your coding session",
+            Text = "Set up a new isolated worktree for your coding session",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 8.5f),
             AutoSize = true,
@@ -194,7 +204,7 @@ internal static class WorkspaceCreatorVisuals
 
         var lblNameHelper = new Label
         {
-            Text = "A descriptive name for your workspace (becomes the branch name)",
+            Text = "A descriptive name for your worktree (becomes the branch name)",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,
@@ -243,7 +253,7 @@ internal static class WorkspaceCreatorVisuals
 
         var lblBranchHelper = new Label
         {
-            Text = "The branch to create the workspace from",
+            Text = "The branch to create the worktree from",
             ForeColor = Color.Gray,
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
             AutoSize = true,
@@ -1124,11 +1134,12 @@ internal static class WorkspaceCreatorVisuals
                 }
 
                 var platform = remotePlatforms[remoteName];
+                isCreating = true;
                 btnCreate.Enabled = false;
                 btnCreate.Text = "Creating...";
-                var (worktreePath, success, error) = await Task.Run(() =>
-                    WorkspaceCreationService.CreateWorkspaceFromPr(
-                        repoPath, repoFolderName!, remoteName, prNum, platform, fetchedPrHeadBranch)).ConfigureAwait(true);
+                var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceFromPrAsync(
+                    repoPath, repoFolderName!, remoteName, prNum, platform, fetchedPrHeadBranch).ConfigureAwait(true);
+                isCreating = false;
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
@@ -1153,7 +1164,7 @@ internal static class WorkspaceCreatorVisuals
                 {
                     btnCreate.Enabled = true;
                     btnCreate.Text = "Create";
-                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show($"Failed to create worktree:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else if (rdoFromIssue.Checked)
@@ -1182,10 +1193,12 @@ internal static class WorkspaceCreatorVisuals
                 }
                 var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
 
+                isCreating = true;
                 btnCreate.Enabled = false;
                 btnCreate.Text = "Creating...";
-                var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
-                    repoPath, repoFolderName!, branchName, baseBranch);
+                var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceAsync(
+                    repoPath, repoFolderName!, branchName, baseBranch).ConfigureAwait(true);
+                isCreating = false;
                 if (success)
                 {
                     result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, issueGitHubUrl);
@@ -1196,7 +1209,7 @@ internal static class WorkspaceCreatorVisuals
                 {
                     btnCreate.Enabled = true;
                     btnCreate.Text = "Create";
-                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show($"Failed to create worktree:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else if (rdoNewBranch.Checked)
@@ -1210,8 +1223,12 @@ internal static class WorkspaceCreatorVisuals
                 }
 
                 var selectedBaseBranch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ') ?? "main";
-                var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspace(
-                    repoPath, repoFolderName!, workspaceName, selectedBaseBranch);
+                isCreating = true;
+                btnCreate.Enabled = false;
+                btnCreate.Text = "Creating...";
+                var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceAsync(
+                    repoPath, repoFolderName!, workspaceName, selectedBaseBranch).ConfigureAwait(true);
+                isCreating = false;
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
@@ -1221,15 +1238,21 @@ internal static class WorkspaceCreatorVisuals
                 }
                 else
                 {
-                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    btnCreate.Enabled = true;
+                    btnCreate.Text = "Create";
+                    MessageBox.Show($"Failed to create worktree:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else
             {
                 // Existing branch mode
                 var selectedBaseBranch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ') ?? "main";
-                var (worktreePath, success, error) = WorkspaceCreationService.CreateWorkspaceFromExistingBranch(
-                    repoPath, repoFolderName!, selectedBaseBranch);
+                isCreating = true;
+                btnCreate.Enabled = false;
+                btnCreate.Text = "Creating...";
+                var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceFromExistingBranchAsync(
+                    repoPath, repoFolderName!, selectedBaseBranch).ConfigureAwait(true);
+                isCreating = false;
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
@@ -1239,7 +1262,9 @@ internal static class WorkspaceCreatorVisuals
                 }
                 else
                 {
-                    MessageBox.Show($"Failed to create workspace:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    btnCreate.Enabled = true;
+                    btnCreate.Text = "Create";
+                    MessageBox.Show($"Failed to create worktree:\n{error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         };

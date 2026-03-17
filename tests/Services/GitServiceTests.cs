@@ -220,6 +220,62 @@
     }
 
     [Fact]
+    public async Task RunGitAsync_ReturnsOutput_ForSimpleCommand()
+    {
+        var repoPath = this.InitBareGitRepo();
+
+        var result = await GitService.RunGitAsync(repoPath, "status").ConfigureAwait(false);
+
+        Assert.Equal(0, result.exitCode);
+        Assert.Contains("On branch", result.stdout);
+    }
+
+    [Fact]
+    public async Task RunGitAsync_ReturnsNonZeroExitCode_ForBadCommand()
+    {
+        var repoPath = this.InitBareGitRepo();
+
+        var result = await GitService.RunGitAsync(repoPath, "not-a-real-command").ConfigureAwait(false);
+
+        Assert.NotEqual(0, result.exitCode);
+    }
+
+    [Fact]
+    public async Task RunGitAsync_ThrowsOnCancellation_WhenTokenAlreadyCancelled()
+    {
+        var repoPath = this.InitBareGitRepo();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => GitService.RunGitAsync(repoPath, "status", cancellationToken: cts.Token)).ConfigureAwait(false);
+    }
+
+    [Fact]
+    public async Task CreateWorktreeAsync_CreatesWorktree_WhenRepoIsValid()
+    {
+        var repoPath = this.InitBareGitRepo();
+        var wtPath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
+
+        var (success, error) = await GitService.CreateWorktreeAsync(repoPath, wtPath, "test-branch", "main").ConfigureAwait(false);
+
+        Assert.True(success, $"Expected worktree creation to succeed but got error: {error}");
+        Assert.True(Directory.Exists(wtPath), "Worktree directory should exist after creation");
+    }
+
+    [Fact]
+    public async Task CreateWorktreeAsync_ReturnsError_WhenBranchAlreadyCheckedOut()
+    {
+        var repoPath = this.InitBareGitRepo();
+        var wtPath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
+
+        // "main" is already checked out in the main worktree, so creating a worktree for it should fail.
+        var (success, _) = await GitService.CreateWorktreeAsync(repoPath, wtPath, "main", "main").ConfigureAwait(false);
+
+        Assert.False(success);
+    }
+
+    [Fact]
     public void ResolveUniqueBranchName_ReturnBaseNameWhenNoWorktreeConflict()
     {
         // Even if a branch with the same name exists, if no worktree uses it, return the base name.

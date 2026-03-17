@@ -219,7 +219,7 @@ internal class NewSessionVisuals
         };
         cwdContextMenu.Items.Add(menuNewSession);
 
-        var menuNewSessionWorkspace = new ToolStripMenuItem("New Copilot Session Workspace") { Image = copilotIcon?.Clone() as Image };
+        var menuNewSessionWorkspace = new ToolStripMenuItem("New Copilot Session Worktree") { Image = copilotIcon?.Clone() as Image };
         menuNewSessionWorkspace.Click += async (s, e) =>
         {
             if (this.CwdListView.SelectedItems.Count > 0

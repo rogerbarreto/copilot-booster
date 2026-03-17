@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.1] - 2026-03-17
+
+### Fixed
+
+- **Worktree creation timeout** — `git worktree add` on large repositories no longer times out after 10 seconds. The operation now runs to completion without being killed. (#12)
+- **Async worktree creation** — all 4 worktree creation modes (PR, Issue, New Branch, Existing Branch) now run asynchronously, preventing UI freezes during creation.
+- **FormClosing guard** — added guard to prevent accidentally closing the worktree creation dialog during an operation.
+
+### Changed
+
+- **Workspace → Worktree rename** — renamed user-facing "Workspace" labels to "Worktree" in the creation dialog, menus, and error messages for consistency with git terminology. (#12)
+
+### Added
+
+- **External Copilot session discovery** — sessions started outside of Copilot Booster are now automatically detected via log file monitoring (`~/.copilot/logs/`). A `workspace.yaml` is auto-created so the session appears in the UI immediately.
+
 ## [0.19.0] - 2026-03-15
 
 ### Added
