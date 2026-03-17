@@ -220,7 +220,7 @@
     }
 
     [Fact]
-    public async Task RunGitAsync_ReturnsOutput_ForSimpleCommand()
+    public async Task RunGitAsync_ReturnsOutput_ForSimpleCommandAsync()
     {
         var repoPath = this.InitBareGitRepo();
 
@@ -231,7 +231,7 @@
     }
 
     [Fact]
-    public async Task RunGitAsync_ReturnsNonZeroExitCode_ForBadCommand()
+    public async Task RunGitAsync_ReturnsNonZeroExitCode_ForBadCommandAsync()
     {
         var repoPath = this.InitBareGitRepo();
 
@@ -241,7 +241,7 @@
     }
 
     [Fact]
-    public async Task RunGitAsync_ThrowsOnCancellation_WhenTokenAlreadyCancelled()
+    public async Task RunGitAsync_ThrowsOnCancellation_WhenTokenAlreadyCancelledAsync()
     {
         var repoPath = this.InitBareGitRepo();
         using var cts = new CancellationTokenSource();
@@ -252,7 +252,7 @@
     }
 
     [Fact]
-    public async Task CreateWorktreeAsync_CreatesWorktree_WhenRepoIsValid()
+    public async Task CreateWorktreeAsync_CreatesWorktree_WhenRepoIsValidAsync()
     {
         var repoPath = this.InitBareGitRepo();
         var wtPath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
@@ -264,7 +264,7 @@
     }
 
     [Fact]
-    public async Task CreateWorktreeAsync_ReturnsError_WhenBranchAlreadyCheckedOut()
+    public async Task CreateWorktreeAsync_ReturnsError_WhenBranchAlreadyCheckedOutAsync()
     {
         var repoPath = this.InitBareGitRepo();
         var wtPath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
