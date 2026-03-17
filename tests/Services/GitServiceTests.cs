@@ -224,7 +224,7 @@
     {
         var repoPath = this.InitBareGitRepo();
 
-        var result = await GitService.RunGitAsync(repoPath, "status").ConfigureAwait(false);
+        var result = await GitService.RunGitAsync(repoPath, "status", TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         Assert.Equal(0, result.exitCode);
         Assert.Contains("On branch", result.stdout);
@@ -235,7 +235,7 @@
     {
         var repoPath = this.InitBareGitRepo();
 
-        var result = await GitService.RunGitAsync(repoPath, "not-a-real-command").ConfigureAwait(false);
+        var result = await GitService.RunGitAsync(repoPath, "not-a-real-command", TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         Assert.NotEqual(0, result.exitCode);
     }
@@ -257,7 +257,7 @@
         var repoPath = this.InitBareGitRepo();
         var wtPath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
 
-        var (success, error) = await GitService.CreateWorktreeAsync(repoPath, wtPath, "test-branch", "main").ConfigureAwait(false);
+        var (success, error) = await GitService.CreateWorktreeAsync(repoPath, wtPath, "test-branch", "main", TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         Assert.True(success, $"Expected worktree creation to succeed but got error: {error}");
         Assert.True(Directory.Exists(wtPath), "Worktree directory should exist after creation");
@@ -270,7 +270,7 @@
         var wtPath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
 
         // "main" is already checked out in the main worktree, so creating a worktree for it should fail.
-        var (success, _) = await GitService.CreateWorktreeAsync(repoPath, wtPath, "main", "main").ConfigureAwait(false);
+        var (success, _) = await GitService.CreateWorktreeAsync(repoPath, wtPath, "main", "main", TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         Assert.False(success);
     }
