@@ -3,25 +3,24 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
-using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace CopilotBooster.Services;
 
 /// <summary>
-/// Checks for application updates via the GitHub Releases API.
+/// Checks for application updates via the GitHub tags page.
 /// </summary>
-internal sealed class UpdateService
+internal sealed partial class UpdateService
 {
-    private const string ReleasesUrl = "https://api.github.com/repos/rogerbarreto/copilot-booster/releases/latest";
+    private const string TagsUrl = "https://github.com/rogerbarreto/copilot-booster/tags";
+    private const string InstallerDownloadUrlTemplate = "https://github.com/rogerbarreto/copilot-booster/releases/download/v{0}/CopilotBooster-Setup.exe";
+
+    [GeneratedRegex(@"/rogerbarreto/copilot-booster/releases/tag/v([0-9\.]+)")]
+    private static partial Regex TagRegex();
 
     private static readonly HttpClient s_httpClient = new()
     {
-        DefaultRequestHeaders =
-        {
-            { "User-Agent", "CopilotBooster" },
-            { "Accept", "application/vnd.github+json" }
-        },
         Timeout = TimeSpan.FromSeconds(10)
     };
 
@@ -32,54 +31,49 @@ internal sealed class UpdateService
         Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
 
     /// <summary>
-    /// Checks GitHub Releases for a newer version.
+    /// Checks the GitHub tags page for a newer version.
     /// </summary>
     /// <returns>Update info if a newer version is available; otherwise null.</returns>
     public static async Task<UpdateInfo?> CheckForUpdateAsync()
     {
         try
         {
-            var json = await s_httpClient.GetStringAsync(ReleasesUrl).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            var tagName = root.GetProperty("tag_name").GetString();
-            if (string.IsNullOrEmpty(tagName))
-            {
-                return null;
-            }
-
-            var versionString = tagName.TrimStart('v');
-            if (!Version.TryParse(versionString, out var latestVersion))
-            {
-                return null;
-            }
-
-            if (latestVersion <= CurrentVersion)
-            {
-                return null;
-            }
-
-            string? installerUrl = null;
-            if (root.TryGetProperty("assets", out var assets))
-            {
-                foreach (var asset in assets.EnumerateArray())
-                {
-                    var name = asset.GetProperty("name").GetString();
-                    if (name != null && name.EndsWith("Setup.exe", StringComparison.OrdinalIgnoreCase))
-                    {
-                        installerUrl = asset.GetProperty("browser_download_url").GetString();
-                        break;
-                    }
-                }
-            }
-
-            return new UpdateInfo(latestVersion, tagName, installerUrl);
+            var html = await s_httpClient.GetStringAsync(TagsUrl).ConfigureAwait(false);
+            return ParseUpdate(html, CurrentVersion);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Parses the GitHub tags HTML and returns update info if a newer version is found.
+    /// </summary>
+    internal static UpdateInfo? ParseUpdate(string html, Version currentVersion)
+    {
+        var match = TagRegex().Match(html);
+
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var versionString = match.Groups[1].Value;
+        if (!Version.TryParse(versionString, out var latestVersion))
+        {
+            return null;
+        }
+
+        if (latestVersion <= currentVersion)
+        {
+            return null;
+        }
+
+        var tagName = $"v{versionString}";
+        var installerUrl = string.Format(InstallerDownloadUrlTemplate, versionString);
+
+        return new UpdateInfo(latestVersion, tagName, installerUrl);
     }
 
     /// <summary>
