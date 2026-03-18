@@ -222,7 +222,7 @@ internal static class CiInformationForm
         btnOpenPr.Click += (s, e) =>
         {
             var prUrl = GitHubLinkService.GetPrUrl(owner, repo, prNumber);
-            GitHubLinkService.OpenUrl(prUrl, sessionId, Program._settings.OpenLinksInEdgeSession, tracker);
+            GitHubLinkService.OpenUrl(prUrl);
         };
 
         var btnOpenJob = new Button
@@ -236,7 +236,7 @@ internal static class CiInformationForm
         {
             if (selectedCheck != null && !string.IsNullOrEmpty(selectedCheck.HtmlUrl))
             {
-                GitHubLinkService.OpenUrl(selectedCheck.HtmlUrl, sessionId, Program._settings.OpenLinksInEdgeSession, tracker);
+                GitHubLinkService.OpenUrl(selectedCheck.HtmlUrl);
             }
         };
 

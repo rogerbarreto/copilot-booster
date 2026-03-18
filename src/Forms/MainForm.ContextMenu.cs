@@ -331,7 +331,7 @@ internal partial class MainForm
             var url = type == "pr"
                 ? GitHubLinkService.GetPrUrl(data.Owner, data.Repo, number)
                 : GitHubLinkService.GetIssueUrl(data.Owner, data.Repo, number);
-            GitHubLinkService.OpenUrl(url, sid, Program._settings.OpenLinksInEdgeSession, this._activeTracker);
+            GitHubLinkService.OpenUrl(url);
             GitHubTrackingService.MarkSeen(sid, type, number);
             this.RequestRefresh(sessionId: sid, trackingChanged: true);
         };
@@ -644,7 +644,7 @@ internal partial class MainForm
                 var url = item.IsPr
                     ? GitHubLinkService.GetPrUrl(data.Owner, data.Repo, item.Number)
                     : GitHubLinkService.GetIssueUrl(data.Owner, data.Repo, item.Number);
-                GitHubLinkService.OpenUrl(url, sid, Program._settings.OpenLinksInEdgeSession, this._activeTracker);
+                GitHubLinkService.OpenUrl(url);
 
                 // Mark as seen (clear red dot)
                 GitHubTrackingService.MarkSeen(sid, item.Type, item.Number);

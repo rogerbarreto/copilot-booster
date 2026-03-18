@@ -700,27 +700,6 @@ internal sealed class SettingsForm : Form
         // =====================================================================
         var (githubPanel, githubBody) = this.CreateCategoryPanel("GitHub", "GitHub integration settings for PR/Issue tracking.", autoScroll: true, padding: new Padding(8));
 
-        var openInEdgeCheck = new CheckBox
-        {
-            Text = "Open GitHub links in session Edge browser",
-            Checked = Program._settings.OpenLinksInEdgeSession,
-            AutoSize = true,
-            Dock = DockStyle.Top,
-            Padding = new Padding(4, 4, 0, 0)
-        };
-        var openInEdgeInfo = new Label
-        {
-            Text = "When enabled, clicking PR/Issue icons opens in the session's Edge workspace instead of the OS default browser.",
-            Dock = DockStyle.Top,
-            Height = 20,
-            Padding = new Padding(24, 0, 0, 4),
-            ForeColor = SystemColors.GrayText,
-            Font = new Font(this.Font.FontFamily, this.Font.Size - 1)
-        };
-
-        githubBody.Controls.Add(openInEdgeInfo);
-        githubBody.Controls.Add(openInEdgeCheck);
-
         // =====================================================================
         // PANEL MAP & TREE WIRING
         // =====================================================================
@@ -850,7 +829,6 @@ internal sealed class SettingsForm : Form
             Program._settings.ToastAnimate = toastAnimateCheck.Checked;
 
             // GitHub
-            Program._settings.OpenLinksInEdgeSession = openInEdgeCheck.Checked;
             Program._settings.TrackActiveSession = trackActiveCheck.Checked;
 
             // Persist

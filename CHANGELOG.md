@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.2] - 2026-03-18
+
+### Fixed
+
+- **GitHub links open in default browser** — reverted broken Edge session browser integration for PR/Issue/CI links. Clicking GitHub column items now opens in the OS default browser reliably.
+
+### Removed
+
+- **"Open GitHub links in session Edge browser"** setting removed from Settings → GitHub (was non-functional).
+
 ## [0.19.1] - 2026-03-17
 
 ### Fixed
