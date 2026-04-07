@@ -1537,9 +1537,11 @@ internal partial class MainForm : Form
             {
                 if (!this._activeTracker.TryGetEdge(sessionId, out var ws))
                 {
+                    Program.Logger.LogWarning("[SaveSignal] TryGetEdge returned false for {SessionId} — edge not tracked (tracked count: {Count})", sessionId, this._activeTracker.GetTrackedEdgeWorkspaces().Count());
                     return [];
                 }
 
+                Program.Logger.LogInformation("[SaveSignal] Found Edge workspace for {SessionId}, HWND={Hwnd}, IsOpen={IsOpen}", sessionId, ws.CachedHwnd, ws.IsOpen);
                 return ws.GetTabUrls();
             }, CancellationToken.None, TaskCreationOptions.None, StaTaskScheduler.Instance).ConfigureAwait(true);
 
@@ -2121,6 +2123,12 @@ internal partial class MainForm : Form
 
             // Skip reserved root-level files
             if (!relativePath.Contains(Path.DirectorySeparatorChar) && reservedFiles.Contains(fileName))
+            {
+                continue;
+            }
+
+            // Skip .lock files (e.g. inuse.48696.lock created by Copilot CLI)
+            if (fileName.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

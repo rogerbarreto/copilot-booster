@@ -752,6 +752,7 @@ internal class ActiveStatusTracker
             if (!kvp.Value.IsOpen)
             {
                 closedEdge.Add(kvp.Key);
+                Program.Logger.LogInformation("[EdgeCleanup] Removing {SessionId} (IsOpen=false, HWND={Hwnd})", kvp.Key, kvp.Value.CachedHwnd);
             }
         }
 
@@ -1087,6 +1088,7 @@ internal class ActiveStatusTracker
         {
             affected.Add(id);
             this._edgeWorkspaces.Remove(id);
+            Program.Logger.LogInformation("[EdgeDestroyed] Removed Edge workspace {SessionId} (HWND={Hwnd})", id, hwnd);
         }
 
         var deadTeams = this._teamsWindows.Where(kvp => kvp.Value.CachedHwnd == hwnd).Select(kvp => kvp.Key).ToList();
@@ -1384,9 +1386,11 @@ internal class ActiveStatusTracker
     internal bool ScanAndTrackEdgeWorkspaces()
     {
         var edgeMatches = EdgeWorkspaceService.ScanEdgeForSessionTabs();
+        Program.Logger.LogInformation("[EdgeScan] Found {Count} session Edge window(s)", edgeMatches.Count);
         bool changed = false;
         foreach (var kvp in edgeMatches)
         {
+            Program.Logger.LogInformation("[EdgeScan] Session {SessionId} → HWND={Hwnd}", kvp.Key, kvp.Value);
             if (!this._edgeWorkspaces.TryGetValue(kvp.Key, out EdgeWorkspaceService? value))
             {
                 var ws = new EdgeWorkspaceService(kvp.Key)
@@ -1396,10 +1400,12 @@ internal class ActiveStatusTracker
                 ws.WindowClosed += () => this.OnEdgeWorkspaceClosed?.Invoke(kvp.Key);
                 this._edgeWorkspaces[kvp.Key] = ws;
                 changed = true;
+                Program.Logger.LogInformation("[EdgeScan] Tracked new Edge workspace for {SessionId}", kvp.Key);
             }
             else if (value.CachedHwnd != kvp.Value)
             {
                 value.CachedHwnd = kvp.Value;
+                Program.Logger.LogInformation("[EdgeScan] Updated HWND for {SessionId}", kvp.Key);
             }
         }
 
