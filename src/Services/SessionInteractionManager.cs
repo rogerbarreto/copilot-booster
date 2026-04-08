@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace CopilotBooster.Services;
@@ -55,25 +56,63 @@ internal class SessionInteractionManager
     }
 
     /// <summary>
-    /// Opens a directory in the specified IDE executable.
+    /// Opens a directory in the specified IDE executable as a fully detached process.
+    /// Uses <c>CREATE_BREAKAWAY_FROM_JOB</c> to ensure the IDE is not killed when CopilotBooster exits.
     /// </summary>
     /// <param name="idePath">Path to the IDE executable.</param>
     /// <param name="directory">The directory to open.</param>
-    /// <returns>The started process, or <c>null</c> if the launch failed.</returns>
-    internal static Process? OpenInIde(string idePath, string directory)
+    /// <returns>The PID of the started process, or <c>null</c> if the launch failed.</returns>
+    internal static int? OpenInIde(string idePath, string directory)
+    {
+        return LaunchDetachedProcess(idePath, $"\"{directory}\"");
+    }
+
+    /// <summary>
+    /// Launches a process fully detached from the current job object using
+    /// <c>CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP</c>.
+    /// The <see cref="Process"/> handle is disposed immediately after extracting the PID.
+    /// Falls back to <see cref="Process.Start"/> with <c>UseShellExecute = true</c> if
+    /// breakaway is denied by the OS.
+    /// </summary>
+    internal static int? LaunchDetachedProcess(string fileName, string arguments)
     {
         try
         {
-            return Process.Start(new ProcessStartInfo
+            var psi = new ProcessStartInfo
             {
-                FileName = idePath,
-                Arguments = $"\"{directory}\"",
-                UseShellExecute = true
-            });
+                FileName = fileName,
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            // CREATE_BREAKAWAY_FROM_JOB (0x01000000) | CREATE_NEW_PROCESS_GROUP (0x00000200)
+            // Detaches the child from the parent's job object so it survives parent exit.
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                psi.Environment["__COMPAT_LAYER"] = ""; // Clear compat layer to avoid interference
+            }
+
+            using var proc = Process.Start(psi);
+            return proc?.Id;
         }
         catch
         {
-            return null;
+            // Breakaway may fail if the job object doesn't allow it — fall back to shell execute
+            try
+            {
+                using var proc = Process.Start(new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = true
+                });
+                return proc?.Id;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 

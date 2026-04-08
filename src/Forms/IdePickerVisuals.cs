@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
@@ -117,10 +116,10 @@ internal static class IdePickerVisuals
             var capturedIde = ide;
             btnCwd.Click += (s, e) =>
             {
-                var proc = LaunchIde(capturedIde.Path, cwd);
-                if (proc != null)
+                var pid = LaunchIde(capturedIde.Path, cwd);
+                if (pid != null)
                 {
-                    onLaunched?.Invoke(capturedIde.Description, proc.Id, cwd);
+                    onLaunched?.Invoke(capturedIde.Description, pid.Value, cwd);
                 }
                 form.Close();
             };
@@ -131,10 +130,10 @@ internal static class IdePickerVisuals
                 var btnRepo = new Button { Text = "Open Repo", Width = 100, Height = 28 };
                 btnRepo.Click += (s, e) =>
                 {
-                    var proc = LaunchIde(capturedIde.Path, repoRoot!);
-                    if (proc != null)
+                    var pid = LaunchIde(capturedIde.Path, repoRoot!);
+                    if (pid != null)
                     {
-                        onLaunched?.Invoke(capturedIde.Description, proc.Id, repoRoot!);
+                        onLaunched?.Invoke(capturedIde.Description, pid.Value, repoRoot!);
                     }
                     form.Close();
                 };
@@ -159,25 +158,20 @@ internal static class IdePickerVisuals
 
     /// <summary>
     /// Launches the specified IDE executable with the given folder path as an argument.
+    /// Uses <see cref="SessionInteractionManager.LaunchDetachedProcess"/> to ensure
+    /// the IDE runs as a standalone process, independent of CopilotBooster.
     /// </summary>
     /// <param name="idePath">The file path to the IDE executable.</param>
     /// <param name="folderPath">The folder path to open in the IDE.</param>
-    /// <returns>The launched process, or null if the launch failed.</returns>
-    internal static Process? LaunchIde(string idePath, string folderPath)
+    /// <returns>The PID of the launched process, or null if the launch failed.</returns>
+    internal static int? LaunchIde(string idePath, string folderPath)
     {
-        try
+        var pid = SessionInteractionManager.LaunchDetachedProcess(idePath, $"\"{folderPath}\"");
+        if (pid == null)
         {
-            return Process.Start(new ProcessStartInfo
-            {
-                FileName = idePath,
-                Arguments = $"\"{folderPath}\"",
-                UseShellExecute = true
-            });
+            MessageBox.Show($"Failed to launch IDE: {idePath}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to launch IDE: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return null;
-        }
+
+        return pid;
     }
 }

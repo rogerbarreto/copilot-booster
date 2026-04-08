@@ -725,10 +725,11 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         hookService.Start();
 
         // Launch VS the EXACT same way as MainForm.ContextMenu.OnOpenInIde
-        var proc = SessionInteractionManager.OpenInIde(DevenvPath, targetPath);
-        Assert.NotNull(proc);
+        var pid = SessionInteractionManager.OpenInIde(DevenvPath, targetPath);
+        Assert.NotNull(pid);
+        var proc = Process.GetProcessById(pid.Value);
         this._startedProcesses.Add(proc);
-        tracker.TrackProcess(SessionId, new ActiveProcess("Visual Studio", proc.Id, targetPath));
+        tracker.TrackProcess(SessionId, new ActiveProcess("Visual Studio", pid.Value, targetPath));
 
         // Wait for VS to fully load (splash → main window)
         PumpUntil(() => false, 10000);
@@ -740,7 +741,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
         // Close VS gracefully via WM_CLOSE (same as user clicking X)
         // This is key: VS destroys 40+ child windows while the process is still alive,
         // which is the exact scenario that causes cascading HWND recapture.
-        var vsHwnd = WindowFocusService.FindWindowHandleByPid(proc.Id);
+        var vsHwnd = WindowFocusService.FindWindowHandleByPid(pid.Value);
         Assert.NotEqual(IntPtr.Zero, vsHwnd);
         _ = SendMessage(vsHwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
 

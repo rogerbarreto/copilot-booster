@@ -225,23 +225,23 @@ internal partial class MainForm
                 return;
             }
 
-            var proc = SessionInteractionManager.OpenInIde(capturedIde.Path, targetPath);
-            if (proc != null)
+            var pid = SessionInteractionManager.OpenInIde(capturedIde.Path, targetPath);
+            if (pid != null)
             {
-                this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, targetPath));
-                this._processExitTracker?.Watch(proc.Id);
+                this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, pid.Value, targetPath));
+                this._processExitTracker?.Watch(pid.Value);
                 this.RefreshActiveStatusAsync();
             }
         };
 
         this._sessionsVisuals.OnOpenInIdeFile += (sid, capturedIde, filePath) =>
         {
-            var proc = SessionInteractionManager.OpenInIde(capturedIde.Path, filePath);
-            if (proc != null)
+            var pid = SessionInteractionManager.OpenInIde(capturedIde.Path, filePath);
+            if (pid != null)
             {
                 var dir = Path.GetDirectoryName(filePath) ?? filePath;
-                this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, proc.Id, dir));
-                this._processExitTracker?.Watch(proc.Id);
+                this._activeTracker.TrackProcess(sid, new ActiveProcess(capturedIde.Description, pid.Value, dir));
+                this._processExitTracker?.Watch(pid.Value);
                 this.RefreshActiveStatusAsync();
             }
         };
