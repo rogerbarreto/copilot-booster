@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
@@ -306,7 +307,7 @@ internal partial class GitHubApiService
             var html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
             // Parse check items: <details class="checks-list-item ..."> blocks
-            var checkItems = MyRegex().Matches(html);
+            var checkItems = ChecksListItemRegex().Matches(html);
 
             if (checkItems.Count == 0)
             {
@@ -323,11 +324,11 @@ internal partial class GitHubApiService
                 var block = checkItems[i].Value;
 
                 // Name: <span>NAME</span> inside the check item
-                var nameMatch = MyRegex1().Match(block);
+                var nameMatch = SpanTextRegex().Match(block);
                 var name = nameMatch.Success ? nameMatch.Groups[1].Value.Trim() : "unknown";
 
                 // Conclusion from aria-label on the SVG: "This job succeeded/failed/was skipped"
-                var ariaMatch = System.Text.RegularExpressions.Regex.Match(block, @"aria-label=""This job (\w+)""");
+                var ariaMatch = AriaLabelJobRegex().Match(block);
                 var conclusion = ariaMatch.Success
                     ? ariaMatch.Groups[1].Value switch
                     {
@@ -339,7 +340,7 @@ internal partial class GitHubApiService
                     : "";
 
                 // Job URL: /actions/runs/{runId}/job/{jobId}
-                var jobMatch = System.Text.RegularExpressions.Regex.Match(block, @"/actions/runs/(\d+)/job/(\d+)");
+                var jobMatch = ActionsRunJobRegex().Match(block);
                 var jobId = jobMatch.Success ? jobMatch.Groups[2].Value : "0";
                 var htmlUrlValue = jobMatch.Success
                     ? $"https://github.com/{owner}/{repo}/actions/runs/{jobMatch.Groups[1].Value}/job/{jobMatch.Groups[2].Value}"
@@ -477,7 +478,7 @@ internal partial class GitHubApiService
 
         // Head SHA from commit_status_icon URL: oid=<40-hex-chars>
         string? headSha = null;
-        var oidMatch = System.Text.RegularExpressions.Regex.Match(html, @"commit_status_icon\?oid=([0-9a-f]{40})");
+        var oidMatch = CommitStatusOidRegex().Match(html);
         if (oidMatch.Success)
         {
             headSha = oidMatch.Groups[1].Value;
@@ -485,7 +486,7 @@ internal partial class GitHubApiService
 
         // updated_at from the last relative-time datetime= attribute
         string? updatedAt = null;
-        var timeMatches = System.Text.RegularExpressions.Regex.Matches(html, @"<relative-time[^>]*datetime=""([^""]+)""");
+        var timeMatches = RelativeTimeDatetimeRegex().Matches(html);
         if (timeMatches.Count > 0)
         {
             updatedAt = timeMatches[^1].Groups[1].Value;
@@ -662,8 +663,21 @@ internal partial class GitHubApiService
         return value == "null" ? null : WebUtility.HtmlDecode(value);
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"<details class=""checks-list-item[\s\S]*?</details>")]
-    private static partial System.Text.RegularExpressions.Regex MyRegex();
-    [System.Text.RegularExpressions.GeneratedRegex(@"<span>([^<]{2,100})</span>")]
-    private static partial System.Text.RegularExpressions.Regex MyRegex1();
+    [GeneratedRegex(@"<details class=""checks-list-item[\s\S]*?</details>")]
+    private static partial Regex ChecksListItemRegex();
+
+    [GeneratedRegex(@"<span>([^<]{2,100})</span>")]
+    private static partial Regex SpanTextRegex();
+
+    [GeneratedRegex(@"aria-label=""This job (\w+)""")]
+    private static partial Regex AriaLabelJobRegex();
+
+    [GeneratedRegex(@"/actions/runs/(\d+)/job/(\d+)")]
+    private static partial Regex ActionsRunJobRegex();
+
+    [GeneratedRegex(@"commit_status_icon\?oid=([0-9a-f]{40})")]
+    private static partial Regex CommitStatusOidRegex();
+
+    [GeneratedRegex(@"<relative-time[^>]*datetime=""([^""]+)""")]
+    private static partial Regex RelativeTimeDatetimeRegex();
 }
