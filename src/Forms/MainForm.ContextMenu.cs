@@ -71,8 +71,7 @@ internal partial class MainForm
 
             if (!string.IsNullOrEmpty(selectedCwd))
             {
-                var promptResult = NewSessionNameVisuals.ShowNamePrompt(selectedCwd);
-                if (promptResult == null)
+                var promptResult = NewSessionNameVisuals.ShowNamePrompt(selectedCwd, this._githubApi); if (promptResult == null)
                 {
                     return;
                 }
@@ -145,7 +144,7 @@ internal partial class MainForm
                 var gitRoot = SessionService.FindGitRoot(selectedCwd);
                 if (gitRoot != null)
                 {
-                    var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot);
+                    var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot, this._githubApi);
                     if (wsResult != null)
                     {
                         var sourceDir = Path.Combine(Program.SessionStateDir, selectedSessionId);

@@ -39,8 +39,8 @@ internal static class CiInformationForm
     {
         var checks = new List<CheckRunInfo>();
 
-        // Fetch check runs for the commit
-        var doc = await api.GetCheckRunsAsync(owner, repo, commitSha).ConfigureAwait(true);
+        // Fetch check runs — try PR-based HTML scraping first, then SHA-based
+        var doc = await api.GetCheckRunsForPrAsync(owner, repo, prNumber, commitSha).ConfigureAwait(true);
         if (doc != null)
         {
             using (doc)

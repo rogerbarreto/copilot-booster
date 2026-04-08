@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.3] - 2026-04-08
+
+### Fixed
+
+- **Issue/PR check "not found" bug** — the "Create New Worktree" and "New Session" dialogs no longer fail to find issues/PRs on public repositories when GitHub API rate limit is exhausted. The previous unauthenticated `api.github.com` calls (60 req/hour) would silently fail and report "Issue not found" or "PR not found".
+
+### Changed
+
+- **Eliminated all `api.github.com` usage** — GitHub data access now uses HTML scraping of `github.com` pages (primary, never rate-limited) with `gh api` CLI as fallback for private repos or richer data. No more unauthenticated API calls anywhere in the codebase.
+- **HTML scraping extracts state and state_reason** — closed issues, merged PRs, and "not planned" status are now correctly detected from embedded metadata in GitHub HTML pages.
+- **Forms use centralized `GitHubApiService`** — the "Create New Worktree" and "New Session" dialogs now use the shared `GitHubApiService` instead of inline HTTP calls, ensuring consistent error handling across the app.
+
+### Removed
+
+- **Direct `api.github.com` HTTP calls** — the internal `GetAsync`/`TryGetAsync`/`CreateRequest` HTTP infrastructure and manual token management have been removed from `GitHubApiService`.
+
 ## [0.19.2] - 2026-03-18
 
 ### Fixed

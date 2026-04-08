@@ -4,8 +4,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Services;
@@ -18,14 +16,13 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal static class WorkspaceCreatorVisuals
 {
-    private static readonly HttpClient s_httpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
 
     /// <summary>
     /// Displays a modal dialog for creating a git worktree workspace from the specified repository.
     /// </summary>
     /// <param name="repoPath">The git repository root path.</param>
     /// <returns>A tuple of worktree path and optional session name on success, or <c>null</c> if the user cancels.</returns>
-    internal static (string WorktreePath, string? SessionName, string? GitHubUrl)? ShowWorkspaceCreator(string repoPath)
+    internal static (string WorktreePath, string? SessionName, string? GitHubUrl)? ShowWorkspaceCreator(string repoPath, GitHubApiService? api = null)
     {
         (string WorktreePath, string? SessionName, string? GitHubUrl)? result = null;
         var repoFolderName = Path.GetFileName(repoPath);
@@ -841,14 +838,14 @@ internal static class WorkspaceCreatorVisuals
             string? prHeadBranch = null;
             try
             {
-                // Run git ls-remote and optional GitHub API title fetch entirely on background thread
+                // Run git ls-remote and optional title fetch entirely on background thread
                 (found, prTitle, prHeadBranch) = await Task.Run(async () =>
                 {
                     var valid = GitService.ValidatePrRef(repoPath, remoteName, platform, prNum);
                     string? title = null;
                     string? headRef = null;
 
-                    if (valid && platform == GitService.HostingPlatform.GitHub)
+                    if (valid && platform == GitService.HostingPlatform.GitHub && api != null)
                     {
                         try
                         {
@@ -859,14 +856,9 @@ internal static class WorkspaceCreatorVisuals
                                 if (parsed.HasValue)
                                 {
                                     var (owner, repo) = parsed.Value;
-                                    var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/pulls/{prNum}";
-                                    var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
-                                    request.Headers.Add("User-Agent", "CopilotBooster");
-                                    var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-                                    if (response.IsSuccessStatusCode)
+                                    using var doc = await api.GetPullRequestAsync(owner, repo, prNum).ConfigureAwait(false);
+                                    if (doc != null)
                                     {
-                                        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                        using var doc = JsonDocument.Parse(json);
                                         if (doc.RootElement.TryGetProperty("title", out var titleProp))
                                         {
                                             title = titleProp.GetString();
@@ -883,7 +875,7 @@ internal static class WorkspaceCreatorVisuals
                         }
                         catch
                         {
-                            // API failure — don't affect the flow
+                            // Service failure — don't affect the flow
                         }
                     }
 
@@ -968,36 +960,26 @@ internal static class WorkspaceCreatorVisuals
                         if (!string.IsNullOrEmpty(remoteUrl))
                         {
                             var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
-                            if (parsed.HasValue)
+                            if (parsed.HasValue && api != null)
                             {
                                 var (owner, repo) = parsed.Value;
-                                var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/issues/{issueNum}";
-                                var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
-                                request.Headers.Add("User-Agent", "CopilotBooster");
-                                var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-                                if (response.IsSuccessStatusCode)
+                                using var doc = await api.GetIssueAsync(owner, repo, issueNum).ConfigureAwait(false);
+                                if (doc != null)
                                 {
-                                    var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                    using var doc = JsonDocument.Parse(json);
-
-                                    // Ensure it's actually an issue, not a PR
-                                    if (!doc.RootElement.TryGetProperty("pull_request", out _))
+                                    valid = true;
+                                    if (doc.RootElement.TryGetProperty("title", out var titleProp))
                                     {
-                                        valid = true;
-                                        if (doc.RootElement.TryGetProperty("title", out var titleProp))
-                                        {
-                                            title = titleProp.GetString();
-                                        }
-
-                                        url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
+                                        title = titleProp.GetString();
                                     }
+
+                                    url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
                                 }
                             }
                         }
                     }
                     catch
                     {
-                        // API failure
+                        // Service failure
                     }
 
                     return (valid, title, url);

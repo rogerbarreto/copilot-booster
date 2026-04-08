@@ -2,8 +2,6 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
-using System.Net.Http;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Services;
@@ -30,7 +28,6 @@ internal record NewSessionResult(
 [ExcludeFromCodeCoverage]
 internal static class NewSessionNameVisuals
 {
-    private static readonly HttpClient s_httpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
 
     /// <summary>
     /// Displays a modal dialog prompting the user for a session name.
@@ -144,7 +141,7 @@ internal static class NewSessionNameVisuals
     /// Displays an enhanced modal dialog with optional branch/PR selection for a git repository.
     /// Falls back to the simple name-only dialog when <paramref name="repoPath"/> is not inside a git repo.
     /// </summary>
-    internal static NewSessionResult? ShowNamePrompt(string repoPath)
+    internal static NewSessionResult? ShowNamePrompt(string repoPath, GitHubApiService? api = null)
     {
         var gitRoot = SessionService.FindGitRoot(repoPath);
         if (gitRoot == null)
@@ -986,7 +983,7 @@ internal static class NewSessionNameVisuals
                     string? title = null;
                     string? headRef = null;
 
-                    if (valid && detectedPlatform == GitService.HostingPlatform.GitHub)
+                    if (valid && detectedPlatform == GitService.HostingPlatform.GitHub && api != null)
                     {
                         try
                         {
@@ -997,14 +994,9 @@ internal static class NewSessionNameVisuals
                                 if (parsed.HasValue)
                                 {
                                     var (owner, repo) = parsed.Value;
-                                    var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/pulls/{prNum}";
-                                    var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
-                                    request.Headers.Add("User-Agent", "CopilotBooster");
-                                    var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-                                    if (response.IsSuccessStatusCode)
+                                    using var doc = await api.GetPullRequestAsync(owner, repo, prNum).ConfigureAwait(false);
+                                    if (doc != null)
                                     {
-                                        var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                        using var doc = JsonDocument.Parse(json);
                                         if (doc.RootElement.TryGetProperty("title", out var titleProp))
                                         {
                                             title = titleProp.GetString();
@@ -1021,7 +1013,7 @@ internal static class NewSessionNameVisuals
                         }
                         catch
                         {
-                            // API failure — don't affect the flow
+                            // Service failure — don't affect the flow
                         }
                     }
 
@@ -1105,36 +1097,26 @@ internal static class NewSessionNameVisuals
                         if (!string.IsNullOrEmpty(remoteUrl))
                         {
                             var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
-                            if (parsed.HasValue)
+                            if (parsed.HasValue && api != null)
                             {
                                 var (owner, repo) = parsed.Value;
-                                var apiUrl = $"https://api.github.com/repos/{owner}/{repo}/issues/{issueNum}";
-                                var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
-                                request.Headers.Add("User-Agent", "CopilotBooster");
-                                var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-                                if (response.IsSuccessStatusCode)
+                                using var doc = await api.GetIssueAsync(owner, repo, issueNum).ConfigureAwait(false);
+                                if (doc != null)
                                 {
-                                    var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                                    using var doc = JsonDocument.Parse(json);
-
-                                    // Ensure it's actually an issue, not a PR
-                                    if (!doc.RootElement.TryGetProperty("pull_request", out _))
+                                    valid = true;
+                                    if (doc.RootElement.TryGetProperty("title", out var titleProp))
                                     {
-                                        valid = true;
-                                        if (doc.RootElement.TryGetProperty("title", out var titleProp))
-                                        {
-                                            title = titleProp.GetString();
-                                        }
-
-                                        url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
+                                        title = titleProp.GetString();
                                     }
+
+                                    url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
                                 }
                             }
                         }
                     }
                     catch
                     {
-                        // API failure
+                        // Service failure
                     }
 
                     return (valid, title, url);

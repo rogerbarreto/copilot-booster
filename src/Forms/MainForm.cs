@@ -1888,8 +1888,7 @@ internal partial class MainForm : Form
         // Wire events identically to the old tab-based visuals
         dialogVisuals.OnNewSession += async (selectedCwd) =>
         {
-            var promptResult = NewSessionNameVisuals.ShowNamePrompt(selectedCwd);
-            if (promptResult == null)
+            var promptResult = NewSessionNameVisuals.ShowNamePrompt(selectedCwd, this._githubApi); if (promptResult == null)
             {
                 return;
             }
@@ -1956,8 +1955,7 @@ internal partial class MainForm : Form
             var gitRoot = SessionService.FindGitRoot(selectedCwd);
             if (gitRoot != null)
             {
-                var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot);
-                if (wsResult != null)
+                var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot, this._githubApi); if (wsResult != null)
                 {
                     var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
                     if (newSessionId != null)

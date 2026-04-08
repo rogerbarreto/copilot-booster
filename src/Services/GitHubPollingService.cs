@@ -258,12 +258,11 @@ internal class GitHubPollingService : IDisposable
                 }
             }
 
-            // Fetch check runs for CI status
+            // Fetch check runs for CI status — try PR-based HTML scraping first, then SHA-based
             var headSha = root.TryGetProperty("head", out var hs) && hs.TryGetProperty("sha", out var sha)
                 ? sha.GetString() ?? "" : "";
-            if (!string.IsNullOrEmpty(headSha))
             {
-                var checksDoc = await this._api.GetCheckRunsAsync(owner, repo, headSha).ConfigureAwait(false);
+                var checksDoc = await this._api.GetCheckRunsForPrAsync(owner, repo, item.Number, headSha).ConfigureAwait(false);
                 if (checksDoc != null)
                 {
                     using (checksDoc)

@@ -50,29 +50,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
 
     private static GitHubApiService CreateApi()
     {
-        string? ghToken = null;
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo("gh", "auth token")
-            {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc != null)
-            {
-                ghToken = proc.StandardOutput.ReadToEnd().Trim();
-                proc.WaitForExit(3000);
-                if (proc.ExitCode != 0 || string.IsNullOrEmpty(ghToken))
-                {
-                    ghToken = null;
-                }
-            }
-        }
-        catch { }
-
-        return new GitHubApiService(() => ghToken);
+        return new GitHubApiService();
     }
 
     /// <summary>

@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -10,15 +9,17 @@ using Microsoft.Extensions.Logging;
 namespace CopilotBooster.Services;
 
 /// <summary>
-/// GitHub REST API client with cascading authentication:
-/// 1. Unauthenticated (public repos, 60 req/hour)
-/// 2. <c>gh auth token</c> from GitHub CLI (5000 req/hour)
-/// 3. Manual PAT from settings (5000 req/hour)
+/// GitHub data service with two data sources:
+/// <list type="number">
+///   <item><c>gh api</c> CLI for structured API data (auth handled by <c>gh</c> natively)</item>
+///   <item>HTML scraping of <c>github.com</c> pages (never rate-limited, fallback for issues/PRs)</item>
+/// </list>
+/// No direct <c>api.github.com</c> HTTP calls.
 /// </summary>
-internal class GitHubApiService
+internal partial class GitHubApiService
 {
     /// <summary>
-    /// Last error message from the most recent failed API call.
+    /// Last error message from the most recent failed call.
     /// </summary>
     internal string? LastError { get; private set; }
 
@@ -27,67 +28,71 @@ internal class GitHubApiService
         Timeout = TimeSpan.FromSeconds(15)
     };
 
-    private string? _cachedGhToken;
-    private bool _ghTokenChecked;
-    private readonly Func<string?> _getPatFromSettings;
+    private readonly Func<string?>? _getPatFromSettings;
 
     /// <summary>
-    /// Creates a new GitHub API service.
+    /// Creates a new GitHub data service.
     /// </summary>
-    /// <param name="getPatFromSettings">Callback to retrieve the PAT from settings (decrypted).</param>
-    internal GitHubApiService(Func<string?> getPatFromSettings)
+    /// <param name="getPatFromSettings">
+    /// Optional callback to retrieve a PAT from settings.
+    /// If provided, the PAT is forwarded as <c>GH_TOKEN</c> env var to <c>gh api</c> calls.
+    /// </param>
+    internal GitHubApiService(Func<string?>? getPatFromSettings = null)
     {
         this._getPatFromSettings = getPatFromSettings;
     }
 
     /// <summary>
-    /// Fetches a PR by number. Returns the parsed JSON or null on failure.
-    /// Falls back to HTML page check if API is rate limited/SAML blocked.
+    /// Fetches a PR by number. Tries <c>gh api</c> first (rich data: head.ref, head.sha,
+    /// draft, user, reviews needed for polling and CI features),
+    /// falls back to HTML scraping for existence/title when <c>gh</c> is unavailable.
+    /// <summary>
+    /// Fetches a PR by number. Tries HTML scraping first (never rate-limited, extracts
+    /// rich metadata from embedded JSON: author, head branch, head SHA, state, title),
+    /// falls back to <c>gh api</c> for private repos.
     /// </summary>
     internal async Task<JsonDocument?> GetPullRequestAsync(string owner, string repo, int number)
     {
-        var doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls/{number}").ConfigureAwait(false);
+        var doc = await this.HtmlCheckAsync(owner, repo, "pull", number).ConfigureAwait(false);
         if (doc != null)
         {
             return doc;
         }
 
-        // Fallback: check if the PR page exists on github.com (not rate limited)
-        return await this.FallbackHtmlCheckAsync(owner, repo, "pull", number).ConfigureAwait(false);
+        return await this.GhApiAsync($"repos/{owner}/{repo}/pulls/{number}").ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Fetches an Issue by number. Returns the parsed JSON or null on failure.
-    /// Returns null if the issue is actually a PR (has <c>pull_request</c> property).
-    /// Falls back to HTML page check if API is rate limited/SAML blocked.
+    /// Fetches an Issue by number. Tries HTML scraping first (never rate-limited),
+    /// falls back to <c>gh api</c> for richer data or private repos.
+    /// Returns null if the issue is actually a PR.
     /// </summary>
     internal async Task<JsonDocument?> GetIssueAsync(string owner, string repo, int number)
     {
-        var doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/issues/{number}").ConfigureAwait(false);
+        var doc = await this.HtmlCheckAsync(owner, repo, "issues", number).ConfigureAwait(false);
+        if (doc != null)
+        {
+            return doc;
+        }
+
+        // HTML failed (private repo?) — try gh api
+        doc = await this.GhApiAsync($"repos/{owner}/{repo}/issues/{number}").ConfigureAwait(false);
         if (doc != null && doc.RootElement.TryGetProperty("pull_request", out _))
         {
             doc.Dispose();
             return null; // It's a PR, not an issue
         }
 
-        if (doc != null)
-        {
-            return doc;
-        }
-
-        // Fallback: check if the issue page exists on github.com (not rate limited)
-        return await this.FallbackHtmlCheckAsync(owner, repo, "issues", number).ConfigureAwait(false);
+        return doc;
     }
 
     /// <summary>
     /// Lists open PRs matching a branch. Tries with owner prefix first (same-repo),
     /// then scans all open PRs for fork-based matches.
-    /// Returns a JSON document where [0] is the matched PR.
     /// </summary>
     internal async Task<JsonDocument?> ListPullRequestsForBranchAsync(string owner, string repo, string branch)
     {
-        // Try with owner prefix (same-repo PRs)
-        var doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open").ConfigureAwait(false);
+        var doc = await this.GhApiAsync($"repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open").ConfigureAwait(false);
         if (doc != null && doc.RootElement.GetArrayLength() > 0)
         {
             return doc;
@@ -95,9 +100,8 @@ internal class GitHubApiService
 
         doc?.Dispose();
 
-        // Fallback: scan all open PRs and match by head branch name
-        // (works for fork-based PRs where the head owner differs)
-        doc = await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls?state=open&per_page=100").ConfigureAwait(false);
+        // Fallback: scan all open PRs and match by head branch name (works for fork-based PRs)
+        doc = await this.GhApiAsync($"repos/{owner}/{repo}/pulls?state=open&per_page=100").ConfigureAwait(false);
         if (doc != null)
         {
             using (doc)
@@ -109,7 +113,6 @@ internal class GitHubApiService
                         var headRef = refProp.GetString();
                         if (string.Equals(headRef, branch, StringComparison.OrdinalIgnoreCase))
                         {
-                            // Re-wrap the single matched PR as a JSON array so [0] is correct
                             var matchedJson = $"[{pr.GetRawText()}]";
                             return JsonDocument.Parse(matchedJson);
                         }
@@ -122,145 +125,262 @@ internal class GitHubApiService
     }
 
     /// <summary>
-    /// Fetches check runs for a commit SHA.
+    /// Fetches check runs for a commit SHA. Tries HTML scraping of <c>/pull/N/checks</c> first,
+    /// falls back to <c>gh api</c>.
+    /// Note: when called with a SHA, the caller must also supply the PR number via the overload.
     /// </summary>
     internal async Task<JsonDocument?> GetCheckRunsAsync(string owner, string repo, string commitSha)
     {
-        return await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/commits/{commitSha}/check-runs").ConfigureAwait(false);
+        // gh api is the only option when called with just a SHA (no PR number for HTML scraping)
+        return await this.GhApiAsync($"repos/{owner}/{repo}/commits/{commitSha}/check-runs").ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Fetches reviews for a PR.
+    /// Fetches check runs for a PR by scraping the <c>/pull/N/checks</c> HTML page.
+    /// Falls back to <c>gh api</c> with the commit SHA.
+    /// </summary>
+    internal async Task<JsonDocument?> GetCheckRunsForPrAsync(string owner, string repo, int prNumber, string? commitSha)
+    {
+        var doc = await HtmlCheckRunsAsync(owner, repo, prNumber).ConfigureAwait(false);
+        if (doc != null)
+        {
+            return doc;
+        }
+
+        if (!string.IsNullOrEmpty(commitSha))
+        {
+            return await this.GhApiAsync($"repos/{owner}/{repo}/commits/{commitSha}/check-runs").ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Fetches reviews for a PR. Tries <c>gh api</c> (no HTML equivalent for structured review data).
     /// </summary>
     internal async Task<JsonDocument?> GetPullRequestReviewsAsync(string owner, string repo, int number)
     {
-        return await this.GetAsync($"https://api.github.com/repos/{owner}/{repo}/pulls/{number}/reviews").ConfigureAwait(false);
+        return await this.GhApiAsync($"repos/{owner}/{repo}/pulls/{number}/reviews").ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Fetches a workflow job log by job ID. Tries unauthenticated first (public repos),
-    /// then cascades to gh CLI / PAT.
+    /// Fetches a workflow job log via <c>gh api</c>.
     /// </summary>
     internal async Task<string?> GetJobLogAsync(string owner, string repo, long jobId)
     {
-        var url = $"https://api.github.com/repos/{owner}/{repo}/actions/jobs/{jobId}/logs";
-
-        // Try unauthenticated first (works for public repos)
-        try
+        var result = await this.GhApiTextAsync($"repos/{owner}/{repo}/actions/jobs/{jobId}/logs").ConfigureAwait(false);
+        if (result != null)
         {
-            var request = CreateRequest(HttpMethod.Get, url, token: null);
-            var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-            if (response.IsSuccessStatusCode)
-            {
-                return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            }
-        }
-        catch { }
-
-        // Try with token
-        var token = this.ResolveToken();
-        if (!string.IsNullOrEmpty(token))
-        {
-            try
-            {
-                var request = CreateRequest(HttpMethod.Get, url, token);
-                var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-                if (response.IsSuccessStatusCode)
-                {
-                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                }
-            }
-            catch { }
+            return result;
         }
 
-        this.LastError = "Job log not available (may require authentication)";
+        this.LastError ??= "Job log not available (requires gh CLI authentication)";
         return null;
     }
 
     /// <summary>
-    /// Core GET with cascading auth: unauthenticated → gh CLI → PAT.
-    /// Automatically escalates auth on 403 (rate limit) or 404 (private repo).
+    /// Runs <c>gh api</c> CLI command and returns parsed JSON.
+    /// Auth is handled natively by <c>gh</c> (uses stored credentials or <c>GH_TOKEN</c> env var).
     /// </summary>
-    private async Task<JsonDocument?> GetAsync(string url)
+    private async Task<JsonDocument?> GhApiAsync(string path)
     {
         this.LastError = null;
-        // Attempt 1: unauthenticated (works for public repos)
-        var result = await TryGetAsync(url, token: null).ConfigureAwait(false);
-        if (result.Success)
+        try
         {
-            return result.Document;
-        }
-
-        // Only escalate auth on rate limit (403 with X-RateLimit-Remaining: 0) or private repo (404)
-        if (result.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
-        {
-            // Attempt 2: gh CLI token
-            var ghToken = this.GetGhCliToken();
-            if (!string.IsNullOrEmpty(ghToken))
+            var (exitCode, stdout, stderr) = await this.RunGhApiAsync(path).ConfigureAwait(false);
+            if (exitCode == 0 && !string.IsNullOrEmpty(stdout))
             {
-                result = await TryGetAsync(url, ghToken).ConfigureAwait(false);
-                if (result.Success)
-                {
-                    return result.Document;
-                }
-
-                // If gh token got 403 (SAML enforcement), the repo is public but the token
-                // doesn't have org access. Wait briefly and retry unauthenticated.
-                if (result.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    await Task.Delay(1000).ConfigureAwait(false);
-                    result = await TryGetAsync(url, token: null).ConfigureAwait(false);
-                    if (result.Success)
-                    {
-                        return result.Document;
-                    }
-                }
+                return JsonDocument.Parse(stdout);
             }
 
-            // Attempt 3: PAT from settings
-            var pat = this._getPatFromSettings();
-            if (!string.IsNullOrEmpty(pat))
+            if (!string.IsNullOrEmpty(stderr))
             {
-                result = await TryGetAsync(url, pat).ConfigureAwait(false);
-                if (result.Success)
-                {
-                    return result.Document;
-                }
+                this.LastError = stderr.Trim();
+                Program.Logger.LogDebug("gh api failed for {Path}: {Error}", path, this.LastError);
             }
         }
-
-        Program.Logger.LogDebug("GitHub API failed for {Url}: {Status}", url, result.StatusCode);
-
-        // Extract error message from GitHub API response
-        if (!string.IsNullOrEmpty(result.ErrorBody))
+        catch (Exception ex) when (ex is not System.ComponentModel.Win32Exception)
         {
-            try
-            {
-                using var errDoc = JsonDocument.Parse(result.ErrorBody);
-                if (errDoc.RootElement.TryGetProperty("message", out var msg))
-                {
-                    this.LastError = $"{(int)result.StatusCode} {result.StatusCode}: {msg.GetString()}";
-                    return null;
-                }
-            }
-            catch { }
-
-            this.LastError = $"{(int)result.StatusCode} {result.StatusCode}";
+            Program.Logger.LogDebug("gh api error for {Path}: {Error}", path, ex.Message);
         }
-        else
+        catch (System.ComponentModel.Win32Exception)
         {
-            this.LastError = $"{(int)result.StatusCode} {result.StatusCode}";
+            // gh CLI not installed — fall through to caller's fallback
+            Program.Logger.LogDebug("gh CLI not available");
         }
 
         return null;
     }
 
     /// <summary>
-    /// Last-resort fallback: check if a PR/Issue exists by fetching the HTML page on github.com.
-    /// This is never rate limited. If the page returns 200, builds a minimal JSON document
-    /// with the number and title extracted from the HTML &lt;title&gt; tag.
+    /// Runs <c>gh api</c> CLI command and returns raw text output (for logs).
     /// </summary>
-    private async Task<JsonDocument?> FallbackHtmlCheckAsync(string owner, string repo, string type, int number)
+    private async Task<string?> GhApiTextAsync(string path)
+    {
+        this.LastError = null;
+        try
+        {
+            var (exitCode, stdout, stderr) = await this.RunGhApiAsync(path).ConfigureAwait(false);
+            if (exitCode == 0 && !string.IsNullOrEmpty(stdout))
+            {
+                return stdout;
+            }
+
+            if (!string.IsNullOrEmpty(stderr))
+            {
+                this.LastError = stderr.Trim();
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("gh api text error for {Path}: {Error}", path, ex.Message);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Core process runner for <c>gh api</c> CLI.
+    /// </summary>
+    private async Task<(int ExitCode, string Stdout, string Stderr)> RunGhApiAsync(string path)
+    {
+        var psi = new ProcessStartInfo("gh")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("api");
+        psi.ArgumentList.Add(path);
+
+        // Forward PAT as GH_TOKEN if configured (allows gh api to work with user-configured PATs)
+        var pat = this._getPatFromSettings?.Invoke();
+        if (!string.IsNullOrEmpty(pat))
+        {
+            psi.Environment["GH_TOKEN"] = pat;
+        }
+
+        using var proc = Process.Start(psi);
+        if (proc == null)
+        {
+            return (-1, "", "Failed to start gh process");
+        }
+
+        // Read stdout and stderr concurrently to avoid deadlocks
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+
+        var completed = proc.WaitForExit(15000);
+        if (!completed)
+        {
+            try { proc.Kill(); }
+            catch { }
+
+            return (-1, "", "gh api timed out");
+        }
+
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        return (proc.ExitCode, stdout, stderr);
+    }
+
+    /// <summary>
+    /// Scrapes the <c>/pull/N/checks</c> page to extract check run data.
+    /// Returns JSON matching the GitHub API check-runs structure.
+    /// </summary>
+    private static async Task<JsonDocument?> HtmlCheckRunsAsync(string owner, string repo, int prNumber)
+    {
+        var checksUrl = $"https://github.com/{owner}/{repo}/pull/{prNumber}/checks";
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, checksUrl);
+            request.Headers.Add("User-Agent", "CopilotBooster");
+            var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+            // Parse check items: <details class="checks-list-item ..."> blocks
+            var checkItems = MyRegex().Matches(html);
+
+            if (checkItems.Count == 0)
+            {
+                return null;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{\"total_count\":");
+            sb.Append(checkItems.Count);
+            sb.Append(",\"check_runs\":[");
+
+            for (var i = 0; i < checkItems.Count; i++)
+            {
+                var block = checkItems[i].Value;
+
+                // Name: <span>NAME</span> inside the check item
+                var nameMatch = MyRegex1().Match(block);
+                var name = nameMatch.Success ? nameMatch.Groups[1].Value.Trim() : "unknown";
+
+                // Conclusion from aria-label on the SVG: "This job succeeded/failed/was skipped"
+                var ariaMatch = System.Text.RegularExpressions.Regex.Match(block, @"aria-label=""This job (\w+)""");
+                var conclusion = ariaMatch.Success
+                    ? ariaMatch.Groups[1].Value switch
+                    {
+                        "succeeded" => "success",
+                        "failed" => "failure",
+                        "was" => "skipped", // "This job was skipped"
+                        _ => ariaMatch.Groups[1].Value
+                    }
+                    : "";
+
+                // Job URL: /actions/runs/{runId}/job/{jobId}
+                var jobMatch = System.Text.RegularExpressions.Regex.Match(block, @"/actions/runs/(\d+)/job/(\d+)");
+                var jobId = jobMatch.Success ? jobMatch.Groups[2].Value : "0";
+                var htmlUrlValue = jobMatch.Success
+                    ? $"https://github.com/{owner}/{repo}/actions/runs/{jobMatch.Groups[1].Value}/job/{jobMatch.Groups[2].Value}"
+                    : "";
+
+                // Status: infer from conclusion
+                var status = string.IsNullOrEmpty(conclusion) ? "in_progress" : "completed";
+
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+
+                sb.Append('{');
+                sb.Append($"\"id\":{jobId}");
+                sb.Append($",\"name\":{JsonSerializer.Serialize(name)}");
+                sb.Append($",\"status\":\"{status}\"");
+                sb.Append($",\"conclusion\":{(string.IsNullOrEmpty(conclusion) ? "null" : $"\"{conclusion}\"")}");
+                sb.Append($",\"html_url\":\"{htmlUrlValue}\"");
+                sb.Append('}');
+            }
+
+            sb.Append("]}");
+            return JsonDocument.Parse(sb.ToString());
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("GitHub HTML check runs scraping failed for {Url}: {Error}", checksUrl, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// HTML page scraping for issues and PRs on <c>github.com</c>. Never rate-limited.
+    /// Extracts rich metadata from embedded JSON in the HTML page, including:
+    /// <list type="bullet">
+    ///   <item>PRs: author, headBranch, headSha, state (open/merged/closed), title, mergedBy, updated_at</item>
+    ///   <item>Issues: author, state, stateReason, title, updated_at, labels</item>
+    /// </list>
+    /// </summary>
+    private async Task<JsonDocument?> HtmlCheckAsync(string owner, string repo, string type, int number)
     {
         var htmlUrl = $"https://github.com/{owner}/{repo}/{type}/{number}";
         try
@@ -274,138 +394,276 @@ internal class GitHubApiService
                 return null;
             }
 
-            // Check if we were redirected (e.g., /pull/N → /issues/N means it's not a PR)
+            // Check redirects: /pull/N → /issues/N means it's an issue, not a PR
             var finalUrl = response.RequestMessage?.RequestUri?.ToString() ?? htmlUrl;
             if (type == "pull" && finalUrl.Contains("/issues/", StringComparison.OrdinalIgnoreCase))
-            {
-                return null; // Redirected to issues — this is an issue, not a PR
-            }
-
-            // Extract title from HTML <title> tag: "Title · Issue #N · owner/repo"
-            var html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            var title = "";
-            var titleStart = html.IndexOf("<title>", StringComparison.OrdinalIgnoreCase);
-            if (titleStart >= 0)
-            {
-                titleStart += 7;
-                var titleEnd = html.IndexOf("</title>", titleStart, StringComparison.OrdinalIgnoreCase);
-                if (titleEnd > titleStart)
-                {
-                    var fullTitle = html[titleStart..titleEnd].Trim();
-                    // Format: "Title · Issue #N · owner/repo · GitHub"
-                    var middleDot = fullTitle.IndexOf(" · ", StringComparison.Ordinal);
-                    title = middleDot > 0 ? WebUtility.HtmlDecode(fullTitle[..middleDot]) : fullTitle;
-                }
-            }
-
-            // Build a minimal JSON that matches the API structure
-            var state = "open";
-            var escapedTitle = JsonSerializer.Serialize(title); // Properly JSON-escapes the string
-            var json = $"{{\"number\":{number},\"title\":{escapedTitle},\"state\":\"{state}\",\"html_url\":\"{htmlUrl}\"}}";
-            this.LastError = null;
-            Program.Logger.LogDebug("GitHub HTML fallback succeeded for {Url}", htmlUrl);
-            return JsonDocument.Parse(json);
-        }
-        catch (Exception ex)
-        {
-            Program.Logger.LogDebug("GitHub HTML fallback failed for {Url}: {Error}", htmlUrl, ex.Message);
-            return null;
-        }
-    }
-
-    private static async Task<(bool Success, JsonDocument? Document, HttpStatusCode StatusCode, string? ErrorBody)> TryGetAsync(string url, string? token)
-    {
-        try
-        {
-            var request = CreateRequest(HttpMethod.Get, url, token);
-            var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                return (true, JsonDocument.Parse(json), response.StatusCode, null);
-            }
-
-            var errorBody = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return (false, null, response.StatusCode, errorBody);
-        }
-        catch (Exception ex)
-        {
-            Program.Logger.LogDebug("GitHub API error for {Url}: {Error}", url, ex.Message);
-            return (false, null, HttpStatusCode.ServiceUnavailable, ex.Message);
-        }
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string? token)
-    {
-        var request = new HttpRequestMessage(method, url);
-        request.Headers.Add("User-Agent", "CopilotBooster");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-
-        if (!string.IsNullOrEmpty(token))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        }
-
-        return request;
-    }
-
-    /// <summary>
-    /// Tries to get a token from <c>gh auth token</c>. Cached after first attempt.
-    /// </summary>
-    private string? GetGhCliToken()
-    {
-        if (this._ghTokenChecked)
-        {
-            return this._cachedGhToken;
-        }
-
-        this._ghTokenChecked = true;
-
-        try
-        {
-            var psi = new ProcessStartInfo("gh", "auth token")
-            {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var proc = Process.Start(psi);
-            if (proc == null)
             {
                 return null;
             }
 
-            var output = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit(3000);
-
-            if (proc.ExitCode == 0 && !string.IsNullOrEmpty(output))
+            // Check redirects: /issues/N → /pull/N means it's a PR, not an issue
+            if (type == "issues" && finalUrl.Contains("/pull/", StringComparison.OrdinalIgnoreCase))
             {
-                this._cachedGhToken = output;
-                Program.Logger.LogDebug("GitHub auth: using gh CLI token");
-                return this._cachedGhToken;
+                return null;
             }
+
+            var html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+            // Detect PR-vs-Issue from <title> tag format
+            var titleTagStart = html.IndexOf("<title>", StringComparison.OrdinalIgnoreCase);
+            if (titleTagStart >= 0)
+            {
+                titleTagStart += 7;
+                var titleTagEnd = html.IndexOf("</title>", titleTagStart, StringComparison.OrdinalIgnoreCase);
+                if (titleTagEnd > titleTagStart)
+                {
+                    var fullTitle = html[titleTagStart..titleTagEnd].Trim();
+                    if (type == "issues" && fullTitle.Contains("Pull Request #", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return null;
+                    }
+
+                    if (type == "pull" && fullTitle.Contains("Issue #", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return null;
+                    }
+                }
+            }
+
+            string json;
+            if (type == "pull")
+            {
+                json = BuildPrJson(html, owner, repo, number, htmlUrl);
+            }
+            else
+            {
+                json = BuildIssueJson(html, number, htmlUrl);
+            }
+
+            this.LastError = null;
+            Program.Logger.LogDebug("GitHub HTML check succeeded for {Url}", htmlUrl);
+            return JsonDocument.Parse(json);
         }
         catch (Exception ex)
         {
-            Program.Logger.LogDebug("gh CLI not available: {Error}", ex.Message);
+            Program.Logger.LogDebug("GitHub HTML check failed for {Url}: {Error}", htmlUrl, ex.Message);
+            return null;
         }
-
-        return null;
     }
 
     /// <summary>
-    /// Resolves the best available token (gh CLI → PAT → null).
+    /// Builds a JSON document matching the GitHub PR API structure from embedded HTML metadata.
+    /// Extracts from the <c>"pullRequest":{...}</c> JSON blob and <c>commit_status_icon?oid=</c> URL.
     /// </summary>
-    private string? ResolveToken()
+    private static string BuildPrJson(string html, string owner, string repo, int number, string htmlUrl)
     {
-        var ghToken = this.GetGhCliToken();
-        if (!string.IsNullOrEmpty(ghToken))
+        // Extract from embedded "pullRequest":{...} JSON blob
+        var title = ExtractJsonString(html, "\"pullRequest\":", "\"title\":\"");
+        var authorLogin = ExtractJsonString(html, "\"pullRequest\":", "\"login\":\"");
+        var headBranch = ExtractJsonString(html, "\"pullRequest\":", "\"headBranch\":\"");
+        var baseBranch = ExtractJsonString(html, "\"pullRequest\":", "\"baseBranch\":\"");
+        var mergedBy = ExtractJsonString(html, "\"pullRequest\":", "\"mergedBy\":\"");
+        _ = ExtractJsonString(html, "\"pullRequest\":", "\"mergedTime\":\"");
+
+        // State from embedded pullRequest blob
+        var rawState = ExtractJsonString(html, "\"pullRequest\":", "\"state\":\"");
+        var merged = string.Equals(rawState, "MERGED", StringComparison.OrdinalIgnoreCase);
+        var state = rawState?.ToLowerInvariant() switch
         {
-            return ghToken;
+            "merged" => "closed",
+            "closed" => "closed",
+            _ => "open"
+        };
+
+        // Head SHA from commit_status_icon URL: oid=<40-hex-chars>
+        string? headSha = null;
+        var oidMatch = System.Text.RegularExpressions.Regex.Match(html, @"commit_status_icon\?oid=([0-9a-f]{40})");
+        if (oidMatch.Success)
+        {
+            headSha = oidMatch.Groups[1].Value;
         }
 
-        return this._getPatFromSettings();
+        // updated_at from the last relative-time datetime= attribute
+        string? updatedAt = null;
+        var timeMatches = System.Text.RegularExpressions.Regex.Matches(html, @"<relative-time[^>]*datetime=""([^""]+)""");
+        if (timeMatches.Count > 0)
+        {
+            updatedAt = timeMatches[^1].Groups[1].Value;
+        }
+
+        // Build JSON matching GitHub API PR structure
+        var sb = new System.Text.StringBuilder();
+        sb.Append('{');
+        sb.Append($"\"number\":{number}");
+        sb.Append($",\"title\":{JsonSerializer.Serialize(title ?? "")}");
+        sb.Append($",\"state\":\"{state}\"");
+        sb.Append($",\"merged\":{(merged ? "true" : "false")}");
+        sb.Append($",\"draft\":false");
+        sb.Append($",\"html_url\":\"{htmlUrl}\"");
+
+        if (authorLogin != null)
+        {
+            sb.Append($",\"user\":{{\"login\":{JsonSerializer.Serialize(authorLogin)}}}");
+        }
+
+        if (headBranch != null || headSha != null)
+        {
+            sb.Append(",\"head\":{");
+            if (headBranch != null)
+            {
+                sb.Append($"\"ref\":{JsonSerializer.Serialize(headBranch)}");
+            }
+
+            if (headSha != null)
+            {
+                if (headBranch != null)
+                {
+                    sb.Append(',');
+                }
+
+                sb.Append($"\"sha\":\"{headSha}\"");
+            }
+
+            sb.Append('}');
+        }
+
+        if (baseBranch != null)
+        {
+            sb.Append($",\"base\":{{\"ref\":{JsonSerializer.Serialize(baseBranch)}}}");
+        }
+
+        if (updatedAt != null)
+        {
+            sb.Append($",\"updated_at\":\"{updatedAt}\"");
+        }
+
+        if (mergedBy != null)
+        {
+            sb.Append($",\"merged_by\":{{\"login\":{JsonSerializer.Serialize(mergedBy)}}}");
+        }
+
+        sb.Append('}');
+        return sb.ToString();
     }
+
+    /// <summary>
+    /// Builds a JSON document matching the GitHub Issue API structure from embedded HTML metadata.
+    /// Extracts state, stateReason, updatedAt, author from embedded JSON fragments.
+    /// </summary>
+    private static string BuildIssueJson(string html, int number, string htmlUrl)
+    {
+        // State from embedded JSON: "state":"CLOSED"
+        var rawState = ExtractFirstJsonValue(html, "\"state\":\"");
+        var state = rawState?.ToLowerInvariant() switch
+        {
+            "closed" => "closed",
+            _ => "open"
+        };
+
+        // State reason: "stateReason":"NOT_PLANNED"
+        var rawReason = ExtractFirstJsonValue(html, "\"stateReason\":\"");
+        string? stateReason = rawReason?.ToLowerInvariant() switch
+        {
+            "not_planned" => "not_planned",
+            "completed" => "completed",
+            "reopened" => "reopened",
+            _ => null
+        };
+
+        // Title from embedded JSON near state/stateReason
+        var title = ExtractFirstJsonValue(html, "\"title\":\"");
+
+        // updatedAt
+        var updatedAt = ExtractFirstJsonValue(html, "\"updatedAt\":\"");
+
+        // Author login — find the first "login" after "author"
+        string? authorLogin = null;
+        var authorIdx = html.IndexOf("\"author\":{", StringComparison.Ordinal);
+        if (authorIdx >= 0)
+        {
+            var loginIdx = html.IndexOf("\"login\":\"", authorIdx, StringComparison.Ordinal);
+            if (loginIdx >= 0 && loginIdx - authorIdx < 200)
+            {
+                authorLogin = ExtractFirstJsonValue(html[loginIdx..], "\"login\":\"");
+            }
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append('{');
+        sb.Append($"\"number\":{number}");
+        sb.Append($",\"title\":{JsonSerializer.Serialize(title ?? "")}");
+        sb.Append($",\"state\":\"{state}\"");
+        sb.Append($",\"html_url\":\"{htmlUrl}\"");
+
+        if (stateReason != null)
+        {
+            sb.Append($",\"state_reason\":\"{stateReason}\"");
+        }
+
+        if (authorLogin != null)
+        {
+            sb.Append($",\"user\":{{\"login\":{JsonSerializer.Serialize(authorLogin)}}}");
+        }
+
+        if (updatedAt != null)
+        {
+            sb.Append($",\"updated_at\":\"{updatedAt}\"");
+        }
+
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Extracts the first quoted value after a JSON key pattern.
+    /// E.g., for pattern <c>"title":"</c>, returns the value between the quotes.
+    /// </summary>
+    private static string? ExtractFirstJsonValue(string html, string prefix)
+    {
+        var idx = html.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx < 0)
+        {
+            return null;
+        }
+
+        var start = idx + prefix.Length;
+        var end = html.IndexOf('"', start);
+        return end > start ? html[start..end] : null;
+    }
+
+    /// <summary>
+    /// Extracts a JSON string value that appears after a context marker and then a field prefix.
+    /// E.g., context <c>"pullRequest":</c> then field <c>"title":"</c>.
+    /// </summary>
+    private static string? ExtractJsonString(string html, string context, string fieldPrefix)
+    {
+        var contextIdx = html.IndexOf(context, StringComparison.Ordinal);
+        if (contextIdx < 0)
+        {
+            return null;
+        }
+
+        // Search within a reasonable window after the context marker
+        var searchEnd = Math.Min(html.Length, contextIdx + 3000);
+        var fieldIdx = html.IndexOf(fieldPrefix, contextIdx, searchEnd - contextIdx, StringComparison.Ordinal);
+        if (fieldIdx < 0)
+        {
+            return null;
+        }
+
+        var start = fieldIdx + fieldPrefix.Length;
+        var end = html.IndexOf('"', start);
+        if (end <= start)
+        {
+            return null;
+        }
+
+        var value = html[start..end];
+        return value == "null" ? null : WebUtility.HtmlDecode(value);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"<details class=""checks-list-item[\s\S]*?</details>")]
+    private static partial System.Text.RegularExpressions.Regex MyRegex();
+    [System.Text.RegularExpressions.GeneratedRegex(@"<span>([^<]{2,100})</span>")]
+    private static partial System.Text.RegularExpressions.Regex MyRegex1();
 }

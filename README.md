@@ -249,7 +249,7 @@ Create a new branch based on any existing branch. Pick a base branch from the dr
 
 #### From PR #
 
-Start a workspace directly from a GitHub PR number. Copilot Booster fetches the PR metadata via the GitHub API and checks out the contributor's original branch name — matching what `gh pr checkout` does.
+Start a workspace directly from a GitHub PR number. Copilot Booster validates the PR and fetches its title, then checks out the contributor's original branch name — matching what `gh pr checkout` does.
 
 <p align="center">
   <img src="images/create-workspace-from-pr.png" alt="Create workspace from a GitHub Pull Request" width="450">
@@ -367,7 +367,7 @@ Configure Microsoft Edge integration — toggle whether renaming a session autom
 
 ### 🔄 In-App Updates
 
-Copilot Booster checks for new versions on startup via the GitHub Releases API. When an update is available, a banner appears at the bottom of the window — click to download and install the latest version automatically.
+Copilot Booster checks for new versions on startup by scanning the GitHub releases page. When an update is available, a banner appears at the bottom of the window — click to download and install the latest version automatically.
 
 ---
 
