@@ -30,6 +30,9 @@ internal partial class GitHubApiService
     };
 
     private readonly Func<string?>? _getPatFromSettings;
+    private readonly Func<string, string?, Task<(int ExitCode, string Stdout, string Stderr)>>? _processRunner;
+    private bool? _hasGhCli;
+    private bool? _isAuthenticated;
 
     /// <summary>
     /// Creates a new GitHub data service.
@@ -38,15 +41,226 @@ internal partial class GitHubApiService
     /// Optional callback to retrieve a PAT from settings.
     /// If provided, the PAT is forwarded as <c>GH_TOKEN</c> env var to <c>gh api</c> calls.
     /// </param>
-    internal GitHubApiService(Func<string?>? getPatFromSettings = null)
+    /// <param name="processRunner">
+    /// Optional process runner for testability. If null, uses real <c>gh</c> CLI process.
+    /// Signature: (command, arguments) → (exitCode, stdout, stderr).
+    /// </param>
+    internal GitHubApiService(Func<string?>? getPatFromSettings = null, Func<string, string?, Task<(int ExitCode, string Stdout, string Stderr)>>? processRunner = null)
     {
         this._getPatFromSettings = getPatFromSettings;
+        this._processRunner = processRunner;
     }
 
     /// <summary>
-    /// Fetches a PR by number. Tries <c>gh api</c> first (rich data: head.ref, head.sha,
-    /// draft, user, reviews needed for polling and CI features),
-    /// falls back to HTML scraping for existence/title when <c>gh</c> is unavailable.
+    /// Whether the <c>gh</c> CLI is installed. Checked once and cached.
+    /// </summary>
+    internal bool HasGhCli
+    {
+        get
+        {
+            this._hasGhCli ??= this.CheckGhCli();
+            return this._hasGhCli.Value;
+        }
+    }
+
+    /// <summary>
+    /// Whether GitHub authentication is available and working.
+    /// If <c>gh</c> CLI is installed, runs <c>gh auth status</c>.
+    /// Otherwise, checks if a PAT is configured.
+    /// Checked once and cached.
+    /// </summary>
+    internal bool IsAuthenticated
+    {
+        get
+        {
+            this._isAuthenticated ??= this.CheckAuthentication();
+            return this._isAuthenticated.Value;
+        }
+    }
+
+    /// <summary>
+    /// Checks if the authenticated user has starred the specified repository.
+    /// Tries <c>gh api</c> first (if installed), falls back to HTTP with PAT.
+    /// Returns <c>false</c> when no authentication is available.
+    /// </summary>
+    internal async Task<bool> IsRepoStarredAsync(string owner, string repo)
+    {
+        if (this.HasGhCli)
+        {
+            var (exitCode, _, _) = await this.RunProcessAsync("gh", $"api user/starred/{owner}/{repo}").ConfigureAwait(false);
+            return exitCode == 0;
+        }
+
+        var pat = this._getPatFromSettings?.Invoke();
+        if (string.IsNullOrEmpty(pat))
+        {
+            return false;
+        }
+
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/user/starred/{owner}/{repo}");
+            request.Headers.Add("User-Agent", "CopilotBooster");
+            request.Headers.Add("Accept", "application/vnd.github+json");
+            request.Headers.Add("Authorization", $"Bearer {pat}");
+            var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+            return response.StatusCode == HttpStatusCode.NoContent; // 204 = starred
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Stars the specified repository for the authenticated user.
+    /// Tries <c>gh api</c> first (if installed), falls back to HTTP with PAT.
+    /// </summary>
+    internal async Task<bool> StarRepoAsync(string owner, string repo)
+    {
+        if (this.HasGhCli)
+        {
+            var (exitCode, _, _) = await this.RunProcessAsync("gh", $"api -X PUT user/starred/{owner}/{repo}").ConfigureAwait(false);
+            return exitCode == 0;
+        }
+
+        var pat = this._getPatFromSettings?.Invoke();
+        if (string.IsNullOrEmpty(pat))
+        {
+            return false;
+        }
+
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Put, $"https://api.github.com/user/starred/{owner}/{repo}");
+            request.Headers.Add("User-Agent", "CopilotBooster");
+            request.Headers.Add("Accept", "application/vnd.github+json");
+            request.Headers.Add("Authorization", $"Bearer {pat}");
+            var response = await s_httpClient.SendAsync(request).ConfigureAwait(false);
+            return response.StatusCode == HttpStatusCode.NoContent; // 204 = success
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool CheckGhCli()
+    {
+        try
+        {
+            if (this._processRunner != null)
+            {
+                var result = this._processRunner("gh", "--version").GetAwaiter().GetResult();
+                return result.ExitCode == 0;
+            }
+
+            var psi = new ProcessStartInfo("gh", "--version")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null)
+            {
+                return false;
+            }
+
+            proc.WaitForExit(5000);
+            return proc.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool CheckAuthentication()
+    {
+        if (this.HasGhCli)
+        {
+            try
+            {
+                if (this._processRunner != null)
+                {
+                    var result = this._processRunner("gh", "auth status").GetAwaiter().GetResult();
+                    return result.ExitCode == 0;
+                }
+
+                var psi = new ProcessStartInfo("gh", "auth status")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var proc = Process.Start(psi);
+                if (proc == null)
+                {
+                    return false;
+                }
+
+                proc.WaitForExit(5000);
+                return proc.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return !string.IsNullOrEmpty(this._getPatFromSettings?.Invoke());
+    }
+
+    /// <summary>
+    /// Runs a process, using the injectable runner if available, otherwise real process.
+    /// </summary>
+    private async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(string fileName, string arguments)
+    {
+        if (this._processRunner != null)
+        {
+            return await this._processRunner(fileName, arguments).ConfigureAwait(false);
+        }
+
+        return await RunRealProcessAsync(fileName, arguments).ConfigureAwait(false);
+    }
+
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunRealProcessAsync(string fileName, string arguments)
+    {
+        var psi = new ProcessStartInfo(fileName)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            Arguments = arguments
+        };
+
+        using var proc = Process.Start(psi);
+        if (proc == null)
+        {
+            return (-1, "", "Failed to start process");
+        }
+
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+
+        var completed = proc.WaitForExit(15000);
+        if (!completed)
+        {
+            try { proc.Kill(); }
+            catch { }
+
+            return (-1, "", "Process timed out");
+        }
+
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+        return (proc.ExitCode, stdout, stderr);
+    }
+
     /// <summary>
     /// Fetches a PR by number. Tries HTML scraping first (never rate-limited, extracts
     /// rich metadata from embedded JSON: author, head branch, head SHA, state, title),
@@ -242,9 +456,15 @@ internal partial class GitHubApiService
 
     /// <summary>
     /// Core process runner for <c>gh api</c> CLI.
+    /// Uses injectable process runner if available, otherwise real process with PAT forwarding.
     /// </summary>
     private async Task<(int ExitCode, string Stdout, string Stderr)> RunGhApiAsync(string path)
     {
+        if (this._processRunner != null)
+        {
+            return await this._processRunner("gh", $"api {path}").ConfigureAwait(false);
+        }
+
         var psi = new ProcessStartInfo("gh")
         {
             RedirectStandardOutput = true,
@@ -268,7 +488,6 @@ internal partial class GitHubApiService
             return (-1, "", "Failed to start gh process");
         }
 
-        // Read stdout and stderr concurrently to avoid deadlocks
         var stdoutTask = proc.StandardOutput.ReadToEndAsync();
         var stderrTask = proc.StandardError.ReadToEndAsync();
 

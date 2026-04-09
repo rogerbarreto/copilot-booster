@@ -1082,6 +1082,9 @@ internal partial class MainForm : Form
 
             await this.LoadInitialDataAsync().ConfigureAwait(true);
 
+            // Check for welcome popup (star request) — async, non-blocking
+            _ = this.CheckWelcomePopupAsync();
+
             // Start event-driven refresh after initial data is loaded
             this._windowHookService?.Start();
             this._fullRefreshTimer?.Start();
@@ -1692,6 +1695,34 @@ internal partial class MainForm : Form
                     this._bellService.NotifySingle(sessionId, sessionName);
                 }
             });
+        }
+    }
+
+    private async Task CheckWelcomePopupAsync()
+    {
+        if (Program._settings.WelcomePopupDismissed)
+        {
+            return;
+        }
+
+        try
+        {
+            var starred = await Task.Run(() => this._githubApi.IsRepoStarredAsync("rogerbarreto", "copilot-booster")).ConfigureAwait(true);
+            if (starred)
+            {
+                return;
+            }
+
+            var dismissed = WelcomePopupVisuals.Show(this._githubApi);
+            if (dismissed)
+            {
+                Program._settings.WelcomePopupDismissed = true;
+                Program._settings.Save();
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Welcome popup check failed: {Error}", ex.Message);
         }
     }
 

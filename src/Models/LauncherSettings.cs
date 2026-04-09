@@ -223,6 +223,13 @@ internal class LauncherSettings
     public string? GitHubToken { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the welcome popup (star request) has been dismissed by the user.
+    /// When <c>true</c>, the popup will not be shown again on startup.
+    /// </summary>
+    [JsonPropertyName("welcomePopupDismissed")]
+    public bool WelcomePopupDismissed { get; set; }
+
+    /// <summary>
     /// Loads the launcher settings from the default settings file.
     /// </summary>
     /// <returns>The deserialized <see cref="LauncherSettings"/> instance.</returns>
