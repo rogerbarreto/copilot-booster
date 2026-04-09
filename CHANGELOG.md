@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.20.0] - 2026-04-09
+
+### Added
+
+- **Welcome popup** — on startup, shows a thank-you message and requests a GitHub star. Authenticated users can star directly from the popup; unauthenticated users are directed to the repo page in their browser. Includes a "Don't show again" checkbox.
+- **`HasGhCli` and `IsAuthenticated` properties** — cached detection of `gh` CLI availability and authentication status, used by the welcome popup and available for future features.
+- **`IsRepoStarredAsync` / `StarRepoAsync`** — check and set GitHub star status via `gh api` (primary) or HTTP with PAT (fallback).
+- **HTML scraping extracts rich PR metadata** — author, head branch, head SHA, state (open/merged/closed), merged-by, and updated-at are now extracted from embedded JSON in GitHub HTML pages.
+- **HTML scraping for CI check runs** — the `/pull/N/checks` page is scraped for check run names, conclusions, and job IDs, removing the dependency on `gh api` for CI status.
+
+### Fixed
+
+- **Issue/PR check "not found" bug** — the "Create New Worktree" and "New Session" dialogs no longer fail to find issues/PRs on public repositories when the GitHub API rate limit is exhausted.
+- **IDE processes tied to CopilotBooster lifecycle** — IDEs now launch as fully detached processes with immediate handle disposal, preventing crashes when CopilotBooster exits.
+- **Process handle leaks** — `OpenInIde` and `LaunchIde` now return PIDs and dispose `Process` handles internally.
+
+### Changed
+
+- **Eliminated all `api.github.com` usage** — GitHub data access now uses HTML scraping of `github.com` pages (primary, never rate-limited) with `gh api` CLI as fallback for private repos or richer data.
+- **Forms use centralized `GitHubApiService`** — the "Create New Worktree" and "New Session" dialogs now use the shared `GitHubApiService` instead of inline HTTP calls.
+- **Injectable process runner** — `GitHubApiService` accepts an optional process runner delegate for unit test faking.
+
+### Removed
+
+- **Direct `api.github.com` HTTP calls** — the internal `GetAsync`/`TryGetAsync`/`CreateRequest` HTTP infrastructure and manual token management have been removed from `GitHubApiService`.
+
 ## [0.19.3] - 2026-04-08
 
 ### Fixed
