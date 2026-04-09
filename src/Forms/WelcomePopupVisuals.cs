@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 using CopilotBooster.Services;
 
@@ -26,7 +27,7 @@ internal static class WelcomePopupVisuals
         using var form = new Form
         {
             Text = "Welcome to Copilot Booster",
-            Size = new Size(460, 280),
+            Size = new Size(460, 350),
             FormBorderStyle = FormBorderStyle.FixedDialog,
             StartPosition = FormStartPosition.CenterScreen,
             MaximizeBox = false,
@@ -36,12 +37,36 @@ internal static class WelcomePopupVisuals
             ForeColor = Color.White
         };
 
+        if (Program.AppIcon != null)
+        {
+            form.Icon = Program.AppIcon;
+        }
+
+        // Logo
+        var logoPicture = new PictureBox
+        {
+            Size = new Size(64, 64),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Location = new Point(190, 12)
+        };
+        var assembly = Assembly.GetExecutingAssembly();
+        var logoStream = assembly.GetManifestResourceStream("CopilotBooster.Resources.logo.png");
+        if (logoStream != null)
+        {
+            logoPicture.Image = Image.FromStream(logoStream);
+        }
+        else if (Program.AppIcon != null)
+        {
+            using var largeIcon = new Icon(Program.AppIcon, 256, 256);
+            logoPicture.Image = largeIcon.ToBitmap();
+        }
+
         var lblTitle = new Label
         {
             Text = "⭐ Thank you for using Copilot Booster!",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 13f, FontStyle.Bold),
             AutoSize = true,
-            Location = new Point(30, 25),
+            Location = new Point(30, 90),
             ForeColor = Color.White
         };
 
@@ -50,7 +75,7 @@ internal static class WelcomePopupVisuals
             Text = "If you find this tool helpful, please consider giving it a star\non GitHub. It helps others discover it and motivates development!",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 9.5f),
             AutoSize = true,
-            Location = new Point(30, 65),
+            Location = new Point(30, 130),
             ForeColor = Color.FromArgb(200, 200, 200)
         };
 
@@ -58,7 +83,7 @@ internal static class WelcomePopupVisuals
         {
             Text = "⭐ Star on GitHub",
             Size = new Size(160, 36),
-            Location = new Point(30, 130),
+            Location = new Point(30, 195),
             FlatStyle = FlatStyle.Flat,
             BackColor = Color.FromArgb(45, 120, 45),
             ForeColor = Color.White,
@@ -71,7 +96,7 @@ internal static class WelcomePopupVisuals
         {
             Text = "Don't show this again",
             AutoSize = true,
-            Location = new Point(30, 185),
+            Location = new Point(30, 250),
             ForeColor = Color.FromArgb(170, 170, 170),
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 8.5f)
         };
@@ -80,7 +105,7 @@ internal static class WelcomePopupVisuals
         {
             Text = "Close",
             Size = new Size(80, 32),
-            Location = new Point(350, 185),
+            Location = new Point(350, 250),
             FlatStyle = FlatStyle.Flat,
             BackColor = Color.FromArgb(55, 55, 55),
             ForeColor = Color.White,
@@ -125,7 +150,7 @@ internal static class WelcomePopupVisuals
             dismissed = chkDismiss.Checked;
         };
 
-        form.Controls.AddRange([lblTitle, lblMessage, btnStar, chkDismiss, btnClose]);
+        form.Controls.AddRange([logoPicture, lblTitle, lblMessage, btnStar, chkDismiss, btnClose]);
         form.AcceptButton = btnStar;
         form.CancelButton = btnClose;
         form.ShowDialog();
