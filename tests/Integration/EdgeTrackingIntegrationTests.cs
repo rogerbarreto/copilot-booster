@@ -65,6 +65,7 @@ public sealed class EdgeTrackingIntegrationTests
     /// sessions list until the OS-level window is detected.
     /// </summary>
     [StaFact]
+    [Trait("Category", "LocalOnly")]
     public void OpenInEdge_TrackedWorkspace_EdgeLinkAppearsInActiveColumn()
     {
         const string SessionId = "edge-tracking-test";
