@@ -1,0 +1,33 @@
+{
+  "id": "74fd0450-5513-4894-a18f-7ffd1b2a60bf",
+  "createdAt": "2026-03-15T15:47:21.201Z",
+  "lastActiveAt": "2026-03-15T15:56:09.858Z",
+  "messages": [
+    {
+      "role": "system",
+      "content": "🏗️ No team yet — casting one based on your project...",
+      "timestamp": "2026-03-15T15:49:44.365Z"
+    },
+    {
+      "role": "agent",
+      "agentName": "coordinator",
+      "content": "Team proposed:\n\n🏗️  Neo        — Lead            Architecture, code review, decisions\n👤  Trinity    — Services Dev    Business logic, design patterns\n⚛️  Morpheus   — UI Dev          WinForms, components, theming\n🧪  Tank       — Tester          TDD, unit & integration tests\n🏗️  Oracle     — Quality Architect SOLID, refactoring, performance\n📋  Scribe     — (silent)        Memory, decisions, session logs\n🔄  Ralph      — (monitor)       Work queue, backlog, keep-alive\n\nUniverse: The Matrix",
+      "timestamp": "2026-03-15T15:50:21.621Z"
+    },
+    {
+      "role": "system",
+      "content": "Look good? Type **y** to confirm or **n** to cancel.",
+      "timestamp": "2026-03-15T15:50:21.633Z"
+    },
+    {
+      "role": "system",
+      "content": "✅ Team hired! 7 members created.",
+      "timestamp": "2026-03-15T15:50:59.682Z"
+    },
+    {
+      "role": "system",
+      "content": "📌 Routing your message to the team now...",
+      "timestamp": "2026-03-15T15:50:59.693Z"
+    }
+  ]
+}
