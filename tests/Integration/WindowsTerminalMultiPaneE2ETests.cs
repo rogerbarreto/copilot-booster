@@ -6,23 +6,29 @@ using System.Text.Json;
 namespace CopilotBooster.IntegrationTests.Integration;
 
 /// <summary>
-/// Local-only live E2E coverage for externally-started Copilot CLI sessions hosted in Windows Terminal panes.
+/// Live E2E coverage for externally-started Copilot CLI sessions hosted in Windows Terminal tabs.
+///
+/// This test reproduces Roger's exact v0.21.1 repro:
+///   1. wt.exe is already running with TWO real copilot.exe tabs (no PowerShell wrapper).
+///   2. CopilotBooster starts AFTER wt is fully up, ingests both sessions, renders the grid.
+///   3. Clicking each session's "Copilot CLI" link MUST focus its own tab — verified by:
+///        a) the WT-selected pane's UIA name contains the session label, and
+///        b) the WT window title contains the session label.
+///
+/// Tab labels are set deterministically by sending `/rename &lt;label&gt;` to copilot's TUI
+/// via SendKeys, AFTER copilot reaches its prompt. Copilot owns the title; we don't fake it.
 /// </summary>
 [Collection(WindowEventHookCollection.Name)]
 public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
 {
-    private const int WaitTimeoutMs = 60_000;
     private const uint WM_CLOSE = 0x0010;
 
     private readonly List<int> _copilotPids = [];
+    private readonly List<int> _pwshPids = [];
     private readonly List<Process> _startedProcesses = [];
     private readonly HashSet<IntPtr> _wtWindowHwnds = [];
     private readonly HashSet<string> _createdSessionDirs = new(StringComparer.OrdinalIgnoreCase);
-    private readonly string _artifactRoot = Path.Combine(
-        Environment.CurrentDirectory,
-        "TestResults",
-        $"copilot-booster-it-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
-    private string? _markerRoot;
+    private readonly HashSet<string> _createdSessionIds = new(StringComparer.OrdinalIgnoreCase);
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -30,129 +36,176 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    private const byte VK_CONTROL = 0x11;
+    private const byte VK_D = 0x44;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    private const string SessionCleanupSentinel = ".it-cleanup-copilot-booster";
+
     public void Dispose()
     {
         this.CleanupProcessesAndWindows();
-        this.MoveCreatedSessionDirs();
-        this.CleanupMarkerRoot();
+        this.CleanupCreatedSessionDirs();
     }
 
     [LocalOnlyFact]
-    [Trait("Category", "LocalOnly")]
-    public async Task WindowsTerminalMultiPaneSessions_AppearResolveAndFocusCorrectPaneAsync()
+    public async Task TwoRealCopilotTabs_LinkClickFocusesCorrectTabAsync()
     {
-        await RunOnStaThreadAsync(this.ExecuteWindowsTerminalMultiPaneE2EAsync).ConfigureAwait(false);
+        await RunOnStaThreadAsync(this.ExecutePreExistingWtRealCopilotE2EAsync).ConfigureAwait(false);
     }
 
-    private async Task ExecuteWindowsTerminalMultiPaneE2EAsync()
+    private async Task ExecutePreExistingWtRealCopilotE2EAsync()
     {
         SkipIfPreflightFails();
-
         Directory.CreateDirectory(Program.SessionStateDir);
         Directory.CreateDirectory(Program.AppDataDir);
 
-        this._markerRoot = Path.Combine(this._artifactRoot, "markers");
-        Directory.CreateDirectory(this._markerRoot);
+        // Orphan sweep — earlier IT runs may have crashed before Dispose, leaving
+        // session dirs behind that pollute Roger's real booster UI. Any dir that still
+        // contains our sentinel file is a known leftover and safe to delete.
+        SweepOrphanItSessionDirs();
 
-        var probes = new[]
+        var sessionA = new RealCopilotSession("RunTests-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionB = new RealCopilotSession("RunTest2-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        foreach (var s in new[] { sessionA, sessionB })
         {
-            new PaneProbe("PaneA-Probe", Guid.NewGuid().ToString("N")),
-            new PaneProbe("PaneB-Probe", Guid.NewGuid().ToString("N"))
-        };
-
-        foreach (var probe in probes)
-        {
-            probe.MarkerPath = Path.Combine(this._markerRoot, $"{probe.Label}.pid");
-            probe.ScriptPath = Path.Combine(this._markerRoot, $"{probe.Label}.ps1");
-            File.WriteAllText(probe.ScriptPath, BuildPaneScript(probe), Encoding.UTF8);
+            // copilot --resume requires a session-state/<id>/ that already contains a valid
+            // workspace.yaml AND an events.jsonl whose first event is `session.start`. The
+            // template here mirrors the on-disk shape produced by a real copilot session
+            // (verified against session 1a9f3df8-f4a0-4207-8e27-ddcd753a2386):
+            //   * workspace.yaml — only id/cwd/summary_count/created_at/updated_at (no
+            //     git_root, no summary, no name — copilot is strict about extras).
+            //   * events.jsonl — opens with a session.start event whose data.sessionId
+            //     matches the dir name. Without this header copilot refuses to resume.
+            s.SessionId = Guid.NewGuid().ToString();
+            s.SessionDir = Path.Combine(Program.SessionStateDir, s.SessionId);
+            this._createdSessionDirs.Add(s.SessionDir);
+            this._createdSessionIds.Add(s.SessionId);
+            Directory.CreateDirectory(s.SessionDir);
+            // Sentinel file lets the next test run's orphan sweep find and delete this
+            // dir even if the current run crashes before Dispose.
+            File.WriteAllText(Path.Combine(s.SessionDir, SessionCleanupSentinel), DateTime.UtcNow.ToString("O"));
+            WriteMinimalWorkspaceYaml(Path.Combine(s.SessionDir, "workspace.yaml"), s.SessionId, Environment.CurrentDirectory);
+            WriteSessionStartEvent(Path.Combine(s.SessionDir, "events.jsonl"), s.SessionId, Environment.CurrentDirectory);
+            SessionNameOverrideService.Set(Program.SessionNameOverrideFile, s.SessionId, s.Label, resolvedFromUserMessage: true);
         }
 
-        var tracker = new ActiveStatusTracker();
-
-        var wtProcess = StartWindowsTerminalWithPanes(probes);
+        var paneGateway = new WindowsTerminalPaneGateway();
+        var (wtProcess, wtHwnd) = StartWtAndTypeCopilotInTwoTabs(paneGateway, sessionA, sessionB);
         if (wtProcess != null)
         {
             this._startedProcesses.Add(wtProcess);
         }
+        this._wtWindowHwnds.Add(wtHwnd);
 
-        foreach (var probe in probes)
-        {
-            probe.CopilotPid = WaitForPanePid(probe);
-            this._copilotPids.Add(probe.CopilotPid);
-            probe.SessionId = $"wt-e2e-{probe.DenyUrlGuid}";
-            probe.SessionDir = Path.Combine(Program.SessionStateDir, probe.SessionId);
-            this._createdSessionDirs.Add(probe.SessionDir);
-        }
+        (sessionA.CopilotPid, sessionA.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA.Marker, 30_000);
+        (sessionB.CopilotPid, sessionB.PwshPid) = WaitForCopilotPidByDenyUrl(sessionB.Marker, 30_000);
+        this._copilotPids.Add(sessionA.CopilotPid);
+        this._copilotPids.Add(sessionB.CopilotPid);
+        this._pwshPids.Add(sessionA.PwshPid);
+        this._pwshPids.Add(sessionB.PwshPid);
 
-        var wtHwndFromTitle = WaitForWindowsTerminalWindow(probes);
-        this._wtWindowHwnds.Add(wtHwndFromTitle);
-
-        foreach (var probe in probes)
-        {
-            EnsureProbeWorkspace(probe);
-            tracker.HandleExternalSessionDiscovered(probe.SessionId!, probe.CopilotPid);
-
-            Assert.True(
-                File.Exists(Path.Combine(probe.SessionDir!, "workspace.yaml")),
-                $"Session {probe.SessionId} for {probe.Label} does not have a workspace.yaml.");
-        }
-
-        foreach (var probe in probes)
-        {
-            var eventsJsonl = Path.Combine(probe.SessionDir!, "events.jsonl");
-            AppendUserMessage(eventsJsonl, probe.Label);
-        }
-
-        foreach (var probe in probes)
-        {
-            SessionNameOverrideService.Set(
-                Program.SessionNameOverrideFile,
-                probe.SessionId!,
-                probe.Label,
-                resolvedFromUserMessage: true);
-            var entry = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, probe.SessionId!);
-            Assert.True(
-                entry is { ResolvedFromUserMessage: true } && entry.Name == probe.Label,
-                $"Booster-Resolved Name was not updated from events.jsonl for {probe.Label}.");
-        }
-
-        // Re-resolve after the deterministic user.message is in the sidecar so WT pane matching can use the resolved label.
-        foreach (var probe in probes)
-        {
-            tracker.RemoveCopilotHost(probe.SessionId!);
-            tracker.HandleExternalSessionDiscovered(probe.SessionId!, probe.CopilotPid);
-            probe.Host = tracker.GetCopilotHost(probe.SessionId!);
-            Assert.NotNull(probe.Host);
-            if (!string.Equals(probe.Host!.HostKindLabel, "Windows Terminal", StringComparison.OrdinalIgnoreCase))
+        // Wait for copilot to fully load on BOTH tabs. Copilot sets the tab title to
+        // "GitHub Copilot" once it's at the prompt — that's the deterministic ready signal.
+        WaitUntil(
+            () =>
             {
-                probe.Host = ResolveWindowsTerminalHostFromUia(probe.Host, probe.Label, wtHwndFromTitle);
-                tracker.SetCopilotHost(probe.SessionId!, probe.Host);
+                var panes = paneGateway.EnumeratePanes(wtHwnd).Panes;
+                return panes.Count >= 2
+                    && panes.Take(2).All(p => p.Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase));
+            },
+            45_000,
+            "Both wt tabs did not produce the 'GitHub Copilot' title within 45s; copilot may not have started.");
+
+        // Settle past splash so copilot is at the prompt and ready for input.
+        Thread.Sleep(2_000);
+
+        // Send /rename <label> to each tab to set deterministic, unique titles.
+        // Because we launched with --resume <our-id>, copilot is bound to OUR session dir
+        // (which already contains workspace.yaml) — /rename writes into it directly.
+        RenameTab(paneGateway, wtHwnd, tabIndex: 0, sessionA.Label);
+        RenameTab(paneGateway, wtHwnd, tabIndex: 1, sessionB.Label);
+
+        // Boot the booster tracker AFTER wt is fully up.
+        var tracker = new ActiveStatusTracker();
+        tracker.HandleExternalSessionDiscovered(sessionA.SessionId, sessionA.CopilotPid);
+        tracker.HandleExternalSessionDiscovered(sessionB.SessionId, sessionB.CopilotPid);
+
+        sessionA.Host = tracker.GetCopilotHost(sessionA.SessionId);
+        sessionB.Host = tracker.GetCopilotHost(sessionB.SessionId);
+        Assert.NotNull(sessionA.Host);
+        Assert.NotNull(sessionB.Host);
+        Assert.Equal("Windows Terminal", sessionA.Host!.HostKindLabel);
+        Assert.Equal("Windows Terminal", sessionB.Host!.HostKindLabel);
+        Assert.NotEqual(sessionA.Host.PaneRuntimeId, sessionB.Host.PaneRuntimeId);
+
+        var sessions = SessionService.LoadNamedSessions(
+                Program.SessionStateDir,
+                Program.PidRegistryFile,
+                Program.SessionStateFile,
+                Program.SessionAliasFile,
+                Program.SessionNameOverrideFile)
+            .Where(s => s.Id == sessionA.SessionId || s.Id == sessionB.SessionId)
+            .ToList();
+        Assert.Equal(2, sessions.Count);
+
+        // Install the production-shape WinEvent hooks so the click→focus path runs
+        // against the same state machine MainForm.cs:1001-1083 wires up. Without this
+        // the IT tests FocusActiveProcess in isolation while production runs it racing
+        // against ForegroundChanged + WindowTitleChanged callbacks that mutate
+        // _activeTrackedWindows mid-flight. The hook callbacks dispatch on this STA
+        // thread via WINEVENT_OUTOFCONTEXT and only fire when Application.DoEvents()
+        // pumps the message queue, identical to MainForm's message-loop semantics.
+        using var hookService = new WindowEventHookService();
+        hookService.WindowCreated += hwnd =>
+        {
+            tracker.OnWindowCreated(hwnd);
+            var title = WindowFocusService.GetWindowTitle(hwnd);
+            if (!string.IsNullOrEmpty(title))
+            {
+                tracker.OnWindowTitleChanged(hwnd, title, ActiveStatusTracker.BuildSessionSummaryMap(sessions));
             }
-
-            Assert.Equal("Windows Terminal", probe.Host.HostKindLabel);
-            Assert.NotEqual(IntPtr.Zero, GetWindowsTerminalHwnd(probe.Host));
-            Assert.Contains(probe.Label, probe.Host.PaneTitle ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-            Assert.False(string.IsNullOrWhiteSpace(probe.Host.PaneRuntimeId));
-            this._wtWindowHwnds.Add(GetWindowsTerminalHwnd(probe.Host));
-        }
-
-        Assert.Equal(
-            probes.Length,
-            probes.Select(probe => probe.Host!.PaneRuntimeId).Distinct(StringComparer.Ordinal).Count());
-
-        var paneGateway = new WindowsTerminalPaneGateway();
-        foreach (var probe in probes)
+        };
+        hookService.WindowDestroyed += hwnd =>
         {
-            AssertPaneTextContainsMarker(paneGateway, GetWindowsTerminalHwnd(probe.Host!), probe);
-        }
-
-        var sessions = LoadProbeSessions(probes);
-        Assert.Equal(probes.Length, sessions.Count);
-        foreach (var probe in probes)
+            tracker.HandleWindowDestroyed(hwnd);
+            tracker.OnWindowDestroyed(hwnd);
+        };
+        hookService.WindowTitleChanged += (hwnd, title) =>
         {
-            var session = Assert.Single(sessions, s => s.Id == probe.SessionId);
-            Assert.Equal(probe.Label, session.Summary);
-        }
+            tracker.HandleWindowNameChanged(hwnd);
+            tracker.OnWindowTitleChanged(hwnd, title, ActiveStatusTracker.BuildSessionSummaryMap(sessions));
+        };
+        hookService.ForegroundChanged += hwnd =>
+        {
+            tracker.OnWindowCreated(hwnd);
+            var title = WindowFocusService.GetWindowTitle(hwnd);
+            if (!string.IsNullOrEmpty(title))
+            {
+                tracker.OnWindowTitleChanged(hwnd, title, ActiveStatusTracker.BuildSessionSummaryMap(sessions));
+            }
+        };
+        hookService.Start();
 
         var snapshot = tracker.IncrementalRefresh(sessions);
         using var gridHost = new Form
@@ -170,48 +223,53 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         gridHost.Show();
         Application.DoEvents();
 
-        foreach (var probe in probes)
-        {
-            var row = Assert.Single(
-                grid.Rows.Cast<DataGridViewRow>(),
-                row => string.Equals(row.Tag as string, probe.SessionId, StringComparison.OrdinalIgnoreCase));
-            Assert.Equal(probe.Label, row.Cells["Session"].Value?.ToString());
-            Assert.Contains("Copilot CLI", row.Cells["RunningApps"].Value?.ToString() ?? string.Empty);
-        }
-
-        AssertRowsContainCopilotCli(grid, probes);
-
-        var foregroundProbe = probes[1];
-        var foregroundWtHwnd = GetWindowsTerminalHwnd(foregroundProbe.Host!);
-        ClickWindowsTerminalTab(paneGateway, foregroundWtHwnd, foregroundProbe);
-        Thread.Sleep(500);
-        tracker.HandleWindowNameChanged(foregroundWtHwnd);
-        tracker.OnWindowTitleChanged(foregroundWtHwnd, WindowFocusService.GetWindowTitle(foregroundWtHwnd), ActiveStatusTracker.BuildSessionSummaryMap(sessions));
-        snapshot = tracker.IncrementalRefresh(sessions);
-        visuals.Populate(sessions, snapshot, searchQuery: null);
-        Application.DoEvents();
-        AssertRowsContainCopilotCli(grid, probes);
-
-        var previousSettings = Program._settings;
+        var prevSettings = Program._settings;
         Program._settings = CreateTestSettings();
         try
         {
-            foreach (var probe in probes)
-            {
-                ClickCopilotCliLink(grid, probe.SessionId!);
-                var wtHwnd = GetWindowsTerminalHwnd(probe.Host!);
-                WaitUntil(
-                    () => GetForegroundWindow() == wtHwnd || WindowFocusService.GetWindowProcessId(GetForegroundWindow()) == probe.Host!.HostPid,
-                    5_000,
-                    $"Focus did not migrate to Windows Terminal for {probe.Label}.");
+            AssertClickFocusesCorrectTab(grid, paneGateway, wtHwnd, sessionA);
+            AssertClickFocusesCorrectTab(grid, paneGateway, wtHwnd, sessionB);
 
-                AssertSelectedWindowsTerminalTab(paneGateway, wtHwnd, probe);
-                AssertFocusedPaneTextContainsMarker(probe, probes, wtHwnd);
-            }
+            // Phase 3 — Stale-host recovery (v0.21.1 bug repro).
+            //
+            // Production scenario: WindowHandleCacheService rehydrates _copilotHosts from
+            // disk before wt is up, OR a prior resolution captured a non-wt ancestor (e.g.
+            // a transient pwsh window owned by ConPTY tooling). The cached CopilotHostInfo
+            // therefore carries HostKindLabel != "Windows Terminal" even though copilot is
+            // physically inside a real wt pane. When the user clicks the session link,
+            // FocusCopilotHost evaluates IsWindowsTerminalHost(hostInfo) → false, falls
+            // through to plain _focusWindowHandle(hostInfo.HostHwnd), and never selects
+            // the correct wt pane.
+            //
+            // We simulate this by overwriting sessionA's resolved entry with a stale,
+            // non-wt CopilotHostInfo via the SetCopilotHost test seam. HostHwnd points at
+            // the live wt window so IsCopilotHostActive passes (window + pid alive), but
+            // HostKindLabel/HostProcessName look like a Console host so the wt-pane fast
+            // path is skipped. Going into phase 3 sessionB's tab is currently selected
+            // (from the click above), so a click on sessionA's link must move wt off
+            // sessionB's tab and onto sessionA's tab to pass.
+            var staleSessionAHost = new CopilotHostInfo(
+                HostHwnd: wtHwnd,
+                HostPid: sessionA.PwshPid,
+                CopilotPid: sessionA.CopilotPid,
+                HostProcessName: "pwsh",
+                HostKindLabel: "Console",
+                ParentHostHwnd: IntPtr.Zero,
+                PaneTitle: null,
+                PaneRuntimeId: null,
+                PaneRootProcessId: null);
+            tracker.SetCopilotHost(sessionA.SessionId, staleSessionAHost);
+
+            // Re-render the grid so the row for sessionA reflects the stale host info.
+            var staleSnapshot = tracker.IncrementalRefresh(sessions);
+            visuals.Populate(sessions, staleSnapshot, searchQuery: null);
+            Application.DoEvents();
+
+            AssertClickFocusesCorrectTab(grid, paneGateway, wtHwnd, sessionA);
         }
         finally
         {
-            Program._settings = previousSettings;
+            Program._settings = prevSettings;
         }
 
         await Task.CompletedTask.ConfigureAwait(false);
@@ -222,22 +280,6 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         var settings = LauncherSettings.CreateDefault();
         settings.SuppressSave = true;
         return settings;
-    }
-
-    private static void AssertRowsContainCopilotCli(TestDataGridView grid, IReadOnlyList<PaneProbe> probes)
-    {
-        foreach (var probe in probes)
-        {
-            var row = Assert.Single(
-                grid.Rows.Cast<DataGridViewRow>(),
-                candidate => string.Equals(candidate.Tag as string, probe.SessionId, StringComparison.OrdinalIgnoreCase));
-            Assert.Contains("Copilot CLI", row.Cells["RunningApps"].Value?.ToString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        }
-
-        Assert.Equal(
-            probes.Count,
-            grid.Rows.Cast<DataGridViewRow>().Count(row =>
-                (row.Cells["RunningApps"].Value?.ToString() ?? string.Empty).Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static TestDataGridView CreateGrid()
@@ -259,16 +301,6 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         return grid;
     }
 
-    private static void EnsureProbeWorkspace(PaneProbe probe)
-    {
-        Directory.CreateDirectory(probe.SessionDir!);
-        var workspaceFile = Path.Combine(probe.SessionDir!, "workspace.yaml");
-        if (!File.Exists(workspaceFile))
-        {
-            CopilotLogWatcherService.CreateWorkspaceYaml(workspaceFile, probe.SessionId!, Environment.CurrentDirectory, probe.Label);
-        }
-    }
-
     private static void ClickCopilotCliLink(TestDataGridView grid, string sessionId)
     {
         var row = Assert.Single(
@@ -286,146 +318,11 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         Application.DoEvents();
     }
 
-    private static void AssertPaneTextContainsMarker(WindowsTerminalPaneGateway paneGateway, IntPtr wtHwnd, PaneProbe probe)
-    {
-        ClickWindowsTerminalTab(paneGateway, wtHwnd, probe);
-        AssertSelectedWindowsTerminalTab(paneGateway, wtHwnd, probe);
-        AssertFocusedPaneTextContainsMarker(probe, [probe], wtHwnd);
-    }
-
-    private static WindowsTerminalPaneInfo AssertSelectedWindowsTerminalTab(
-        WindowsTerminalPaneGateway paneGateway,
-        IntPtr wtHwnd,
-        PaneProbe probe)
-    {
-        WindowsTerminalPaneInfo? selected = null;
-        WindowsTerminalPaneEnumeration lastEnumeration = new([], IsPartial: false);
-        var deadline = Environment.TickCount64 + 1_000;
-        while (Environment.TickCount64 < deadline)
-        {
-            lastEnumeration = paneGateway.EnumeratePanes(wtHwnd);
-            selected = lastEnumeration.Panes.FirstOrDefault(pane => pane.IsSelected);
-            var windowTitle = WindowFocusService.GetWindowTitle(wtHwnd);
-            if (selected != null
-                && string.Equals(selected.RuntimeId, probe.Host!.PaneRuntimeId, StringComparison.Ordinal)
-                && selected.Name.Contains(probe.Label, StringComparison.OrdinalIgnoreCase)
-                && windowTitle.Contains(probe.Label, StringComparison.OrdinalIgnoreCase))
-            {
-                return selected;
-            }
-
-            Application.DoEvents();
-            Thread.Sleep(50);
-        }
-
-        var panes = string.Join(
-            "; ",
-            lastEnumeration.Panes.Select(pane => $"Name='{pane.Name}', RuntimeId='{pane.RuntimeId}', IsSelected={pane.IsSelected}"));
-        Assert.Fail(
-            $"Windows Terminal selected the wrong tab for {probe.Label}. "
-            + $"Expected runtime id '{probe.Host!.PaneRuntimeId}' and WT title containing '{probe.Label}'. "
-            + $"Actual selected tab: Name='{selected?.Name}', RuntimeId='{selected?.RuntimeId}', WT title='{WindowFocusService.GetWindowTitle(wtHwnd)}'. "
-            + $"All tabs: {panes}. If the target WT window is elevated while the test is not, UIA selection may be blocked.");
-        throw new UnreachableException();
-    }
-
-    private static void ClickWindowsTerminalTab(WindowsTerminalPaneGateway paneGateway, IntPtr wtHwnd, PaneProbe probe)
-    {
-        Assert.True(
-            paneGateway.FocusPane(wtHwnd, probe.Host!.PaneRuntimeId!),
-            $"Could not select WT tab for {probe.Label} while preparing marker assertion.");
-    }
-
-    private static void AssertFocusedPaneTextContainsMarker(PaneProbe expectedProbe, IReadOnlyList<PaneProbe> allProbes, IntPtr wtHwnd)
-    {
-        var markers = allProbes
-            .Select(probe => $"COPILOT_BOOSTER_PANE_MARKER={probe.DenyUrlGuid}")
-            .ToList();
-        var text = string.Empty;
-        WaitUntil(
-            () =>
-            {
-                text = WindowsTerminalPaneGateway.ReadWindowText(wtHwnd);
-                return markers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
-            },
-            30_000,
-            $"WT UIA text did not expose any pane marker after focusing {expectedProbe.Label}. Last text was: {text}");
-
-        var expectedMarker = $"COPILOT_BOOSTER_PANE_MARKER={expectedProbe.DenyUrlGuid}";
-        Assert.Contains(expectedMarker, text, StringComparison.OrdinalIgnoreCase);
-
-        foreach (var other in allProbes.Where(probe => !ReferenceEquals(probe, expectedProbe)))
-        {
-            var otherMarker = $"COPILOT_BOOSTER_PANE_MARKER={other.DenyUrlGuid}";
-            Assert.DoesNotContain(otherMarker, text, StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
-    private static List<NamedSession> LoadProbeSessions(IEnumerable<PaneProbe> probes)
-    {
-        var ids = probes.Select(probe => probe.SessionId).Where(id => id != null).ToHashSet(StringComparer.OrdinalIgnoreCase)!;
-        return SessionService.LoadNamedSessions(
-                Program.SessionStateDir,
-                Program.PidRegistryFile,
-                Program.SessionStateFile,
-                Program.SessionAliasFile,
-                Program.SessionNameOverrideFile)
-            .Where(session => ids.Contains(session.Id))
-            .ToList();
-    }
-
-    private static IntPtr GetWindowsTerminalHwnd(CopilotHostInfo host)
-    {
-        return host.ParentHostHwnd != IntPtr.Zero ? host.ParentHostHwnd : host.HostHwnd;
-    }
-
-    private static IntPtr WaitForWindowsTerminalWindow(IReadOnlyList<PaneProbe> probes)
-    {
-        IntPtr hwnd = IntPtr.Zero;
-        WaitUntil(
-            () =>
-            {
-                foreach (var probe in probes)
-                {
-                    hwnd = WindowFocusService.FindWindowHandleByTitle(probe.Label, null);
-                    if (hwnd != IntPtr.Zero)
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
-            },
-            WaitTimeoutMs,
-            "Windows Terminal window for the live E2E was not found by tab title.");
-        return hwnd;
-    }
-
-    private static CopilotHostInfo ResolveWindowsTerminalHostFromUia(CopilotHostInfo host, string probeLabel, IntPtr wtHwnd)
-    {
-        var candidateHwnd = wtHwnd != IntPtr.Zero ? wtHwnd : GetWindowsTerminalHwnd(host);
-        var paneGateway = new WindowsTerminalPaneGateway();
-        var pane = paneGateway.EnumeratePanes(candidateHwnd).Panes.FirstOrDefault(
-            candidate => candidate.Name.Contains(probeLabel, StringComparison.OrdinalIgnoreCase));
-        Assert.NotNull(pane);
-        var paneHwnd = pane!.Hwnd == IntPtr.Zero ? candidateHwnd : pane.Hwnd;
-        return host with
-        {
-            HostHwnd = paneHwnd,
-            HostPid = WindowFocusService.GetWindowProcessId(candidateHwnd),
-            HostProcessName = "WindowsTerminal",
-            HostKindLabel = "Windows Terminal",
-            ParentHostHwnd = candidateHwnd,
-            PaneTitle = pane.Name,
-            PaneRuntimeId = pane.RuntimeId
-        };
-    }
-
     private static void SkipIfPreflightFails()
     {
         if (string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase))
         {
-            Assert.Skip("Live Windows Terminal multi-pane test is LocalOnly and does not run on CI runners.");
+            Assert.Skip("Live Windows Terminal multi-pane test is local-only and does not run on CI runners.");
         }
 
         if (!Environment.UserInteractive || Process.GetCurrentProcess().SessionId == 0 || GetForegroundWindow() == IntPtr.Zero)
@@ -457,137 +354,272 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         }
     }
 
-    private static Process? StartWindowsTerminalWithPanes(IReadOnlyList<PaneProbe> probes)
+    /// <summary>
+    /// Launches wt.exe with the user's default profile (no command argument), opens a second tab
+    /// via Ctrl+Shift+T, then types <c>copilot --deny-url=&lt;marker&gt;</c> into each tab. This is
+    /// the only flow that mirrors a real user opening Windows Terminal and starting copilot from
+    /// the shell prompt — it exercises the real default-shell → "GitHub Copilot" title transition.
+    /// Launching with <c>wt new-tab copilot</c> (or similar) locks the tab title to the command
+    /// name and never triggers copilot's ESC]0; title-set, so it does not represent reality.
+    /// </summary>
+    private static (Process? WtLauncher, IntPtr WtHwnd) StartWtAndTypeCopilotInTwoTabs(
+        WindowsTerminalPaneGateway gateway,
+        RealCopilotSession a,
+        RealCopilotSession b)
     {
-        var commands = new List<string>
-        {
-            $"new-tab --title \"{probes[0].Label}\" --suppressApplicationTitle powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{probes[0].ScriptPath}\""
-        };
+        // Windows Terminal uses a single "monarch" process that hosts all windows, so a new wt
+        // window does NOT create a new WindowsTerminal.exe PID — it adds a new top-level HWND
+        // to the existing process. Snapshot HWNDs (not PIDs) to detect the window we spawn.
+        var existingWtHwnds = EnumerateWindowsTerminalHwnds().ToHashSet();
 
-        for (int i = 1; i < probes.Count; i++)
-        {
-            commands.Add($"new-tab --title \"{probes[i].Label}\" --suppressApplicationTitle powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{probes[i].ScriptPath}\"");
-        }
-
-        var windowName = $"cb-it-{Guid.NewGuid():N}";
-        return Process.Start(new ProcessStartInfo
+        // `-w new` forces a fresh wt window even if global glomming is enabled.
+        var launcher = Process.Start(new ProcessStartInfo
         {
             FileName = "wt.exe",
-            Arguments = $"-w \"{windowName}\" {string.Join(" ; ", commands)}",
-            UseShellExecute = true
+            Arguments = "-w new",
+            UseShellExecute = false,
+            CreateNoWindow = false
         });
-    }
 
-    private static string BuildPaneScript(PaneProbe probe)
-    {
-        var marker = EscapePowerShellSingleQuoted(probe.MarkerPath!);
-        var errorMarker = EscapePowerShellSingleQuoted(probe.MarkerPath! + ".error");
-        var label = EscapePowerShellSingleQuoted(probe.Label);
-        var denyArg = EscapePowerShellSingleQuoted($"--deny-url={probe.DenyUrlGuid}");
-        var guid = EscapePowerShellSingleQuoted(probe.DenyUrlGuid);
-
-        return $$"""
-$ErrorActionPreference = 'Stop'
-try {
-    $Host.UI.RawUI.WindowTitle = '{{label}}'
-    Start-Job -ScriptBlock {
-        param($guid, $marker, $errorMarker)
-        try {
-            $deadline = (Get-Date).AddSeconds(20)
-            do {
-                $candidate = Get-CimInstance Win32_Process | Where-Object {
-                    $_.CommandLine -like "*--deny-url=$guid*" -and $_.ProcessId -ne $PID
-                } | Sort-Object CreationDate | Select-Object -Last 1
-                if ($candidate -ne $null) {
-                    Set-Content -LiteralPath $marker -Value ([int]$candidate.ProcessId) -Encoding ascii
-                    return
-                }
-                Start-Sleep -Milliseconds 250
-            } while ((Get-Date) -lt $deadline)
-            Set-Content -LiteralPath $errorMarker -Value "Timed out finding Copilot process for $guid" -Encoding utf8
-        }
-        catch {
-            Set-Content -LiteralPath $errorMarker -Value $_.Exception.Message -Encoding utf8
-        }
-    } -ArgumentList '{{guid}}','{{marker}}','{{errorMarker}}' | Out-Null
-    Write-Host 'COPILOT_BOOSTER_PANE_MARKER={{guid}}'
-    & copilot --interactive 'COPILOT_BOOSTER_PANE_MARKER={{guid}}' '{{denyArg}}'
-}
-catch {
-    Set-Content -LiteralPath '{{errorMarker}}' -Value $_.Exception.Message -Encoding utf8
-}
-Start-Sleep -Seconds 600
-""";
-    }
-
-    private static string EscapePowerShellSingleQuoted(string value)
-    {
-        return value.Replace("'", "''", StringComparison.Ordinal);
-    }
-
-    private static int WaitForPanePid(PaneProbe probe)
-    {
+        IntPtr wtHwnd = IntPtr.Zero;
         WaitUntil(
-            () => File.Exists(probe.MarkerPath!) || File.Exists(probe.MarkerPath! + ".error"),
-            WaitTimeoutMs,
-            $"Pane {probe.Label} did not write a Copilot PID marker.");
-
-        var errorPath = probe.MarkerPath! + ".error";
-        if (File.Exists(errorPath))
-        {
-            Assert.Skip($"Pane {probe.Label} could not start copilot: {ReadAllTextWithRetry(errorPath)}");
-        }
-
-        var markerText = ReadAllTextWithRetry(probe.MarkerPath!).Trim();
-        if (!int.TryParse(markerText, out var pid) || pid <= 0)
-        {
-            Assert.Skip($"Pane {probe.Label} wrote an invalid Copilot PID marker: {markerText}");
-        }
-
-        try
-        {
-            if (Process.GetProcessById(pid).HasExited)
+            () =>
             {
-                Assert.Skip($"Copilot process for {probe.Label} exited before the live E2E could observe it.");
-            }
-        }
-        catch (ArgumentException)
-        {
-            Assert.Skip($"Copilot process for {probe.Label} was not running when the live E2E tried to observe it.");
-        }
+                foreach (var hwnd in EnumerateWindowsTerminalHwnds())
+                {
+                    if (!existingWtHwnds.Contains(hwnd))
+                    {
+                        wtHwnd = hwnd;
+                        return true;
+                    }
+                }
+                return false;
+            },
+            20_000,
+            "Newly-spawned wt.exe window did not appear within 20s.");
 
-        return pid;
+        // Wait for the default-profile shell in tab 0 to register a UIA pane.
+        WaitUntil(
+            () => gateway.EnumeratePanes(wtHwnd).Panes.Count >= 1,
+            15_000,
+            "wt.exe first tab's UIA pane did not appear within 15s.");
+        Thread.Sleep(1_500);
+
+        // Open a second tab via Ctrl+Shift+T (the wt-level chrome shortcut, handled before the cell).
+        Assert.True(WindowFocusService.TryFocusWindowHandle(wtHwnd), "Could not foreground wt before Ctrl+Shift+T.");
+        Thread.Sleep(250);
+        SendKeys.SendWait("^+t");
+
+        WaitUntil(
+            () => gateway.EnumeratePanes(wtHwnd).Panes.Count >= 2,
+            15_000,
+            "wt.exe second tab did not appear within 15s after Ctrl+Shift+T.");
+        Thread.Sleep(1_500);
+
+        // Type the copilot launch command into each tab. `--resume "<sessionId>"` binds copilot
+        // to the session-state/<id>/ dir we pre-created (with workspace.yaml already populated);
+        // the GUID is quoted because copilot's CLI expects a quoted session id argument.
+        // `--deny-url=<marker>` is purely a unique CLI arg used for WMI PID correlation. Once
+        // copilot reaches its prompt it overrides the tab title to "GitHub Copilot" via ESC]0;.
+        TypeIntoTab(gateway, wtHwnd, tabIndex: 0, $"copilot --resume \"{a.SessionId}\" --deny-url={a.Marker}");
+        TypeIntoTab(gateway, wtHwnd, tabIndex: 1, $"copilot --resume \"{b.SessionId}\" --deny-url={b.Marker}");
+
+        return (launcher, wtHwnd);
     }
 
-    private static string ReadAllTextWithRetry(string path)
+    private static List<IntPtr> EnumerateWindowsTerminalHwnds()
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        IOException? lastIOException;
-        do
+        var wtPids = Process.GetProcessesByName("WindowsTerminal").Select(p => (uint)p.Id).ToHashSet();
+        var hwnds = new List<IntPtr>();
+        if (wtPids.Count == 0)
+        {
+            return hwnds;
+        }
+
+        EnumWindows((hWnd, _) =>
         {
             try
             {
-                return File.ReadAllText(path);
-            }
-            catch (IOException ex)
-            {
-                lastIOException = ex;
-                Thread.Sleep(50);
-            }
-        }
-        while (DateTime.UtcNow < deadline);
+                if (!IsWindowVisible(hWnd))
+                {
+                    return true;
+                }
 
-        throw lastIOException ?? new IOException($"Could not read '{path}'.");
+                var threadId = GetWindowThreadProcessId(hWnd, out var pid);
+                if (threadId == 0 || !wtPids.Contains(pid))
+                {
+                    return true;
+                }
+
+                var sb = new StringBuilder(256);
+                if (GetClassName(hWnd, sb, sb.Capacity) > 0
+                    && sb.ToString().Contains("CASCADIA", StringComparison.OrdinalIgnoreCase))
+                {
+                    hwnds.Add(hWnd);
+                }
+            }
+            catch
+            {
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return hwnds;
     }
 
-    private static void AppendUserMessage(string eventsJsonl, string message)
+    private static void TypeIntoTab(WindowsTerminalPaneGateway gateway, IntPtr wtHwnd, int tabIndex, string command)
     {
+        var panes = gateway.EnumeratePanes(wtHwnd).Panes;
+        Assert.True(panes.Count > tabIndex, $"WT only has {panes.Count} tabs; cannot type into tab {tabIndex}.");
+        var target = panes[tabIndex];
+
+        Assert.True(gateway.FocusPane(wtHwnd, target.RuntimeId!), $"Could not focus tab {tabIndex} via UIA before typing.");
+        Thread.Sleep(250);
+        Assert.True(WindowFocusService.TryFocusWindowHandle(wtHwnd), "Could not foreground wt before typing.");
+        Thread.Sleep(250);
+
+        SendKeys.SendWait(SendKeysEscape(command) + "{ENTER}");
+        Thread.Sleep(400);
+    }
+
+    private static (int CopilotPid, int PwshPid) WaitForCopilotPidByDenyUrl(string marker, int timeoutMs)
+    {
+        (int copilot, int pwsh)? result = null;
+        WaitUntil(
+            () => { result = TryFindCopilotPidByDenyUrl(marker); return result.HasValue; },
+            timeoutMs,
+            $"Copilot process with --deny-url={marker} did not appear within {timeoutMs}ms.");
+        return result!.Value;
+    }
+
+    private static (int CopilotPid, int PwshPid)? TryFindCopilotPidByDenyUrl(string marker)
+    {
+        // Capture both the copilot.exe PID and its parent (pwsh.exe / cmd.exe) at discovery
+        // time. Disposal must kill BOTH — killing only copilot leaves pwsh prompting forever
+        // inside the wt tab, which keeps the wt window alive after the test.
+        var ps = "(Get-CimInstance Win32_Process -Filter \\\"Name='copilot.exe'\\\" | "
+            + "Where-Object { $_.CommandLine -like '*" + marker + "*' } | "
+            + "Select-Object -First 1 ProcessId, ParentProcessId) | "
+            + "ForEach-Object { \\\"$($_.ProcessId),$($_.ParentProcessId)\\\" }";
+        var result = RunProcess("powershell.exe", $"-NoLogo -NoProfile -Command \"{ps}\"", 5_000);
+        var stdout = result.Stdout.Trim();
+        if (string.IsNullOrEmpty(stdout))
+        {
+            return null;
+        }
+
+        var parts = stdout.Split(',', 2);
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], out var copilotPid) || copilotPid <= 0
+            || !int.TryParse(parts[1], out var parentPid) || parentPid <= 0)
+        {
+            return null;
+        }
+
+        return (copilotPid, parentPid);
+    }
+
+    private static void RenameTab(WindowsTerminalPaneGateway gateway, IntPtr wtHwnd, int tabIndex, string newLabel)
+    {
+        var initial = gateway.EnumeratePanes(wtHwnd).Panes;
+        Assert.True(initial.Count > tabIndex, $"WT only has {initial.Count} tabs; need at least {tabIndex + 1}.");
+        var target = initial[tabIndex];
+
+        Assert.True(gateway.FocusPane(wtHwnd, target.RuntimeId!), $"Could not focus tab {tabIndex} via UIA before /rename.");
+        Thread.Sleep(250);
+        Assert.True(WindowFocusService.TryFocusWindowHandle(wtHwnd), "Could not bring wt.exe to foreground for SendKeys.");
+        Thread.Sleep(250);
+
+        SendKeys.SendWait($"/rename {SendKeysEscape(newLabel)}{{ENTER}}");
+
+        WaitUntil(
+            () => gateway.EnumeratePanes(wtHwnd).Panes.Any(p => p.Name.Contains(newLabel, StringComparison.OrdinalIgnoreCase)),
+            10_000,
+            $"Tab title did not become '{newLabel}' after sending '/rename {newLabel}<Enter>'. Current tabs: "
+            + string.Join(" | ", gateway.EnumeratePanes(wtHwnd).Panes.Select(p => $"'{p.Name}'")));
+    }
+
+    private static string SendKeysEscape(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (var c in s)
+        {
+            if ("+^%~(){}".IndexOf(c) >= 0) { sb.Append('{').Append(c).Append('}'); }
+            else { sb.Append(c); }
+        }
+        return sb.ToString();
+    }
+
+    private static void AssertClickFocusesCorrectTab(TestDataGridView grid, WindowsTerminalPaneGateway gateway, IntPtr wtHwnd, RealCopilotSession session)
+    {
+        ClickCopilotCliLink(grid, session.SessionId);
+
+        // Pump the message loop while wt processes focus + UIA Select. Hook callbacks
+        // (WINEVENT_OUTOFCONTEXT) only dispatch when DoEvents runs, identical to
+        // MainForm's message-loop semantics. Without this, ForegroundChanged events
+        // queue up but never fire — the IT would silently skip the production race.
+        var deadline = DateTime.UtcNow.AddSeconds(3);
+        while (DateTime.UtcNow < deadline)
+        {
+            Application.DoEvents();
+            Thread.Sleep(50);
+        }
+
+        var enumeration = gateway.EnumeratePanes(wtHwnd);
+        var selected = enumeration.Panes.FirstOrDefault(p => p.IsSelected);
+        var details = string.Join(" | ", enumeration.Panes.Select(p => $"Name='{p.Name}' Selected={p.IsSelected}"));
+
+        Assert.True(
+            selected != null && selected.Name.Contains(session.Label, StringComparison.OrdinalIgnoreCase),
+            $"After clicking 'Copilot CLI' on session '{session.Label}': selected tab is '{selected?.Name}', not the one matching '{session.Label}'. Tabs: {details}.");
+
+        var windowTitle = WindowFocusService.GetWindowTitle(wtHwnd);
+        Assert.True(
+            windowTitle.Contains(session.Label, StringComparison.OrdinalIgnoreCase),
+            $"After clicking 'Copilot CLI' on session '{session.Label}': WT window title is '{windowTitle}'; expected to contain '{session.Label}'. Tabs: {details}.");
+    }
+
+    private static void WriteMinimalWorkspaceYaml(string wsFile, string sessionId, string cwd)
+    {
+        // Mirrors the exact on-disk shape of a real copilot workspace.yaml
+        // (session 1a9f3df8 captured 2026-05-03). Five fields, no git_root,
+        // no summary, no name. copilot --resume rejects extras.
+        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+        var lines = new[]
+        {
+            $"id: {sessionId}",
+            $"cwd: {cwd}",
+            "summary_count: 0",
+            $"created_at: {now}",
+            $"updated_at: {now}",
+        };
+        File.WriteAllLines(wsFile, lines);
+    }
+
+    private static void WriteSessionStartEvent(string eventsJsonl, string sessionId, string cwd)
+    {
+        // Mirrors the first line of a real copilot events.jsonl (session 1a9f3df8).
+        // Without a session.start header copilot --resume refuses to load the session.
+        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
         var payload = JsonSerializer.Serialize(new
         {
-            type = "user.message",
-            data = new { content = message }
+            type = "session.start",
+            data = new
+            {
+                sessionId,
+                version = 1,
+                producer = "copilot-agent",
+                copilotVersion = "1.0.40",
+                startTime = now,
+                context = new { cwd },
+                alreadyInUse = false,
+                remoteSteerable = false,
+            },
+            id = Guid.NewGuid().ToString(),
+            timestamp = now,
+            parentId = (string?)null,
         });
-        File.AppendAllText(eventsJsonl, payload + Environment.NewLine, Encoding.UTF8);
+        File.WriteAllText(eventsJsonl, payload + Environment.NewLine, Encoding.UTF8);
     }
 
     private static ProcessRunResult RunProcess(string fileName, string arguments, int timeoutMs)
@@ -670,22 +702,32 @@ Start-Sleep -Seconds 600
 
     private void CleanupProcessesAndWindows()
     {
+        // Kill copilot.exe first (the leaf), then its parent shell. Killing the parent
+        // pwsh.exe terminates the tab's process — but wt by default leaves zombie tabs
+        // behind ("[process exited with code ...]. You can now close this terminal with
+        // Ctrl+D, or press Enter to restart."). To actually close the window we send
+        // Ctrl+D once per tab via keybd_event after all pwsh processes are gone.
         foreach (var pid in this._copilotPids.Distinct())
         {
-            try
-            {
-                var process = Process.GetProcessById(pid);
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                    process.WaitForExit(5_000);
-                }
-
-                process.Dispose();
-            }
-            catch { }
+            TryKillProcessTree(pid);
         }
 
+        foreach (var pid in this._pwshPids.Distinct())
+        {
+            TryKillProcessTree(pid);
+        }
+
+        // Each wtHwnd we tracked hosts exactly two zombie tabs (one per session). Ctrl+D
+        // on a zombie tab closes it; closing the last tab closes the wt window.
+        foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero).Distinct())
+        {
+            TryCloseZombieWtTabs(hwnd, tabCount: 2);
+        }
+
+        // Safety net for any window that didn't respond to Ctrl+D (e.g. user changed wt
+        // closeOnExit profile setting). WM_CLOSE prompts wt's "close-all-tabs" dialog
+        // when a tab still has a running process — but at this point all our processes
+        // are dead, so wt accepts the close cleanly.
         foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero).Distinct())
         {
             try { _ = SendMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); } catch { }
@@ -708,53 +750,154 @@ Start-Sleep -Seconds 600
         }
     }
 
-    private void MoveCreatedSessionDirs()
+    private static void TryKillProcessTree(int pid)
     {
-        foreach (var sessionDir in this._createdSessionDirs)
+        try
         {
-            if (!Directory.Exists(sessionDir))
+            var process = Process.GetProcessById(pid);
+            if (!process.HasExited)
             {
-                continue;
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(5_000);
             }
 
-            Directory.CreateDirectory(this._artifactRoot);
-            var destination = Path.Combine(this._artifactRoot, Path.GetFileName(sessionDir));
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    if (Directory.Exists(destination))
-                    {
-                        destination = Path.Combine(this._artifactRoot, $"{Path.GetFileName(sessionDir)}-{Guid.NewGuid():N}");
-                    }
-
-                    Directory.Move(sessionDir, destination);
-                    break;
-                }
-                catch when (attempt < 4)
-                {
-                    Thread.Sleep(250);
-                }
-                catch
-                {
-                    break;
-                }
-            }
+            process.Dispose();
+        }
+        catch
+        {
+            // Process already gone or insufficient privilege — best-effort cleanup.
         }
     }
 
-    private void CleanupMarkerRoot()
+    private static void TryCloseZombieWtTabs(IntPtr wtHwnd, int tabCount)
     {
-        if (this._markerRoot == null || !Directory.Exists(this._markerRoot))
+        try
+        {
+            if (!IsWindow(wtHwnd))
+            {
+                return;
+            }
+
+            // Give wt a moment to render the zombie state after pwsh exits.
+            Thread.Sleep(300);
+
+            for (var i = 0; i < tabCount; i++)
+            {
+                if (!IsWindow(wtHwnd))
+                {
+                    return;
+                }
+
+                if (!WindowFocusService.TryFocusWindowHandle(wtHwnd))
+                {
+                    return;
+                }
+
+                Thread.Sleep(150);
+                SendCtrlD();
+                Thread.Sleep(250);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup — never fail Dispose.
+        }
+    }
+
+    private static void SendCtrlD()
+    {
+        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_D, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_D, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    }
+
+    private void CleanupCreatedSessionDirs()
+    {
+        // Remove name overrides first so even if dir deletion fails (file lock from
+        // Roger's running booster), the booster UI won't keep the test label cached.
+        foreach (var sessionId in this._createdSessionIds)
+        {
+            try
+            {
+                SessionNameOverrideService.Remove(Program.SessionNameOverrideFile, sessionId);
+            }
+            catch
+            {
+                // Best-effort — never fail Dispose.
+            }
+        }
+
+        foreach (var sessionDir in this._createdSessionDirs)
+        {
+            TryDeleteSessionDir(sessionDir);
+        }
+    }
+
+    private static void SweepOrphanItSessionDirs()
+    {
+        if (!Directory.Exists(Program.SessionStateDir))
         {
             return;
         }
 
+        IEnumerable<string> candidates;
         try
         {
-            Directory.Delete(this._markerRoot, recursive: true);
+            candidates = Directory.EnumerateDirectories(Program.SessionStateDir);
         }
-        catch { }
+        catch
+        {
+            return;
+        }
+
+        foreach (var dir in candidates)
+        {
+            var sentinel = Path.Combine(dir, SessionCleanupSentinel);
+            if (!File.Exists(sentinel))
+            {
+                continue;
+            }
+
+            // Try to recover the session id from the dir name (always a guid for our IT)
+            // and clear its name override so a stale alias doesn't survive in booster's
+            // session-names.json after we delete the dir.
+            var sessionId = Path.GetFileName(dir);
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                try { SessionNameOverrideService.Remove(Program.SessionNameOverrideFile, sessionId); } catch { }
+            }
+
+            TryDeleteSessionDir(dir);
+        }
+    }
+
+    private static void TryDeleteSessionDir(string sessionDir)
+    {
+        if (!Directory.Exists(sessionDir))
+        {
+            return;
+        }
+
+        // Booster (when Roger has the real app running) periodically reads workspace.yaml
+        // / events.jsonl. Those reads acquire transient handles that can race with our
+        // delete. Retry with backoff to win against the booster's poll loop.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            try
+            {
+                Directory.Delete(sessionDir, recursive: true);
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return;
+            }
+            catch
+            {
+                Thread.Sleep(250);
+            }
+        }
     }
 
     private sealed record ProcessRunResult(int ExitCode, string Stdout, string Stderr, bool TimedOut);
@@ -768,15 +911,16 @@ Start-Sleep -Seconds 600
         }
     }
 
-    private sealed class PaneProbe(string label, string denyUrlGuid)
+    private sealed class RealCopilotSession
     {
-        internal string Label { get; } = label;
-        internal string DenyUrlGuid { get; } = denyUrlGuid;
-        internal string? MarkerPath { get; set; }
-        internal string? ScriptPath { get; set; }
+        internal string Label { get; }
+        internal string Marker { get; } = Guid.NewGuid().ToString("N");
+        internal string SessionId { get; set; } = string.Empty;
+        internal string SessionDir { get; set; } = string.Empty;
         internal int CopilotPid { get; set; }
-        internal string? SessionId { get; set; }
-        internal string? SessionDir { get; set; }
+        internal int PwshPid { get; set; }
         internal CopilotHostInfo? Host { get; set; }
+
+        internal RealCopilotSession(string label) => this.Label = label;
     }
 }
