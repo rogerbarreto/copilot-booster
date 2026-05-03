@@ -359,10 +359,11 @@ internal class ActiveStatusTracker
         };
     }
 
-    private void FocusCopilotHost(CopilotHostInfo hostInfo)
+    private void FocusCopilotHost(string sessionId, CopilotHostInfo hostInfo)
     {
         RuntimeDiagnosticLog.Write(
-            "FocusCopilotHost copilotPid={0} hostPid={1} host={2} parent={3} runtimeId={4} paneRootPid={5} paneTitle={6}",
+            "FocusCopilotHost session={0} copilotPid={1} hostPid={2} host={3} parent={4} runtimeId={5} paneRootPid={6} paneTitle={7}",
+            sessionId,
             hostInfo.CopilotPid,
             hostInfo.HostPid,
             hostInfo.HostHwnd,
@@ -375,6 +376,36 @@ internal class ActiveStatusTracker
         {
             this._focusWindowHandle(hostInfo.ParentHostHwnd);
             this.TrySelectWindowsTerminalPane(hostInfo);
+            return;
+        }
+
+        // Defensive live re-resolve: hostInfo doesn't claim Windows Terminal, but copilot
+        // may actually be hosted inside one (stale cache rehydrated before wt was up,
+        // pre-wt resolution captured a transient parent, or the HostKindClassifier missed
+        // a forked wt build). Walk the parent chain now and project to the live wt context
+        // when found, then persist so subsequent clicks skip the re-probe.
+        var liveWtContext = this._hostResolver.ResolveWindowsTerminalContext(hostInfo.CopilotPid);
+        if (liveWtContext != null)
+        {
+            var wtBase = new CopilotHostInfo(
+                liveWtContext.HostHwnd,
+                liveWtContext.HostPid,
+                hostInfo.CopilotPid,
+                liveWtContext.HostProcessName,
+                liveWtContext.HostKindLabel,
+                liveWtContext.HostHwnd,
+                PaneRootProcessId: liveWtContext.PaneRootPid);
+            var liveWt = this.ResolveWindowsTerminalPane(sessionId, wtBase, sessionSummary: null, liveWtContext.PaneRootPid);
+            RuntimeDiagnosticLog.Write(
+                "FocusCopilotHost live-wt re-resolve session={0} copilotPid={1} prevHostKind={2} wtHwnd={3} runtimeId={4}",
+                sessionId,
+                hostInfo.CopilotPid,
+                hostInfo.HostKindLabel,
+                liveWt.HostHwnd,
+                liveWt.PaneRuntimeId ?? "null");
+            this.SetCopilotHost(sessionId, liveWt);
+            this._focusWindowHandle(GetParentHostHwnd(liveWt));
+            this.TrySelectWindowsTerminalPane(liveWt);
             return;
         }
 
@@ -838,7 +869,7 @@ internal class ActiveStatusTracker
         // Priority 1: Use host HWND if available and alive
         if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
         {
-            this.FocusCopilotHost(hostInfo);
+            this.FocusCopilotHost(sessionId, hostInfo);
             return true;
         }
 
@@ -883,7 +914,8 @@ internal class ActiveStatusTracker
         if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
         {
             var capturedHostInfo = hostInfo;
-            focusTargets.Add(("Copilot CLI", () => this.FocusCopilotHost(capturedHostInfo)));
+            var capturedSessionId = sessionId;
+            focusTargets.Add(("Copilot CLI", () => this.FocusCopilotHost(capturedSessionId, capturedHostInfo)));
         }
 
         // Priority 2: Add tracked windows (legacy title-scan path)
