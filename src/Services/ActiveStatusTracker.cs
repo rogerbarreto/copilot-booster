@@ -269,24 +269,37 @@ internal class ActiveStatusTracker
     private CopilotHostInfo? ResolveCopilotHost(string sessionId, int copilotPid, string? sessionSummary)
     {
         var info = this._hostResolver.Resolve(copilotPid);
+        var wtContext = this._hostResolver.ResolveWindowsTerminalContext(copilotPid);
+        if (wtContext != null)
+        {
+            var wtInfo = new CopilotHostInfo(
+                wtContext.HostHwnd,
+                wtContext.HostPid,
+                copilotPid,
+                wtContext.HostProcessName,
+                wtContext.HostKindLabel,
+                wtContext.HostHwnd);
+            return this.ResolveWindowsTerminalPane(sessionId, wtInfo, sessionSummary, wtContext.PaneRootPid);
+        }
+
         if (info == null)
         {
             return null;
         }
 
         return IsWindowsTerminalHost(info)
-            ? this.ResolveWindowsTerminalPane(sessionId, info, sessionSummary)
+            ? this.ResolveWindowsTerminalPane(sessionId, info, sessionSummary, paneRootPid: null)
             : info;
     }
 
-    private CopilotHostInfo ResolveWindowsTerminalPane(string sessionId, CopilotHostInfo info, string? sessionSummary)
+    private CopilotHostInfo ResolveWindowsTerminalPane(string sessionId, CopilotHostInfo info, string? sessionSummary, int? paneRootPid)
     {
         var wtWindowHwnd = GetParentHostHwnd(info);
         var terms = BuildWindowsTerminalPaneMatchTerms(sessionId, sessionSummary);
         var result = this._windowsTerminalPaneGateway.EnumeratePanes(wtWindowHwnd);
         LogWindowsTerminalPaneEnumeration(result, wtWindowHwnd, info.CopilotPid);
 
-        var pane = FindMatchingPane(result.Panes, info.CopilotPid, terms, preferredTitle: null);
+        var pane = FindMatchingPane(result.Panes, info.CopilotPid, terms, preferredTitle: null, paneRootPid);
         if (pane == null)
         {
             return info with { HostHwnd = wtWindowHwnd, ParentHostHwnd = wtWindowHwnd };
@@ -335,7 +348,7 @@ internal class ActiveStatusTracker
         var result = this._windowsTerminalPaneGateway.EnumeratePanes(wtWindowHwnd);
         LogWindowsTerminalPaneEnumeration(result, wtWindowHwnd, hostInfo.CopilotPid);
 
-        var pane = FindMatchingPane(result.Panes, hostInfo.CopilotPid, terms, hostInfo.PaneTitle);
+        var pane = FindMatchingPane(result.Panes, hostInfo.CopilotPid, terms, hostInfo.PaneTitle, paneRootPid: null);
         if (pane == null)
         {
             return false;
@@ -381,8 +394,18 @@ internal class ActiveStatusTracker
         IReadOnlyList<WindowsTerminalPaneInfo> panes,
         int copilotPid,
         IReadOnlyList<string> terms,
-        string? preferredTitle)
+        string? preferredTitle,
+        int? paneRootPid)
     {
+        if (paneRootPid.HasValue)
+        {
+            var paneRootMatches = panes.Where(pane => pane.PaneRootProcessId == paneRootPid.Value).ToList();
+            if (paneRootMatches.Count > 0)
+            {
+                return ChooseBestPane(paneRootMatches);
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(preferredTitle))
         {
             var preferredMatches = panes
@@ -416,7 +439,7 @@ internal class ActiveStatusTracker
         {
             var normalizedTerm = NormalizePaneTitle(term);
             if (string.Equals(normalizedTitle, normalizedTerm, StringComparison.OrdinalIgnoreCase)
-                || (normalizedTerm.Length >= 8 && normalizedTitle.Contains(normalizedTerm, StringComparison.OrdinalIgnoreCase)))
+                || (normalizedTerm.Length >= 16 && normalizedTitle.Contains(normalizedTerm, StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
             }

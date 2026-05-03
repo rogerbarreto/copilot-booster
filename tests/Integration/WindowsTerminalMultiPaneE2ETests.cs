@@ -139,6 +139,12 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             probes.Length,
             probes.Select(probe => probe.Host!.PaneRuntimeId).Distinct(StringComparer.Ordinal).Count());
 
+        var paneGateway = new WindowsTerminalPaneGateway();
+        foreach (var probe in probes)
+        {
+            AssertPaneTextContainsMarker(paneGateway, GetWindowsTerminalHwnd(probe.Host!), probe);
+        }
+
         var sessions = LoadProbeSessions(probes);
         Assert.Equal(probes.Length, sessions.Count);
         foreach (var probe in probes)
@@ -177,7 +183,6 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             grid.Rows.Cast<DataGridViewRow>().Count(row =>
                 (row.Cells["RunningApps"].Value?.ToString() ?? string.Empty).Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase)));
 
-        var paneGateway = new WindowsTerminalPaneGateway();
         var previousSettings = Program._settings;
         Program._settings = CreateTestSettings();
         try
@@ -192,6 +197,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
                     $"Focus did not migrate to Windows Terminal for {probe.Label}.");
 
                 AssertSelectedWindowsTerminalTab(paneGateway, wtHwnd, probe);
+                AssertFocusedPaneTextContainsMarker(paneGateway, wtHwnd, probe, probes);
             }
         }
         finally
@@ -255,6 +261,12 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         Application.DoEvents();
     }
 
+    private static void AssertPaneTextContainsMarker(WindowsTerminalPaneGateway paneGateway, IntPtr wtHwnd, PaneProbe probe)
+    {
+        ClickWindowsTerminalTab(paneGateway, wtHwnd, probe);
+        AssertFocusedPaneTextContainsMarker(paneGateway, wtHwnd, probe, [probe]);
+    }
+
     private static void AssertSelectedWindowsTerminalTab(
         WindowsTerminalPaneGateway paneGateway,
         IntPtr wtHwnd,
@@ -288,6 +300,38 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             + $"Expected runtime id '{probe.Host!.PaneRuntimeId}' and WT title containing '{probe.Label}'. "
             + $"Actual selected tab: Name='{selected?.Name}', RuntimeId='{selected?.RuntimeId}', WT title='{WindowFocusService.GetWindowTitle(wtHwnd)}'. "
             + $"All tabs: {panes}. If the target WT window is elevated while the test is not, UIA selection may be blocked.");
+    }
+
+    private static void ClickWindowsTerminalTab(WindowsTerminalPaneGateway paneGateway, IntPtr wtHwnd, PaneProbe probe)
+    {
+        Assert.True(
+            paneGateway.FocusPane(wtHwnd, probe.Host!.PaneRuntimeId!),
+            $"Could not select WT tab for {probe.Label} while preparing marker assertion.");
+    }
+
+    private static void AssertFocusedPaneTextContainsMarker(
+        WindowsTerminalPaneGateway paneGateway,
+        IntPtr wtHwnd,
+        PaneProbe expectedProbe,
+        IReadOnlyList<PaneProbe> allProbes)
+    {
+        var text = WindowsTerminalPaneGateway.ReadWindowText(wtHwnd);
+        var markers = allProbes
+            .Select(probe => $"COPILOT_BOOSTER_PANE_MARKER={probe.DenyUrlGuid}")
+            .ToList();
+        if (!markers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var expectedMarker = $"COPILOT_BOOSTER_PANE_MARKER={expectedProbe.DenyUrlGuid}";
+        Assert.Contains(expectedMarker, text, StringComparison.OrdinalIgnoreCase);
+
+        foreach (var other in allProbes.Where(probe => !ReferenceEquals(probe, expectedProbe)))
+        {
+            var otherMarker = $"COPILOT_BOOSTER_PANE_MARKER={other.DenyUrlGuid}";
+            Assert.DoesNotContain(otherMarker, text, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private static List<NamedSession> LoadProbeSessions(IEnumerable<PaneProbe> probes)
@@ -439,6 +483,7 @@ try {
             Set-Content -LiteralPath $errorMarker -Value $_.Exception.Message -Encoding utf8
         }
     } -ArgumentList '{{guid}}','{{marker}}','{{errorMarker}}' | Out-Null
+    Write-Host 'COPILOT_BOOSTER_PANE_MARKER={{guid}}'
     & copilot '{{denyArg}}'
 }
 catch {

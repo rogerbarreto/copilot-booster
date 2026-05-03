@@ -298,7 +298,37 @@ public sealed class ActiveStatusTrackerHostTests
     }
 
     [Fact]
-    public void FocusActiveProcess_WindowsTerminalHostWithRuntimeId_FocusesPaneBeforeParentWindow()
+    public void HandleInternalCopilotPidRegistered_WindowsTerminalIdenticalTitles_MapsByPaneRootProcess()
+    {
+        var firstSessionId = "session-run-tests";
+        var secondSessionId = "session-run-test-2";
+        var parentHwnd = new IntPtr(0xAAA);
+        var tree = new FakeProcessTree()
+            .Add(1000, 700, "copilot", IntPtr.Zero)
+            .Add(1001, 701, "copilot", IntPtr.Zero)
+            .Add(700, 900, "OpenConsole", IntPtr.Zero)
+            .Add(701, 900, "OpenConsole", IntPtr.Zero)
+            .Add(900, null, "WindowsTerminal", parentHwnd);
+        var gateway = new FakeWindowsTerminalPaneGateway([
+            new WindowsTerminalPaneInfo("Copilot CLI", IntPtr.Zero, 900, false, () => { }, "runtime-1", PaneRootProcessId: 700),
+            new WindowsTerminalPaneInfo("Copilot CLI", IntPtr.Zero, 900, true, () => { }, "runtime-2", PaneRootProcessId: 701)
+        ]);
+        var tracker = CreateTracker(tree, gateway);
+
+        tracker.HandleInternalCopilotPidRegistered(firstSessionId, 1000);
+        tracker.HandleInternalCopilotPidRegistered(secondSessionId, 1001);
+
+        var firstHost = tracker.GetCopilotHost(firstSessionId);
+        var secondHost = tracker.GetCopilotHost(secondSessionId);
+        Assert.NotNull(firstHost);
+        Assert.NotNull(secondHost);
+        Assert.Equal("runtime-1", firstHost!.PaneRuntimeId);
+        Assert.Equal("runtime-2", secondHost!.PaneRuntimeId);
+        Assert.NotEqual(firstHost.PaneRuntimeId, secondHost.PaneRuntimeId);
+    }
+
+    [Fact]
+    public void FocusActiveProcess_WindowsTerminalHostWithRuntimeId_FocusesParentBeforePaneSelection()
     {
         var sessionId = "session-run-test-2";
         var parentHwnd = new IntPtr(0xAAA);

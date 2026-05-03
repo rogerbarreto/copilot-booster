@@ -9,6 +9,13 @@ namespace CopilotBooster.Services;
 /// <summary>
 /// Resolves the Copilot Host for a given Copilot CLI process by walking the parent process tree.
 /// </summary>
+internal sealed record WindowsTerminalHostContext(
+    IntPtr HostHwnd,
+    int HostPid,
+    int PaneRootPid,
+    string HostProcessName,
+    string HostKindLabel);
+
 internal sealed class CopilotHostResolver
 {
     private readonly IProcessTreeProvider _provider;
@@ -48,44 +55,21 @@ internal sealed class CopilotHostResolver
     {
         try
         {
-            int current = copilotPid;
-            var visited = new HashSet<int>();
-            const int MaxDepth = 32;
-
-            for (int depth = 0; depth < MaxDepth; depth++)
+            foreach (var ancestor in this.EnumerateAncestors(copilotPid))
             {
-                int? parentPid = this._provider.GetParentPid(current);
-                if (parentPid is null or 0)
-                {
-                    return null;
-                }
-
-                if (!visited.Add(parentPid.Value))
-                {
-                    return null;
-                }
-
-                current = parentPid.Value;
-
-                if (current == this._ownPid)
+                if (ancestor.Pid == this._ownPid || ancestor.ProcessName == null)
                 {
                     continue;
                 }
 
-                string? processName = this._provider.GetProcessName(current);
-                if (processName == null)
-                {
-                    continue;
-                }
-
-                IntPtr hwnd = this._provider.GetTopLevelWindow(current);
+                IntPtr hwnd = this._provider.GetTopLevelWindow(ancestor.Pid);
                 if (hwnd == IntPtr.Zero)
                 {
                     continue;
                 }
 
-                string hostKindLabel = HostKindClassifier.Classify(processName);
-                return new CopilotHostInfo(hwnd, current, copilotPid, processName, hostKindLabel);
+                string hostKindLabel = HostKindClassifier.Classify(ancestor.ProcessName);
+                return new CopilotHostInfo(hwnd, ancestor.Pid, copilotPid, ancestor.ProcessName, hostKindLabel);
             }
 
             return null;
@@ -95,5 +79,71 @@ internal sealed class CopilotHostResolver
             Program.Logger.LogWarning("CopilotHostResolver failed for pid {Pid}: {Error}", copilotPid, ex.Message);
             return null;
         }
+    }
+
+    internal WindowsTerminalHostContext? ResolveWindowsTerminalContext(int copilotPid)
+    {
+        try
+        {
+            int paneRootPid = copilotPid;
+            foreach (var ancestor in this.EnumerateAncestors(copilotPid))
+            {
+                if (ancestor.ProcessName == null)
+                {
+                    paneRootPid = ancestor.Pid;
+                    continue;
+                }
+
+                if (IsWindowsTerminalProcess(ancestor.ProcessName))
+                {
+                    var hwnd = this._provider.GetTopLevelWindow(ancestor.Pid);
+                    if (hwnd == IntPtr.Zero)
+                    {
+                        return null;
+                    }
+
+                    return new WindowsTerminalHostContext(
+                        hwnd,
+                        ancestor.Pid,
+                        paneRootPid,
+                        ancestor.ProcessName,
+                        HostKindClassifier.Classify(ancestor.ProcessName));
+                }
+
+                paneRootPid = ancestor.Pid;
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Windows Terminal context resolution failed for pid {Pid}: {Error}", copilotPid, ex.Message);
+        }
+
+        return null;
+    }
+
+    private IEnumerable<(int Pid, string? ProcessName)> EnumerateAncestors(int copilotPid)
+    {
+        int current = copilotPid;
+        var visited = new HashSet<int>();
+        const int MaxDepth = 32;
+
+        for (int depth = 0; depth < MaxDepth; depth++)
+        {
+            int? parentPid = this._provider.GetParentPid(current);
+            if (parentPid is null or 0 || !visited.Add(parentPid.Value))
+            {
+                yield break;
+            }
+
+            current = parentPid.Value;
+            yield return (current, this._provider.GetProcessName(current));
+        }
+    }
+
+    private static bool IsWindowsTerminalProcess(string processName)
+    {
+        return string.Equals(processName, "WindowsTerminal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(processName, "wt", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(processName, "wt.exe", StringComparison.OrdinalIgnoreCase);
     }
 }

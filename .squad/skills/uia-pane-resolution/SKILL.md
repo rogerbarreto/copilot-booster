@@ -7,8 +7,8 @@ Use this skill when wiring UI Automation pane/tab selection for terminal hosts t
 1. Resolve the parent host HWND through the normal process-tree path first.
 2. Enumerate selectable UIA elements under the parent with a gateway interface, not inline UIA calls.
 3. Keep the gateway time-boxed and degradable: partial/empty results must fall back to the parent HWND.
-4. Match by true child process id only if the gateway can prove it. `AutomationElement.Current.ProcessId` usually reports the UI host process, not the embedded shell/application.
-5. Prefer deterministic user-visible titles (`SessionId`, launch title, workspace summary, override/alias) as the portable fallback.
+4. Match by pane-root process id when possible: walk `copilotPid` up to the child directly under `WindowsTerminal.exe`, then match that PID to a UIA pane. `AutomationElement.Current.ProcessId` usually reports the UI host process, not the embedded shell/application.
+5. Prefer deterministic exact user-visible titles (`SessionId`, launch title, workspace summary, override/alias) only as a fallback; avoid broad substring matching for human titles because `Run Test` can collide with `Run Test 2`.
 6. If multiple panes match, prefer the currently selected/active pane, then first match.
 7. Cache by `(parent HWND, pane runtime id)` and store the selected child HWND, title, and runtime id. Do not collapse multiple WT tabs to the parent HWND.
 8. Invalidate synchronously on parent name/tab changes and child/parent destruction. Do not run UIA inside WinEvent handlers.
@@ -22,8 +22,9 @@ Use this skill when wiring UI Automation pane/tab selection for terminal hosts t
 - Foreground WT before selecting its tab. Selecting while WT is unfocused can report success yet leave the previously active tab visible on some WT builds.
 - For WT XAML-Islands, tabs do not have distinct Win32 HWNDs. The stable dispatch identity is `(parent HWND, UIA runtime id)`.
 - Live E2E should assert both UIA selected tab identity and the WT window title after click; UIA-only assertions can miss visible-tab regressions.
+- WT TextPattern may expose tab-strip/title text but not terminal scrollback; treat scrollback-marker checks as opportunistic, not guaranteed.
 - Logging empty/partial enumeration at Information level makes UIA slowness visible without breaking focus fallback.
 
 ## Confidence
 
-Medium — UIA enumeration and runtime-id tab selection have both been validated against Windows Terminal multi-session bugs.
+High — UIA enumeration, runtime-id tab selection, and pane-root process correlation have been validated across three independent Windows Terminal multi-session bugs.

@@ -47,7 +47,14 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 var hwnd = current.NativeWindowHandle == 0 ? IntPtr.Zero : new IntPtr(current.NativeWindowHandle);
                 var select = CreateSelectAction(tabItem);
                 var isSelected = IsSelected(tabItem);
-                panes.Add(new WindowsTerminalPaneInfo(name, hwnd, current.ProcessId, isSelected, select, GetRuntimeId(tabItem)));
+                panes.Add(new WindowsTerminalPaneInfo(
+                    name,
+                    hwnd,
+                    current.ProcessId,
+                    isSelected,
+                    select,
+                    GetRuntimeId(tabItem),
+                    GetPaneRootProcessId(tabItem, current.ProcessId)));
             }
 
             return new WindowsTerminalPaneEnumeration(panes, isPartial);
@@ -117,6 +124,40 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
         return this.EnumeratePanes(wtHwnd).Panes.Select(pane => (pane.Name, pane.Select)).ToList();
     }
 
+    public static string ReadWindowText(IntPtr wtHwnd, int maxLength = 20_000)
+    {
+        try
+        {
+            var rootElement = AutomationElement.FromHandle(wtHwnd);
+            if (rootElement == null)
+            {
+                return string.Empty;
+            }
+
+            var textCondition = new PropertyCondition(AutomationElement.IsTextPatternAvailableProperty, true);
+            var textElements = rootElement.FindAll(TreeScope.Descendants, textCondition);
+            var parts = new List<string>();
+            foreach (AutomationElement textElement in textElements)
+            {
+                if (textElement.TryGetCurrentPattern(TextPattern.Pattern, out object? pattern))
+                {
+                    var text = ((TextPattern)pattern).DocumentRange.GetText(maxLength);
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        parts.Add(text);
+                    }
+                }
+            }
+
+            return string.Join(Environment.NewLine, parts);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogInformation("Windows Terminal text read failed for hwnd {Hwnd}: {Error}", wtHwnd, ex.Message);
+            return string.Empty;
+        }
+    }
+
     private static string? GetRuntimeId(AutomationElement element)
     {
         try
@@ -125,6 +166,59 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
             return runtimeId == null || runtimeId.Length == 0
                 ? null
                 : string.Join(".", runtimeId);
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return null;
+    }
+
+    private static int? GetPaneRootProcessId(AutomationElement tabItem, int wtProcessId)
+    {
+        var direct = TryGetNativeWindowProcessId(tabItem, wtProcessId);
+        if (direct.HasValue)
+        {
+            return direct;
+        }
+
+        try
+        {
+            var descendants = tabItem.FindAll(TreeScope.Descendants, Condition.TrueCondition);
+            foreach (AutomationElement descendant in descendants)
+            {
+                var pid = TryGetNativeWindowProcessId(descendant, wtProcessId);
+                if (pid.HasValue)
+                {
+                    return pid;
+                }
+            }
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return null;
+    }
+
+    private static int? TryGetNativeWindowProcessId(AutomationElement element, int wtProcessId)
+    {
+        try
+        {
+            var hwnd = element.Current.NativeWindowHandle == 0 ? IntPtr.Zero : new IntPtr(element.Current.NativeWindowHandle);
+            if (hwnd == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            var pid = WindowFocusService.GetWindowProcessId(hwnd);
+            return pid > 0 && pid != wtProcessId ? pid : null;
         }
         catch (ElementNotAvailableException)
         {

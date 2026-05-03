@@ -10,7 +10,8 @@ internal sealed record WindowsTerminalPaneInfo(
     int ProcessId,
     bool IsSelected,
     Action Select,
-    string? RuntimeId = null);
+    string? RuntimeId = null,
+    int? PaneRootProcessId = null);
 
 internal sealed record WindowsTerminalPaneEnumeration(
     IReadOnlyList<WindowsTerminalPaneInfo> Panes,
