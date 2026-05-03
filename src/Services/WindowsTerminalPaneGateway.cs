@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Windows.Automation;
 using Microsoft.Extensions.Logging;
 
@@ -95,7 +96,7 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
 
                 if (string.Equals(GetRuntimeId(tabItem), paneRuntimeId, StringComparison.Ordinal))
                 {
-                    return TrySelect(tabItem);
+                    return TryActivateAndVerify(tabItem, wtHwnd, paneRuntimeId);
                 }
             }
         }
@@ -156,10 +157,37 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
 
     private static Action CreateSelectAction(AutomationElement tabItem)
     {
-        return () => TrySelect(tabItem);
+        return () => _ = TryActivateAndVerify(tabItem, IntPtr.Zero, GetRuntimeId(tabItem) ?? string.Empty);
     }
 
-    private static bool TrySelect(AutomationElement tabItem)
+    private static bool TryActivateAndVerify(AutomationElement tabItem, IntPtr wtHwnd, string paneRuntimeId)
+    {
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            if (TrySelectionItemSelect(tabItem) && WaitUntilSelected(tabItem, 200))
+            {
+                return true;
+            }
+
+            if (TryInvoke(tabItem) && WaitUntilSelected(tabItem, 200))
+            {
+                return true;
+            }
+        }
+
+        if (IsSelected(tabItem))
+        {
+            return true;
+        }
+
+        Program.Logger.LogWarning(
+            "Windows Terminal pane activation did not select hwnd {Hwnd}, runtime id {RuntimeId}",
+            wtHwnd,
+            paneRuntimeId);
+        return false;
+    }
+
+    private static bool TrySelectionItemSelect(AutomationElement tabItem)
     {
         try
         {
@@ -169,13 +197,20 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 return true;
             }
         }
-        catch (ElementNotAvailableException)
+        catch (ElementNotAvailableException ex)
         {
+            Program.Logger.LogInformation("Windows Terminal SelectionItemPattern.Select failed: {Error}", ex.Message);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Program.Logger.LogInformation("Windows Terminal SelectionItemPattern.Select failed: {Error}", ex.Message);
         }
 
+        return false;
+    }
+
+    private static bool TryInvoke(AutomationElement tabItem)
+    {
         try
         {
             if (tabItem.TryGetCurrentPattern(InvokePattern.Pattern, out object? invokePattern))
@@ -184,12 +219,30 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 return true;
             }
         }
-        catch (ElementNotAvailableException)
+        catch (ElementNotAvailableException ex)
         {
+            Program.Logger.LogInformation("Windows Terminal InvokePattern.Invoke failed: {Error}", ex.Message);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
+            Program.Logger.LogInformation("Windows Terminal InvokePattern.Invoke failed: {Error}", ex.Message);
         }
+
+        return false;
+    }
+
+    private static bool WaitUntilSelected(AutomationElement tabItem, int timeoutMs)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        do
+        {
+            if (IsSelected(tabItem))
+            {
+                return true;
+            }
+
+            Thread.Sleep(25);
+        } while (Environment.TickCount64 < deadline);
 
         return false;
     }

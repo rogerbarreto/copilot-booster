@@ -342,7 +342,7 @@ public sealed class ActiveStatusTrackerHostTests
             Program._settings = previousSettings;
         }
 
-        Assert.Equal([$"pane:{expectedHwnd}:runtime-2", $"foreground:{expectedHwnd}"], calls);
+        Assert.Equal([$"foreground:{expectedHwnd}", $"pane:{expectedHwnd}:runtime-2"], calls);
     }
 
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)

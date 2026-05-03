@@ -301,8 +301,8 @@ internal class ActiveStatusTracker
     {
         if (IsWindowsTerminalHost(hostInfo) && hostInfo.ParentHostHwnd != IntPtr.Zero)
         {
-            this.TrySelectWindowsTerminalPane(hostInfo);
             this._focusWindowHandle(hostInfo.ParentHostHwnd);
+            this.TrySelectWindowsTerminalPane(hostInfo);
             return;
         }
 
