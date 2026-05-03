@@ -134,28 +134,102 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 return string.Empty;
             }
 
-            var textCondition = new PropertyCondition(AutomationElement.IsTextPatternAvailableProperty, true);
-            var textElements = rootElement.FindAll(TreeScope.Descendants, textCondition);
+            var sw = Stopwatch.StartNew();
             var parts = new List<string>();
-            foreach (AutomationElement textElement in textElements)
-            {
-                if (textElement.TryGetCurrentPattern(TextPattern.Pattern, out object? pattern))
-                {
-                    var text = ((TextPattern)pattern).DocumentRange.GetText(maxLength);
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        parts.Add(text);
-                    }
-                }
-            }
-
-            return string.Join(Environment.NewLine, parts);
+            int remainingLength = maxLength;
+            CollectAutomationText(rootElement, parts, sw, ref remainingLength);
+            return string.Join(Environment.NewLine, parts.Distinct(StringComparer.Ordinal));
         }
         catch (Exception ex)
         {
             Program.Logger.LogInformation("Windows Terminal text read failed for hwnd {Hwnd}: {Error}", wtHwnd, ex.Message);
             return string.Empty;
         }
+    }
+
+    private static void CollectAutomationText(
+        AutomationElement element,
+        List<string> parts,
+        Stopwatch sw,
+        ref int remainingLength)
+    {
+        if (remainingLength <= 0 || sw.ElapsedMilliseconds > 500)
+        {
+            return;
+        }
+
+        AddElementText(element, parts, ref remainingLength);
+
+        AutomationElement? child;
+        try
+        {
+            child = TreeWalker.RawViewWalker.GetFirstChild(element);
+        }
+        catch (ElementNotAvailableException)
+        {
+            return;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        while (child != null && remainingLength > 0 && sw.ElapsedMilliseconds <= 500)
+        {
+            CollectAutomationText(child, parts, sw, ref remainingLength);
+            try
+            {
+                child = TreeWalker.RawViewWalker.GetNextSibling(child);
+            }
+            catch (ElementNotAvailableException)
+            {
+                return;
+            }
+            catch (InvalidOperationException)
+            {
+                return;
+            }
+        }
+    }
+
+    private static void AddElementText(AutomationElement element, List<string> parts, ref int remainingLength)
+    {
+        try
+        {
+            if (element.TryGetCurrentPattern(TextPattern.Pattern, out object? textPattern))
+            {
+                AddText(((TextPattern)textPattern).DocumentRange.GetText(remainingLength), parts, ref remainingLength);
+            }
+
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out object? valuePattern))
+            {
+                AddText(((ValuePattern)valuePattern).Current.Value, parts, ref remainingLength);
+            }
+
+            AddText(element.Current.Name, parts, ref remainingLength);
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private static void AddText(string? text, List<string> parts, ref int remainingLength)
+    {
+        if (string.IsNullOrWhiteSpace(text) || remainingLength <= 0)
+        {
+            return;
+        }
+
+        if (text.Length > remainingLength)
+        {
+            text = text[..remainingLength];
+        }
+
+        parts.Add(text);
+        remainingLength -= text.Length;
     }
 
     private static string? GetRuntimeId(AutomationElement element)

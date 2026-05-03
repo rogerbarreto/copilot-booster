@@ -197,7 +197,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
                     $"Focus did not migrate to Windows Terminal for {probe.Label}.");
 
                 AssertSelectedWindowsTerminalTab(paneGateway, wtHwnd, probe);
-                AssertFocusedPaneTextContainsMarker(paneGateway, wtHwnd, probe, probes);
+                AssertFocusedPaneTextContainsMarker(probe, probes, wtHwnd);
             }
         }
         finally
@@ -264,10 +264,11 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
     private static void AssertPaneTextContainsMarker(WindowsTerminalPaneGateway paneGateway, IntPtr wtHwnd, PaneProbe probe)
     {
         ClickWindowsTerminalTab(paneGateway, wtHwnd, probe);
-        AssertFocusedPaneTextContainsMarker(paneGateway, wtHwnd, probe, [probe]);
+        AssertSelectedWindowsTerminalTab(paneGateway, wtHwnd, probe);
+        AssertFocusedPaneTextContainsMarker(probe, [probe], wtHwnd);
     }
 
-    private static void AssertSelectedWindowsTerminalTab(
+    private static WindowsTerminalPaneInfo AssertSelectedWindowsTerminalTab(
         WindowsTerminalPaneGateway paneGateway,
         IntPtr wtHwnd,
         PaneProbe probe)
@@ -285,7 +286,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
                 && selected.Name.Contains(probe.Label, StringComparison.OrdinalIgnoreCase)
                 && windowTitle.Contains(probe.Label, StringComparison.OrdinalIgnoreCase))
             {
-                return;
+                return selected;
             }
 
             Application.DoEvents();
@@ -300,6 +301,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             + $"Expected runtime id '{probe.Host!.PaneRuntimeId}' and WT title containing '{probe.Label}'. "
             + $"Actual selected tab: Name='{selected?.Name}', RuntimeId='{selected?.RuntimeId}', WT title='{WindowFocusService.GetWindowTitle(wtHwnd)}'. "
             + $"All tabs: {panes}. If the target WT window is elevated while the test is not, UIA selection may be blocked.");
+        throw new UnreachableException();
     }
 
     private static void ClickWindowsTerminalTab(WindowsTerminalPaneGateway paneGateway, IntPtr wtHwnd, PaneProbe probe)
@@ -309,20 +311,20 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             $"Could not select WT tab for {probe.Label} while preparing marker assertion.");
     }
 
-    private static void AssertFocusedPaneTextContainsMarker(
-        WindowsTerminalPaneGateway paneGateway,
-        IntPtr wtHwnd,
-        PaneProbe expectedProbe,
-        IReadOnlyList<PaneProbe> allProbes)
+    private static void AssertFocusedPaneTextContainsMarker(PaneProbe expectedProbe, IReadOnlyList<PaneProbe> allProbes, IntPtr wtHwnd)
     {
-        var text = WindowsTerminalPaneGateway.ReadWindowText(wtHwnd);
         var markers = allProbes
             .Select(probe => $"COPILOT_BOOSTER_PANE_MARKER={probe.DenyUrlGuid}")
             .ToList();
-        if (!markers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase)))
-        {
-            return;
-        }
+        var text = string.Empty;
+        WaitUntil(
+            () =>
+            {
+                text = WindowsTerminalPaneGateway.ReadWindowText(wtHwnd);
+                return markers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            },
+            30_000,
+            $"WT UIA text did not expose any pane marker after focusing {expectedProbe.Label}. Last text was: {text}");
 
         var expectedMarker = $"COPILOT_BOOSTER_PANE_MARKER={expectedProbe.DenyUrlGuid}";
         Assert.Contains(expectedMarker, text, StringComparison.OrdinalIgnoreCase);
@@ -484,7 +486,7 @@ try {
         }
     } -ArgumentList '{{guid}}','{{marker}}','{{errorMarker}}' | Out-Null
     Write-Host 'COPILOT_BOOSTER_PANE_MARKER={{guid}}'
-    & copilot '{{denyArg}}'
+    & copilot --interactive 'COPILOT_BOOSTER_PANE_MARKER={{guid}}' '{{denyArg}}'
 }
 catch {
     Set-Content -LiteralPath '{{errorMarker}}' -Value $_.Exception.Message -Encoding utf8
@@ -508,10 +510,10 @@ Start-Sleep -Seconds 600
         var errorPath = probe.MarkerPath! + ".error";
         if (File.Exists(errorPath))
         {
-            Assert.Skip($"Pane {probe.Label} could not start copilot: {File.ReadAllText(errorPath)}");
+            Assert.Skip($"Pane {probe.Label} could not start copilot: {ReadAllTextWithRetry(errorPath)}");
         }
 
-        var markerText = File.ReadAllText(probe.MarkerPath!).Trim();
+        var markerText = ReadAllTextWithRetry(probe.MarkerPath!).Trim();
         if (!int.TryParse(markerText, out var pid) || pid <= 0)
         {
             Assert.Skip($"Pane {probe.Label} wrote an invalid Copilot PID marker: {markerText}");
@@ -530,6 +532,27 @@ Start-Sleep -Seconds 600
         }
 
         return pid;
+    }
+
+    private static string ReadAllTextWithRetry(string path)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        IOException? lastIOException;
+        do
+        {
+            try
+            {
+                return File.ReadAllText(path);
+            }
+            catch (IOException ex)
+            {
+                lastIOException = ex;
+                Thread.Sleep(50);
+            }
+        }
+        while (DateTime.UtcNow < deadline);
+
+        throw lastIOException ?? new IOException($"Could not read '{path}'.");
     }
 
     private static void AppendUserMessage(string eventsJsonl, string message)

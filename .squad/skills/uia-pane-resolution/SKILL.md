@@ -21,8 +21,8 @@ Use this skill when wiring UI Automation pane/tab selection for terminal hosts t
 - `SelectionItemPattern.Select()` is preferred for tab activation; fall back to `InvokePattern.Invoke()`, then read back `SelectionItemPattern.Current.IsSelected` with a short poll before returning success.
 - Foreground WT before selecting its tab. Selecting while WT is unfocused can report success yet leave the previously active tab visible on some WT builds.
 - For WT XAML-Islands, tabs do not have distinct Win32 HWNDs. The stable dispatch identity is `(parent HWND, UIA runtime id)`.
-- Live E2E should assert both UIA selected tab identity and the WT window title after click; UIA-only assertions can miss visible-tab regressions.
-- WT TextPattern may expose tab-strip/title text but not terminal scrollback; treat scrollback-marker checks as opportunistic, not guaranteed.
+- Live E2E should assert UIA selected tab identity, WT window title, and a selected-pane content marker after click; selected-tab/title-only assertions can miss swapped session-to-pane mappings.
+- WT TextPattern alone may expose only tab-strip/title text. Walk the Raw UIA tree and collect text/name/value surfaces when a test needs selected-terminal content; seed a marker into the visible interactive prompt and fail if the expected marker is absent or another pane's marker is present.
 - Logging empty/partial enumeration at Information level makes UIA slowness visible without breaking focus fallback.
 
 ## Confidence
