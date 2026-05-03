@@ -107,6 +107,53 @@ Two components establish ADR-0001 compliance and deferred name resolution:
 
 **Test Count Growth:** 637 unit → 647 unit (+10), 84 IT → 104 IT (+20)
 
+### Round 4 Integration Tests All-Green Mandate — Tank
+
+**Date:** 2026-05-03  
+**Status:** Complete  
+**Implementation:** Tank (Round 4)  
+**Directive:** Enforce Roger Barreto's all-green mandate across all integration tests
+
+**Problem:** Round 3 ended with 13 baseline-red integration tests (Playwright browser not installed locally, LocalOnly tests). These were documented as "known environmental failures" — a process smell. The directive supersedes tolerance: ALL tests must be GREEN, period. Either tests self-bootstrap their environment or skip cleanly.
+
+**Solution:**
+
+1. **Playwright auto-bootstrap fixture:**
+   - New xUnit collection: `PlaywrightBootstrap`
+   - Collection fixture probes `Playwright.CreateAsync().Chromium.LaunchAsync()`
+   - On missing browser: auto-calls `Microsoft.Playwright.Program.Main(["install", "chromium"])`
+   - On install failure: skips cleanly (xUnit skip mechanism, no red bar)
+   - Timing: 36s first run (with install), 29s cached, vs. 39s pre-bootstrap inventory with 13 reds
+
+2. **LocalOnly conditional skip policy:**
+   - Custom attributes: `LocalOnlyFactAttribute`, `LocalOnlyStaFactAttribute`
+   - Skip unless `COPILOT_BOOSTER_RUN_LOCALONLY=1` or `true` is set
+   - Trait-only approach fails; attribute-based skip is reliable in in-process xUnit runner
+
+3. **Test-shape corrections:**
+   - `CopilotLogWatcherService.TryParseLogContent` expects `kind: "session_start"`, `session_id`, `context.cwd` (not raw top-level `cwd`)
+   - Deferred name resolution code-fence test corrected to exercise production formatter contract (not invented trailing-fence stripping)
+
+4. **Build isolation and stability:**
+   - `tests/Directory.Build.props` gives `CopilotBooster.IntegrationTests` its own `obj-integration/` intermediate path
+   - Prevents solution-level restore/build from racing with unit test project and dropping Playwright references
+   - `RunningAppsGridDetectionTests` assigned to non-parallel xUnit collection (uses global WinEvent hooks and real windows)
+   - Collection narrowing keeps full IT run at ~29s instead of disabling all parallelism
+
+**Outcome:**
+
+| Metric | Result |
+|--------|--------|
+| Integration Tests Passed | 99 / 104 |
+| Integration Tests Skipped | 5 / 104 |
+| Integration Tests Failed | 0 / 104 ✅ |
+| Unit Tests | 647 / 647 ✅ |
+| Build (dotnet build --tl:off) | 0 warnings, 0 errors ✅ |
+| Format (dotnet format --verify-no-changes) | Clean ✅ |
+| Cached IT Runtime | 29.247s |
+
+**Consequence:** Directive satisfied. Binary green bar restored. Local `dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release` produces zero failures. All tests either pass or skip cleanly.
+
 ---
 
 ## Issue #12: Async Worktree Creation with Cancellation

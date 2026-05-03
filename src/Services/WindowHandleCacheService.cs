@@ -13,7 +13,11 @@ namespace CopilotBooster.Services;
 /// </summary>
 internal static class WindowHandleCacheService
 {
-    private record HandleEntry(string SessionId, string Type, string Name, string? FolderPath, long Hwnd);
+    /// <summary>
+    /// HostPid and CopilotPid are used for "copilot-host" entry type.
+    /// For copilot-host entries, FolderPath is repurposed to store HostKindLabel.
+    /// </summary>
+    private record HandleEntry(string SessionId, string Type, string Name, string? FolderPath, long Hwnd, int? HostPid = null, int? CopilotPid = null);
 
     /// <summary>
     /// Saves all tracked window handles to the cache file.
@@ -24,6 +28,20 @@ internal static class WindowHandleCacheService
         Dictionary<string, List<(string Label, IntPtr Hwnd)>> explorerWindows,
         Dictionary<string, EdgeWorkspaceService> edgeWorkspaces,
         Dictionary<string, TeamsWindowService> teamsWindows)
+    {
+        Save(cacheFile, trackedProcesses, explorerWindows, edgeWorkspaces, teamsWindows, []);
+    }
+
+    /// <summary>
+    /// Saves all tracked window handles to the cache file, including copilot-host entries.
+    /// </summary>
+    internal static void Save(
+        string cacheFile,
+        Dictionary<string, List<ActiveProcess>> trackedProcesses,
+        Dictionary<string, List<(string Label, IntPtr Hwnd)>> explorerWindows,
+        Dictionary<string, EdgeWorkspaceService> edgeWorkspaces,
+        Dictionary<string, TeamsWindowService> teamsWindows,
+        Dictionary<string, CopilotHostInfo> copilotHosts)
     {
         try
         {
@@ -67,6 +85,16 @@ internal static class WindowHandleCacheService
                 }
             }
 
+            foreach (var kvp in copilotHosts)
+            {
+                var host = kvp.Value;
+                if (host.HostHwnd != IntPtr.Zero)
+                {
+                    // For copilot-host entries: FolderPath field is repurposed to store HostKindLabel
+                    entries.Add(new HandleEntry(kvp.Key, "copilot-host", host.HostProcessName, host.HostKindLabel, host.HostHwnd.ToInt64(), host.HostPid, host.CopilotPid));
+                }
+            }
+
             var dir = Path.GetDirectoryName(cacheFile);
             if (dir != null && !Directory.Exists(dir))
             {
@@ -86,18 +114,20 @@ internal static class WindowHandleCacheService
         Dictionary<string, List<ActiveProcess>> Processes,
         Dictionary<string, List<(string Label, IntPtr Hwnd)>> Explorers,
         Dictionary<string, IntPtr> Edges,
-        Dictionary<string, IntPtr> Teams) Load(string cacheFile)
+        Dictionary<string, IntPtr> Teams,
+        Dictionary<string, CopilotHostInfo> CopilotHosts) Load(string cacheFile)
     {
         var processes = new Dictionary<string, List<ActiveProcess>>(StringComparer.OrdinalIgnoreCase);
         var explorers = new Dictionary<string, List<(string Label, IntPtr Hwnd)>>(StringComparer.OrdinalIgnoreCase);
         var edges = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
         var teams = new Dictionary<string, IntPtr>(StringComparer.OrdinalIgnoreCase);
+        var copilotHosts = new Dictionary<string, CopilotHostInfo>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
             if (!File.Exists(cacheFile))
             {
-                return (processes, explorers, edges, teams);
+                return (processes, explorers, edges, teams, copilotHosts);
             }
 
             var entries = JsonSerializer.Deserialize<List<HandleEntry>>(File.ReadAllText(cacheFile)) ?? [];
@@ -139,11 +169,23 @@ internal static class WindowHandleCacheService
                     case "teams":
                         teams[entry.SessionId] = hwnd;
                         break;
+
+                    case "copilot-host":
+                        if (entry.HostPid.HasValue && entry.CopilotPid.HasValue)
+                        {
+                            int actualPid = WindowFocusService.GetWindowProcessId(hwnd);
+                            if (actualPid == entry.HostPid.Value)
+                            {
+                                // FolderPath is repurposed to store HostKindLabel
+                                copilotHosts[entry.SessionId] = new CopilotHostInfo(hwnd, entry.HostPid.Value, entry.CopilotPid.Value, entry.Name, entry.FolderPath ?? "Unknown");
+                            }
+                        }
+                        break;
                 }
             }
         }
         catch (Exception ex) { Program.Logger.LogWarning("Failed to load window handle cache: {Error}", ex.Message); }
 
-        return (processes, explorers, edges, teams);
+        return (processes, explorers, edges, teams, copilotHosts);
     }
 }

@@ -33,9 +33,9 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     private readonly object _cacheLock = new();
 
     /// <summary>
-    /// Fires when an external Copilot session is discovered. Parameter is the session ID.
+    /// Fires when an external Copilot session is discovered. Parameters: sessionId, copilotPid.
     /// </summary>
-    internal event Action<string>? ExternalSessionDiscovered;
+    internal event Action<string, int>? ExternalSessionDiscovered;
 
     internal CopilotLogWatcherService(string? sessionStateDir = null)
     {
@@ -218,7 +218,7 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
             var sessionDir = Path.Combine(this._sessionStateDir, sessionId);
             CreateWorkspaceYamlFromPid(Path.Combine(sessionDir, "workspace.yaml"), sessionId, cwd, pid.Value);
             Program.Logger.LogInformation("External Copilot session discovered: {SessionId} at {Cwd}", sessionId, cwd);
-            this.ExternalSessionDiscovered?.Invoke(sessionId);
+            this.ExternalSessionDiscovered?.Invoke(sessionId, pid.Value);
 
             lock (this._cacheLock)
             {
@@ -402,8 +402,12 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     {
         try
         {
-            var sessionName = GetWindowTitleByPid(pid) ?? sessionId;
-            CreateWorkspaceYaml(wsFile, sessionId, cwd, sessionName);
+            // ADR-0001: External sessions must NOT write GUID fallback to summary.
+            // Only write the summary if we get a real window title (non-null).
+            // If null, omit the summary field entirely — the T1 trigger will populate
+            // the Booster-Resolved Name sidecar instead.
+            var sessionName = GetWindowTitleByPid(pid);
+            CreateWorkspaceYaml(wsFile, sessionId, cwd, sessionName ?? string.Empty);
         }
         catch (Exception ex)
         {

@@ -1,5 +1,6 @@
 ﻿namespace CopilotBooster.IntegrationTests.Integration;
 
+[Collection(PlaywrightBootstrapCollection.Name)]
 public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
 {
     private string? _signalsFilePath;
@@ -406,7 +407,7 @@ public sealed class SessionHtmlSaveIntegrationTests : IAsyncDisposable
     /// Full integration test: save tabs → update context watcher → GetCounts matches immediately.
     /// Simulates the exact flow from HandleEdgeSaveSignalAsync and OnSaveEdgeTabs handlers.
     /// </summary>
-    [StaFact]
+    [LocalOnlyStaFact]
     [Trait("Category", "LocalOnly")]
     public async Task SessionHtml_E2E_SaveTabs_ContextCountUpdatesImmediatelyAsync()
     {

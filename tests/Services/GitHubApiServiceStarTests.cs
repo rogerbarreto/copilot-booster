@@ -139,7 +139,7 @@ public sealed class GitHubApiServiceStarTests
         };
         var api = new GitHubApiService(processRunner: (cmd, args) => FakeProcess(responses, cmd, args));
 
-        Assert.True(await api.IsRepoStarredAsync("owner", "repo"));
+        Assert.True(await api.IsRepoStarredAsync("owner", "repo").ConfigureAwait(false));
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class GitHubApiServiceStarTests
         };
         var api = new GitHubApiService(processRunner: (cmd, args) => FakeProcess(responses, cmd, args));
 
-        Assert.False(await api.IsRepoStarredAsync("owner", "repo"));
+        Assert.False(await api.IsRepoStarredAsync("owner", "repo").ConfigureAwait(false));
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public sealed class GitHubApiServiceStarTests
             getPatFromSettings: () => null,
             processRunner: (cmd, args) => FakeProcess(responses, cmd, args));
 
-        Assert.False(await api.IsRepoStarredAsync("owner", "repo"));
+        Assert.False(await api.IsRepoStarredAsync("owner", "repo").ConfigureAwait(false));
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public sealed class GitHubApiServiceStarTests
         };
         var api = new GitHubApiService(processRunner: (cmd, args) => FakeProcess(responses, cmd, args));
 
-        Assert.True(await api.StarRepoAsync("owner", "repo"));
+        Assert.True(await api.StarRepoAsync("owner", "repo").ConfigureAwait(false));
     }
 
     [Fact]
@@ -187,6 +187,6 @@ public sealed class GitHubApiServiceStarTests
             getPatFromSettings: () => null,
             processRunner: (cmd, args) => FakeProcess(responses, cmd, args));
 
-        Assert.False(await api.StarRepoAsync("owner", "repo"));
+        Assert.False(await api.StarRepoAsync("owner", "repo").ConfigureAwait(false));
     }
 }

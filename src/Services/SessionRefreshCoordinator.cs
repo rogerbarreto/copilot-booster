@@ -36,17 +36,12 @@ internal class SessionRefreshCoordinator
     /// <returns>The loaded sessions.</returns>
     internal IReadOnlyList<NamedSession> LoadSessions()
     {
-        this._cachedSessions = SessionService.LoadNamedSessions(this._sessionStateDir, this._pidRegistryFile);
-
-        // Merge aliases from the alias file
-        var aliases = SessionAliasService.Load(Program.SessionAliasFile);
-        foreach (var session in this._cachedSessions)
-        {
-            if (aliases.TryGetValue(session.Id, out var alias))
-            {
-                session.Alias = alias;
-            }
-        }
+        this._cachedSessions = SessionService.LoadNamedSessions(
+            this._sessionStateDir,
+            this._pidRegistryFile,
+            Program.SessionStateFile,
+            Program.SessionAliasFile,
+            Program.SessionNameOverrideFile);
 
         return this._cachedSessions;
     }

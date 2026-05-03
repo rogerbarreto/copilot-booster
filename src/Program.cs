@@ -48,6 +48,7 @@ internal class Program
     internal static readonly string IdeCacheFile = Path.Combine(AppDataDir, "ide-cache.json");
     internal static readonly string WindowHandleCacheFile = Path.Combine(AppDataDir, "window-handles.json");
     internal static readonly string SessionAliasFile = Path.Combine(AppDataDir, "session-aliases.json");
+    internal static readonly string SessionNameOverrideFile = Path.Combine(AppDataDir, "session-names.json");
     internal static readonly string SessionStateFile = Path.Combine(AppDataDir, "session-states.json");
     private static readonly string s_signalFile = Path.Combine(AppDataDir, "ui-signal.txt");
     private static readonly string s_lastUpdateFile = Path.Combine(AppDataDir, "jumplist-lastupdate.txt");

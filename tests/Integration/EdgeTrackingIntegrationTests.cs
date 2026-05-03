@@ -64,7 +64,7 @@ public sealed class EdgeTrackingIntegrationTests
     /// the workspace, the browser link for the session does not appear in the
     /// sessions list until the OS-level window is detected.
     /// </summary>
-    [StaFact]
+    [LocalOnlyStaFact]
     [Trait("Category", "LocalOnly")]
     public void OpenInEdge_TrackedWorkspace_EdgeLinkAppearsInActiveColumn()
     {

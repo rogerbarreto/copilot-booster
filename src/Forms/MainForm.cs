@@ -154,15 +154,32 @@ internal partial class MainForm : Form
         this._contextWatcher.StartWatching();
 
         this._logWatcher = new CopilotLogWatcherService();
-        this._logWatcher.ExternalSessionDiscovered += sid =>
+        this._logWatcher.ExternalSessionDiscovered += (sid, copilotPid) =>
         {
             if (this.IsHandleCreated)
             {
                 Program.Logger.LogInformation("External session discovered via log watcher: {SessionId}", sid);
-                this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, dataChanged: true));
+                this.BeginInvoke(() =>
+                {
+                    this._activeTracker.HandleExternalSessionDiscovered(sid, copilotPid);
+                    this.RequestRefresh(sessionId: sid, dataChanged: true);
+                });
             }
         };
         this._logWatcher.StartWatching();
+
+        // T2: Subscribe to internal Copilot PID registration
+        PidRegistryService.CopilotPidRegisteredStatic += (sid, copilotPid) =>
+        {
+            if (this.IsHandleCreated)
+            {
+                this.BeginInvoke(() =>
+                {
+                    this._activeTracker.HandleInternalCopilotPidRegistered(sid, copilotPid);
+                    this.RequestRefresh(sessionId: sid, trackingChanged: true);
+                });
+            }
+        };
 
         this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
@@ -1005,6 +1022,7 @@ internal partial class MainForm : Form
         };
         this._windowHookService.WindowDestroyed += hwnd =>
         {
+            this._activeTracker.HandleWindowDestroyed(hwnd);
             var affected = this._activeTracker.OnWindowDestroyed(hwnd);
             foreach (var id in affected)
             {

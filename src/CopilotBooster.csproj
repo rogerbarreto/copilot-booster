@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <ApplicationIcon>copilot.ico</ApplicationIcon>
     <AssemblyName>CopilotBooster</AssemblyName>
     <Version>0.20.1</Version>

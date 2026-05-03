@@ -696,7 +696,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// Reproduces the cascading EVENT_OBJECT_DESTROY issue where
     /// OnWindowDestroyed keeps recapturing to dying child windows.
     /// </summary>
-    [StaFact]
+    [LocalOnlyStaFact]
     [Trait("Category", "LocalOnly")]
     public void E2E_RealVisualStudio_OpenAndClose_GridMustClear()
     {

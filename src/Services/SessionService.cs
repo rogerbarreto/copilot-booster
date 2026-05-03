@@ -169,13 +169,31 @@ internal class SessionService
             }
 
             var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
+            string displaySummary;
+            if (!string.IsNullOrEmpty(summary))
+            {
+                displaySummary = summary;
+            }
+            else
+            {
+                var overrideEntry = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, id);
+                if (overrideEntry != null)
+                {
+                    displaySummary = overrideEntry.Name;
+                }
+                else
+                {
+                    displaySummary = string.IsNullOrWhiteSpace(folder)
+                        ? "(no folder)"
+                        : folder;
+                }
+            }
+
             return new SessionInfo
             {
                 Id = id,
                 Cwd = cwd ?? "Unknown",
-                Summary = string.IsNullOrWhiteSpace(folder)
-                    ? (string.IsNullOrEmpty(summary) ? "(no folder)" : summary)
-                    : (string.IsNullOrEmpty(summary) ? $"{folder}" : summary),
+                Summary = displaySummary,
                 Pid = pid
             };
         }
@@ -233,8 +251,15 @@ internal class SessionService
     /// <param name="sessionStateDir">Path to the directory containing session state.</param>
     /// <param name="pidRegistryFile">Path to the PID registry JSON file for active session detection.</param>
     /// <param name="sessionStateFile">Path to the session states JSON file for delete tracking.</param>
+    /// <param name="aliasFile">Path to the alias JSON file for alias resolution.</param>
+    /// <param name="overrideFile">Path to the session name override JSON file for Booster-Resolved Names.</param>
     /// <returns>A list of named sessions with summaries.</returns>
-    internal static List<NamedSession> LoadNamedSessions(string sessionStateDir, string? pidRegistryFile = null, string? sessionStateFile = null)
+    internal static List<NamedSession> LoadNamedSessions(
+        string sessionStateDir,
+        string? pidRegistryFile = null,
+        string? sessionStateFile = null,
+        string? aliasFile = null,
+        string? overrideFile = null)
     {
         var profiling = Program.Logger.IsEnabled(LogLevel.Debug);
         var totalSw = profiling ? Stopwatch.StartNew() : null;
@@ -266,6 +291,8 @@ internal class SessionService
         int deletedCount = 0;
 
         var deletedIds = SessionArchiveService.GetDeletedIds(sessionStateFile ?? Program.SessionStateFile);
+        var aliases = aliasFile != null ? SessionAliasService.Load(aliasFile) : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var overrides = overrideFile != null ? SessionNameOverrideService.Load(overrideFile) : new Dictionary<string, SessionNameOverride>(StringComparer.OrdinalIgnoreCase);
 
         sw?.Restart();
         var sessions = sortedDirs
@@ -312,9 +339,24 @@ internal class SessionService
                     }
 
                     var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
-                    var displaySummary = string.IsNullOrWhiteSpace(summary)
-                        ? (string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "")
-                        : summary;
+                    string displaySummary;
+                    if (aliases.TryGetValue(id, out var alias))
+                    {
+                        displaySummary = alias;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(summary))
+                    {
+                        displaySummary = summary;
+                    }
+                    else if (overrides.TryGetValue(id, out var overrideEntry))
+                    {
+                        displaySummary = overrideEntry.Name;
+                    }
+                    else
+                    {
+                        displaySummary = string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "";
+                    }
+
                     var isGitRepo = false;
                     if (!string.IsNullOrEmpty(cwd))
                     {

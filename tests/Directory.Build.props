@@ -1,0 +1,6 @@
+﻿<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'CopilotBooster.IntegrationTests'">
+    <BaseIntermediateOutputPath>obj-integration\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+</Project>

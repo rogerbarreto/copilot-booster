@@ -36,6 +36,13 @@ internal class EventsJournalService : IDisposable
     internal event Action<string, SessionStatus>? StatusChanged;
 
     /// <summary>
+    /// Fired on the FileSystemWatcher thread when a Booster-Resolved Name
+    /// is successfully updated from the first user.message in events.jsonl.
+    /// Subscribers must marshal to the UI thread.
+    /// </summary>
+    internal event Action<string>? BoosterResolvedNameUpdated;
+
+    /// <summary>
     /// When true, StatusChanged events are suppressed (during startup priming).
     /// </summary>
     internal bool SuppressEvents { get; set; } = true;
@@ -119,6 +126,11 @@ internal class EventsJournalService : IDisposable
                 StatusChanged?.Invoke(sessionId, newStatus);
             }
         }
+
+        // Deferred Booster-Resolved Name resolution: if the current override
+        // is unresolved (ResolvedFromUserMessage == false), attempt to extract
+        // the first user.message and update the sidecar.
+        this.TryResolveBoosterName(sessionId, e.FullPath);
     }
 
     private void OnWatcherError(object sender, ErrorEventArgs e)
@@ -422,6 +434,55 @@ internal class EventsJournalService : IDisposable
         catch (Exception ex)
         {
             Program.Logger.LogDebug("Failed to save events cache: {Error}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to resolve the Booster-Resolved Name for a session if it's currently unresolved.
+    /// Reads the first user.message from events.jsonl, formats it, and updates the sidecar.
+    /// Only operates when the existing override has ResolvedFromUserMessage == false.
+    /// </summary>
+    private void TryResolveBoosterName(string sessionId, string eventsJsonlPath)
+    {
+        try
+        {
+            // Check if the current override is unresolved
+            var currentOverride = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, sessionId);
+            if (currentOverride == null || currentOverride.ResolvedFromUserMessage)
+            {
+                // Already resolved or not present — no work to do
+                return;
+            }
+
+            // Extract the first user.message content
+            var rawContent = FirstUserMessageExtractor.Extract(eventsJsonlPath);
+            if (rawContent == null)
+            {
+                // No user.message found yet — try again on next event
+                return;
+            }
+
+            // Format the content (32-char truncation, whitespace collapse)
+            var formattedName = BoosterResolvedNameFormatter.Format(rawContent);
+            if (string.IsNullOrWhiteSpace(formattedName))
+            {
+                // Formatted content is empty — keep placeholder
+                return;
+            }
+
+            // Update the sidecar with the resolved name
+            SessionNameOverrideService.Set(
+                Program.SessionNameOverrideFile,
+                sessionId,
+                formattedName,
+                resolvedFromUserMessage: true);
+
+            // Raise event so MainForm can refresh the session list
+            BoosterResolvedNameUpdated?.Invoke(sessionId);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to resolve Booster name for {SessionId}: {Error}", sessionId, ex.Message);
         }
     }
 

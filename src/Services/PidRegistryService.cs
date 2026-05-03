@@ -13,6 +13,20 @@ internal class PidRegistryService
 {
     private readonly string _copilotDir;
     private readonly string _pidRegistryFile;
+    private readonly Dictionary<int, int> _lastCopilotPidByLauncherPid = [];
+    private static readonly Dictionary<int, int> s_lastCopilotPidByLauncherPidStatic = [];
+
+    /// <summary>
+    /// Fires when a Copilot CLI PID is registered for a session (internal sessions only).
+    /// Parameters: sessionId, copilotPid.
+    /// </summary>
+    internal event Action<string, int>? CopilotPidRegistered;
+
+    /// <summary>
+    /// Static event fired when a Copilot CLI PID is registered (for static UpdatePidSessionId calls).
+    /// Parameters: sessionId, copilotPid.
+    /// </summary>
+    internal static event Action<string, int>? CopilotPidRegisteredStatic;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PidRegistryService"/> class.
@@ -43,7 +57,26 @@ internal class PidRegistryService
     /// <param name="pid">The launcher process ID to update.</param>
     /// <param name="sessionId">The session ID to associate with the process.</param>
     /// <param name="copilotPid">The cmd.exe process ID hosting the copilot CLI.</param>
-    internal void UpdatePidSessionId(int pid, string sessionId, int copilotPid = 0) => UpdatePidSessionId(pid, sessionId, this._pidRegistryFile, copilotPid);
+    internal void UpdatePidSessionId(int pid, string sessionId, int copilotPid = 0)
+    {
+        // Check if this is a new/different copilotPid to avoid firing duplicate events
+        bool shouldFireEvent = false;
+        if (copilotPid > 0)
+        {
+            if (!this._lastCopilotPidByLauncherPid.TryGetValue(pid, out int lastPid) || lastPid != copilotPid)
+            {
+                this._lastCopilotPidByLauncherPid[pid] = copilotPid;
+                shouldFireEvent = true;
+            }
+        }
+
+        UpdatePidSessionId(pid, sessionId, this._pidRegistryFile, copilotPid);
+
+        if (shouldFireEvent)
+        {
+            this.CopilotPidRegistered?.Invoke(sessionId, copilotPid);
+        }
+    }
 
     /// <summary>
     /// Registers a process ID in the PID registry file, creating the directory and file if needed.
@@ -84,6 +117,20 @@ internal class PidRegistryService
     /// <param name="copilotPid">The cmd.exe process ID hosting the copilot CLI.</param>
     internal static void UpdatePidSessionId(int pid, string sessionId, string pidRegistryFile, int copilotPid = 0)
     {
+        // Check if this is a new/different copilotPid to avoid firing duplicate events
+        bool shouldFireEvent = false;
+        if (copilotPid > 0)
+        {
+            lock (s_lastCopilotPidByLauncherPidStatic)
+            {
+                if (!s_lastCopilotPidByLauncherPidStatic.TryGetValue(pid, out int lastPid) || lastPid != copilotPid)
+                {
+                    s_lastCopilotPidByLauncherPidStatic[pid] = copilotPid;
+                    shouldFireEvent = true;
+                }
+            }
+        }
+
         try
         {
             if (!File.Exists(pidRegistryFile))
@@ -98,6 +145,11 @@ internal class PidRegistryService
                 JsonSerializer.Serialize(new { started = DateTime.Now.ToString("o"), sessionId, copilotPid }));
 
             File.WriteAllText(pidRegistryFile, JsonSerializer.Serialize(registry));
+
+            if (shouldFireEvent)
+            {
+                CopilotPidRegisteredStatic?.Invoke(sessionId, copilotPid);
+            }
         }
         catch (Exception ex) { Program.Logger.LogError("Failed to update PID session: {Error}", ex.Message); }
     }

@@ -155,7 +155,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
     /// microsoft/agent-framework. Issue #4702 exists but was returning false 404.
     /// This test uses the actual local worktree path to reproduce the exact app flow.
     /// </summary>
-    [Fact]
+    [LocalOnlyFact]
     [Trait("Category", "LocalOnly")]
     public async Task AddIssue_AgentFramework_UpstreamRemote_FindsIssue4702Async()
     {
@@ -196,7 +196,7 @@ public sealed class GitHubAddItemRealPathTests : IDisposable
     /// Verifies that microsoft/agent-framework issue #4702 is accessible via cascading auth.
     /// May fail when unauthenticated rate limit is exhausted and gh token lacks SAML for microsoft org.
     /// </summary>
-    [Fact]
+    [LocalOnlyFact]
     [Trait("Category", "LocalOnly")]
     public async Task AddIssue_MicrosoftAgentFramework_Issue4702_FoundAsync()
     {

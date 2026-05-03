@@ -30,6 +30,8 @@ internal class ActiveStatusTracker
     private readonly Dictionary<string, EdgeWorkspaceService> _edgeWorkspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, TeamsWindowService> _teamsWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<(string Label, IntPtr Hwnd)>> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CopilotHostInfo> _copilotHosts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly CopilotHostResolver _hostResolver = new();
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     internal readonly EventsJournalService EventsJournal = new();
     private bool _handleCacheInitialLoadDone;
@@ -48,6 +50,16 @@ internal class ActiveStatusTracker
     /// Callback invoked when a tracked Teams window is detected as closed.
     /// </summary>
     internal Action<string>? OnTeamsWindowClosed { get; set; }
+
+    /// <summary>
+    /// Fired when a Copilot Host is resolved and set for a session.
+    /// </summary>
+    internal event Action<string, CopilotHostInfo>? CopilotHostResolved;
+
+    /// <summary>
+    /// Fired when a Copilot Host entry is removed for a session.
+    /// </summary>
+    internal event Action<string>? CopilotHostRemoved;
 
     /// <summary>
     /// Seeds sessions present at startup. These will output "" instead of "bell"
@@ -73,6 +85,117 @@ internal class ActiveStatusTracker
     internal bool IsStartupSuppressed(string sessionId)
     {
         return this._startedSessionIds.Contains(sessionId);
+    }
+
+    /// <summary>
+    /// Gets the resolved CopilotHostInfo for a session, or null if no host has been resolved yet.
+    /// </summary>
+    internal CopilotHostInfo? GetCopilotHost(string sessionId)
+    {
+        return this._copilotHosts.TryGetValue(sessionId, out CopilotHostInfo? info) ? info : null;
+    }
+
+    /// <summary>
+    /// Sets/updates the host entry for a session. Triggers projection into _activeTrackedWindows
+    /// by HWND identity. Idempotent: identical re-set is a no-op.
+    /// </summary>
+    internal void SetCopilotHost(string sessionId, CopilotHostInfo info)
+    {
+        if (this._copilotHosts.TryGetValue(sessionId, out CopilotHostInfo? existing) &&
+            existing.HostHwnd == info.HostHwnd &&
+            existing.HostPid == info.HostPid &&
+            existing.CopilotPid == info.CopilotPid)
+        {
+            return;
+        }
+
+        this._copilotHosts[sessionId] = info;
+        this.ProjectCopilotHostToActiveWindows(sessionId, info);
+        this.CopilotHostResolved?.Invoke(sessionId, info);
+    }
+
+    /// <summary>
+    /// Removes the host entry for a session. No-op if missing.
+    /// </summary>
+    internal void RemoveCopilotHost(string sessionId)
+    {
+        if (!this._copilotHosts.Remove(sessionId, out CopilotHostInfo? removed))
+        {
+            return;
+        }
+
+        this.UnprojectCopilotHostFromActiveWindows(sessionId, removed.HostHwnd);
+        this.CopilotHostRemoved?.Invoke(sessionId);
+    }
+
+    /// <summary>
+    /// T1 trigger: handles external session discovery from CopilotLogWatcherService.
+    /// Resolves the host and sets Booster-Resolved Name placeholder if needed.
+    /// </summary>
+    internal void HandleExternalSessionDiscovered(string sessionId, int copilotPid)
+    {
+        var info = this._hostResolver.Resolve(copilotPid);
+        if (info == null)
+        {
+            return;
+        }
+
+        this.SetCopilotHost(sessionId, info);
+
+        // Set Booster-Resolved Name placeholder if no override exists yet
+        var existing = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, sessionId);
+        if (existing == null)
+        {
+            var placeholder = BoosterResolvedNameFormatter.BuildPlaceholder(info.HostProcessName);
+            SessionNameOverrideService.Set(Program.SessionNameOverrideFile, sessionId, placeholder, resolvedFromUserMessage: false);
+        }
+    }
+
+    /// <summary>
+    /// T2 trigger: handles internal Copilot PID registration from PidRegistryService.
+    /// Resolves the host only if missing or dead, to avoid redundant re-resolution.
+    /// </summary>
+    internal void HandleInternalCopilotPidRegistered(string sessionId, int copilotPid)
+    {
+        // Don't re-resolve if we already have a host for this session and it's still alive
+        var existing = this.GetCopilotHost(sessionId);
+        if (existing != null && WindowFocusService.IsWindowAlive(existing.HostHwnd))
+        {
+            return;
+        }
+
+        var info = this._hostResolver.Resolve(copilotPid);
+        if (info == null)
+        {
+            return;
+        }
+
+        this.SetCopilotHost(sessionId, info);
+
+        // Internal sessions get the same placeholder treatment for parity (Q3 unified scope)
+        var nameOverride = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, sessionId);
+        if (nameOverride == null)
+        {
+            var placeholder = BoosterResolvedNameFormatter.BuildPlaceholder(info.HostProcessName);
+            SessionNameOverrideService.Set(Program.SessionNameOverrideFile, sessionId, placeholder, resolvedFromUserMessage: false);
+        }
+    }
+
+    /// <summary>
+    /// T5 trigger: handles window destruction. Evicts any host entry whose HWND matches.
+    /// </summary>
+    internal void HandleWindowDestroyed(IntPtr hwnd)
+    {
+        // Find any session whose host HWND matches and evict
+        var toRemove = this._copilotHosts
+            .Where(kvp => kvp.Value.HostHwnd == hwnd)
+            .Select(kvp => kvp.Key)
+            .ToList();
+
+        foreach (var sid in toRemove)
+        {
+            this.RemoveCopilotHost(sid);
+        }
     }
 
     internal static HashSet<string> LoadActiveSessionIds()
@@ -306,7 +429,14 @@ internal class ActiveStatusTracker
     /// </summary>
     internal bool TryFocusCopilotCli(string sessionId)
     {
-        // Check tracked windows first (HWND-based, most reliable)
+        // Priority 1: Use host HWND if available and alive
+        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && WindowFocusService.IsWindowAlive(hostInfo.HostHwnd))
+        {
+            WindowFocusService.TryFocusWindowHandle(hostInfo.HostHwnd);
+            return true;
+        }
+
+        // Priority 2: Check tracked windows (HWND-based, legacy title-scan path)
         if (this._activeTrackedWindows.TryGetValue(sessionId, out var tracked))
         {
             var cli = tracked.FirstOrDefault(t => t.Label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase));
@@ -317,7 +447,7 @@ internal class ActiveStatusTracker
             }
         }
 
-        // Fallback: PID-based
+        // Priority 3: PID-based fallback
         if (this._activeSessionIds.Contains(sessionId))
         {
             var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
@@ -344,17 +474,31 @@ internal class ActiveStatusTracker
     {
         var focusTargets = new List<(string name, Action focus)>();
 
+        // Priority 1: Add host-resolved Copilot CLI first if available and alive
+        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && WindowFocusService.IsWindowAlive(hostInfo.HostHwnd))
+        {
+            var capturedHostHwnd = hostInfo.HostHwnd;
+            focusTargets.Add(("Copilot CLI", () => WindowFocusService.TryFocusWindowHandle(capturedHostHwnd)));
+        }
+
+        // Priority 2: Add tracked windows (legacy title-scan path)
         if (this._activeTrackedWindows.TryGetValue(sessionId, out var tracked))
         {
             foreach (var (label, title, hwnd) in tracked)
             {
+                // Skip if this is the host HWND we already added (avoid duplicate)
+                if (this._copilotHosts.TryGetValue(sessionId, out var h) && h.HostHwnd == hwnd)
+                {
+                    continue;
+                }
+
                 var capturedHwnd = hwnd;
                 focusTargets.Add((label, () => WindowFocusService.TryFocusWindowHandle(capturedHwnd)));
             }
         }
         else if (this._activeSessionIds.Contains(sessionId))
         {
-            // Fallback: PID-based focus for Copilot CLI sessions without a titled window
+            // Priority 3: PID-based fallback for Copilot CLI sessions without a titled window
             var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
             var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
             if (session != null && session.CopilotPid > 0)
@@ -604,7 +748,7 @@ internal class ActiveStatusTracker
         if (!this._handleCacheInitialLoadDone)
         {
             this._handleCacheInitialLoadDone = true;
-            var (cachedProcesses, cachedExplorers, cachedEdges, cachedTeams) = WindowHandleCacheService.Load(Program.WindowHandleCacheFile);
+            var (cachedProcesses, cachedExplorers, cachedEdges, cachedTeams, cachedHosts) = WindowHandleCacheService.Load(Program.WindowHandleCacheFile);
             foreach (var kvp in cachedProcesses)
             {
                 if (!this._trackedProcesses.ContainsKey(kvp.Key))
@@ -636,6 +780,15 @@ internal class ActiveStatusTracker
                     var teams = new TeamsWindowService();
                     teams.RestoreCachedHwnd(kvp.Value);
                     this._teamsWindows[kvp.Key] = teams;
+                }
+            }
+
+            foreach (var kvp in cachedHosts)
+            {
+                if (!this._copilotHosts.ContainsKey(kvp.Key))
+                {
+                    this._copilotHosts[kvp.Key] = kvp.Value;
+                    this.ProjectCopilotHostToActiveWindows(kvp.Key, kvp.Value);
                 }
             }
 
@@ -779,6 +932,32 @@ internal class ActiveStatusTracker
             }
 
             this._teamsWindows.Remove(id);
+        }
+
+        // T4: Re-resolve host for sessions whose host is missing or dead
+        var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
+        foreach (var session in activeSessions)
+        {
+            if (session.CopilotPid <= 0)
+            {
+                continue;
+            }
+
+            var existing = this.GetCopilotHost(session.Id);
+            if (existing != null && WindowFocusService.IsWindowAlive(existing.HostHwnd))
+            {
+                continue;
+            }
+
+            var info = this._hostResolver.Resolve(session.CopilotPid);
+            if (info != null)
+            {
+                this.SetCopilotHost(session.Id, info);
+            }
+            else if (existing != null)
+            {
+                this.RemoveCopilotHost(session.Id);
+            }
         }
 
         // Edge workspace scanning happens separately via ScanAndTrackEdgeWorkspaces()
@@ -1419,10 +1598,43 @@ internal class ActiveStatusTracker
         => this._edgeWorkspaces.Values.ToList();
 
     /// <summary>
+    /// Projects a CopilotHostInfo entry into _activeTrackedWindows as a "Copilot CLI" entry.
+    /// Deduplicates by HWND: if an entry with the same HWND already exists, no-op.
+    /// </summary>
+    private void ProjectCopilotHostToActiveWindows(string sessionId, CopilotHostInfo info)
+    {
+        if (!this._activeTrackedWindows.TryGetValue(sessionId, out List<(string Label, string Title, nint Hwnd)>? value))
+        {
+            value = [];
+            this._activeTrackedWindows[sessionId] = value;
+        }
+
+        if (value.Any(t => t.Hwnd == info.HostHwnd))
+        {
+            return;
+        }
+
+        value.Add(("Copilot CLI", "", info.HostHwnd));
+    }
+
+    /// <summary>
+    /// Removes the entry matching the given HWND from _activeTrackedWindows for the session.
+    /// </summary>
+    private void UnprojectCopilotHostFromActiveWindows(string sessionId, IntPtr hwnd)
+    {
+        if (!this._activeTrackedWindows.TryGetValue(sessionId, out List<(string Label, string Title, nint Hwnd)>? value))
+        {
+            return;
+        }
+
+        value.RemoveAll(t => t.Hwnd == hwnd);
+    }
+
+    /// <summary>
     /// Persists the window handle cache to disk. Called once on shutdown.
     /// </summary>
     internal void SaveWindowHandleCache()
     {
-        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces, this._teamsWindows);
+        WindowHandleCacheService.Save(Program.WindowHandleCacheFile, this._trackedProcesses, this._explorerWindows, this._edgeWorkspaces, this._teamsWindows, this._copilotHosts);
     }
 }
