@@ -54,6 +54,25 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    private const int SW_RESTORE = 9;
+    private const byte VK_MENU = 0x12;
+    private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+
     private const byte VK_CONTROL = 0x11;
     private const byte VK_D = 0x44;
     private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -473,10 +492,26 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         Assert.True(panes.Count > tabIndex, $"WT only has {panes.Count} tabs; cannot type into tab {tabIndex}.");
         var target = panes[tabIndex];
 
-        Assert.True(gateway.FocusPane(wtHwnd, target.RuntimeId!), $"Could not focus tab {tabIndex} via UIA before typing.");
-        Thread.Sleep(250);
-        Assert.True(WindowFocusService.TryFocusWindowHandle(wtHwnd), "Could not foreground wt before typing.");
-        Thread.Sleep(250);
+        // Window MUST be foreground BEFORE UIA Select. Selecting a tab in a non-foreground
+        // wt window only marks the tab visually; when the window later comes forward, it
+        // restores whichever tab WAS active, not the freshly-selected one.
+        ForceForeground(wtHwnd);
+        Thread.Sleep(200);
+
+        // CRITICAL: only call UIA Select when the desired tab is NOT already selected.
+        // SelectionItemPattern.Select on an already-selected TabItem moves keyboard focus
+        // FROM the TermControl ONTO the tab strip element — keystrokes then go nowhere
+        // (the tab title isn't editable). Freshly-spawned single-tab wt windows always
+        // have tab 0 already selected; selecting it again would steal focus from the
+        // pane content. Same applies for a 2-tab wt where tab 1 just opened via
+        // Ctrl+Shift+T and is already the active tab.
+        if (!target.IsSelected)
+        {
+            Assert.True(gateway.FocusPane(wtHwnd, target.RuntimeId!), $"Could not focus tab {tabIndex} via UIA before typing.");
+            Thread.Sleep(250);
+            ForceForeground(wtHwnd);
+            Thread.Sleep(250);
+        }
 
         SendKeys.SendWait(SendKeysEscape(command) + "{ENTER}");
         Thread.Sleep(400);
@@ -525,10 +560,15 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         Assert.True(initial.Count > tabIndex, $"WT only has {initial.Count} tabs; need at least {tabIndex + 1}.");
         var target = initial[tabIndex];
 
-        Assert.True(gateway.FocusPane(wtHwnd, target.RuntimeId!), $"Could not focus tab {tabIndex} via UIA before /rename.");
-        Thread.Sleep(250);
-        Assert.True(WindowFocusService.TryFocusWindowHandle(wtHwnd), "Could not bring wt.exe to foreground for SendKeys.");
-        Thread.Sleep(250);
+        ForceForeground(wtHwnd);
+        Thread.Sleep(200);
+        if (!target.IsSelected)
+        {
+            Assert.True(gateway.FocusPane(wtHwnd, target.RuntimeId!), $"Could not focus tab {tabIndex} via UIA before /rename.");
+            Thread.Sleep(250);
+            ForceForeground(wtHwnd);
+            Thread.Sleep(250);
+        }
 
         SendKeys.SendWait($"/rename {SendKeysEscape(newLabel)}{{ENTER}}");
 
@@ -909,6 +949,409 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             var mouseArgs = new MouseEventArgs(MouseButtons.Left, clicks: 1, x, y, delta: 0);
             this.OnCellMouseClick(new DataGridViewCellMouseEventArgs(columnIndex, rowIndex, x, y, mouseArgs));
         }
+    }
+
+    [Fact]
+    public async Task MultiWtWindows_HostBindingDoesNotScrambleAsync()
+    {
+        await RunOnStaThreadAsync(this.ExecuteMultiWtWindowsHostBindingAsync).ConfigureAwait(false);
+    }
+
+    private async Task ExecuteMultiWtWindowsHostBindingAsync()
+    {
+        SkipIfPreflightFails();
+        Directory.CreateDirectory(Program.SessionStateDir);
+        Directory.CreateDirectory(Program.AppDataDir);
+        SweepOrphanItSessionDirs();
+
+        // Three sessions across two wt windows:
+        //   wt-A hosts sessions A1, A2 (two copilot tabs).
+        //   wt-B hosts session B1 (single copilot tab in a SECOND wt window).
+        //
+        // Since the Sun Valley refactor, all wt windows share one WindowsTerminal.exe PID.
+        // CopilotHostResolver historically called GetTopLevelWindow(wtPid) which returns
+        // the FIRST visible top-level hwnd matching the pid (z-order), so two of the
+        // three sessions get bound to the wrong wt window — their actual pane lives in
+        // the OTHER wt window, but resolution returned this one's hwnd.
+        var sessionA1 = new RealCopilotSession("WtA-Tab1-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionA2 = new RealCopilotSession("WtA-Tab2-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionB1 = new RealCopilotSession("WtB-Tab1-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var allSessions = new[] { sessionA1, sessionA2, sessionB1 };
+        foreach (var s in allSessions)
+        {
+            s.SessionId = Guid.NewGuid().ToString();
+            s.SessionDir = Path.Combine(Program.SessionStateDir, s.SessionId);
+            this._createdSessionDirs.Add(s.SessionDir);
+            this._createdSessionIds.Add(s.SessionId);
+            Directory.CreateDirectory(s.SessionDir);
+            File.WriteAllText(Path.Combine(s.SessionDir, SessionCleanupSentinel), DateTime.UtcNow.ToString("O"));
+            WriteMinimalWorkspaceYaml(Path.Combine(s.SessionDir, "workspace.yaml"), s.SessionId, Environment.CurrentDirectory);
+            WriteSessionStartEvent(Path.Combine(s.SessionDir, "events.jsonl"), s.SessionId, Environment.CurrentDirectory);
+            SessionNameOverrideService.Set(Program.SessionNameOverrideFile, s.SessionId, s.Label, resolvedFromUserMessage: true);
+        }
+
+        var paneGateway = new WindowsTerminalPaneGateway();
+
+        // Open BOTH wt windows up-front (each with their empty default tabs) BEFORE
+        // typing any copilot commands. Spawning a second wt window while the first
+        // window's copilots are mid-launch yanks foreground to the new window and
+        // SendKeys.SendWait delivery races against the focus change — typed bytes
+        // get split across the wrong cells.
+        //
+        // wt-A: spawn with `-w new`, open a SECOND tab via Ctrl+Shift+T, no copilot yet.
+        var wtAHwnd = OpenFreshWtWithExtraTab(paneGateway, out var wtAProcess);
+        if (wtAProcess != null)
+        {
+            this._startedProcesses.Add(wtAProcess);
+        }
+        this._wtWindowHwnds.Add(wtAHwnd);
+
+        // wt-B: spawn with `-w new`, single empty tab.
+        var wtBHwnd = OpenFreshWtWithSingleTab(paneGateway, out var wtBProcess);
+        if (wtBProcess != null)
+        {
+            this._startedProcesses.Add(wtBProcess);
+        }
+        this._wtWindowHwnds.Add(wtBHwnd);
+        Assert.NotEqual(wtAHwnd, wtBHwnd);
+
+        // Both windows are now stable; type the copilot launch command into each tab
+        // SERIALLY. TypeIntoTab refocuses both the UIA pane and the wt window before
+        // each SendKeys block, so we don't depend on global focus state between calls.
+        TypeIntoTab(paneGateway, wtAHwnd, tabIndex: 0, $"copilot --resume \"{sessionA1.SessionId}\" --deny-url={sessionA1.Marker}");
+        TypeIntoTab(paneGateway, wtAHwnd, tabIndex: 1, $"copilot --resume \"{sessionA2.SessionId}\" --deny-url={sessionA2.Marker}");
+        TypeIntoTab(paneGateway, wtBHwnd, tabIndex: 0, $"copilot --resume \"{sessionB1.SessionId}\" --deny-url={sessionB1.Marker}");
+
+        (sessionA1.CopilotPid, sessionA1.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA1.Marker, 30_000);
+        (sessionA2.CopilotPid, sessionA2.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA2.Marker, 30_000);
+        (sessionB1.CopilotPid, sessionB1.PwshPid) = WaitForCopilotPidByDenyUrl(sessionB1.Marker, 30_000);
+        foreach (var s in allSessions)
+        {
+            this._copilotPids.Add(s.CopilotPid);
+            this._pwshPids.Add(s.PwshPid);
+        }
+
+        // Wait for copilot to fully load on all 3 panes (across both wt windows).
+        WaitUntil(
+            () =>
+            {
+                var aPanes = paneGateway.EnumeratePanes(wtAHwnd).Panes;
+                var bPanes = paneGateway.EnumeratePanes(wtBHwnd).Panes;
+                return aPanes.Count >= 2
+                    && aPanes.Take(2).All(p => p.Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase))
+                    && bPanes.Count >= 1
+                    && bPanes[0].Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase);
+            },
+            45_000,
+            "Copilot did not reach 'GitHub Copilot' title on all 3 panes within 45s.");
+
+        Thread.Sleep(2_000);
+
+        RenameTab(paneGateway, wtAHwnd, tabIndex: 0, sessionA1.Label);
+        RenameTab(paneGateway, wtAHwnd, tabIndex: 1, sessionA2.Label);
+        RenameTab(paneGateway, wtBHwnd, tabIndex: 0, sessionB1.Label);
+
+        // Boot the booster tracker AFTER both wt windows are fully up.
+        var tracker = new ActiveStatusTracker();
+        foreach (var s in allSessions)
+        {
+            tracker.HandleExternalSessionDiscovered(s.SessionId, s.CopilotPid);
+            s.Host = tracker.GetCopilotHost(s.SessionId);
+            Assert.NotNull(s.Host);
+        }
+
+        // Ground truth: enumerate panes in BOTH wt windows and use the unique session
+        // labels (set by RenameTab earlier and verified by its WaitUntil) to determine
+        // which wt hwnd physically owns each session's pane. We can't use
+        // PaneRootProcessId here — UIA isn't always exposing pane-content hwnds with
+        // their own pid (depends on focus state, OpenConsole/ConPTY hosting), so the
+        // labels are the only stable per-pane identifier we have.
+        var wtAPanes = paneGateway.EnumeratePanes(wtAHwnd).Panes;
+        var wtBPanes = paneGateway.EnumeratePanes(wtBHwnd).Panes;
+        IntPtr GroundTruthWtHwndFor(RealCopilotSession s)
+        {
+            bool MatchesPane(WindowsTerminalPaneInfo pane) =>
+                (pane.PaneRootProcessId.HasValue && pane.PaneRootProcessId.Value == s.PwshPid)
+                || pane.ProcessId == s.CopilotPid
+                || pane.Name.Contains(s.Label, StringComparison.OrdinalIgnoreCase);
+
+            if (wtAPanes.Any(MatchesPane))
+            {
+                return wtAHwnd;
+            }
+            if (wtBPanes.Any(MatchesPane))
+            {
+                return wtBHwnd;
+            }
+            Assert.Fail(
+                $"Could not locate a pane for session {s.Label} (copilotPid={s.CopilotPid}, pwshPid={s.PwshPid}) "
+                + $"in either wt window. wt-A panes: [{string.Join("|", wtAPanes.Select(p => $"name='{p.Name}',pid={p.ProcessId},paneRoot={p.PaneRootProcessId}"))}] "
+                + $"wt-B panes: [{string.Join("|", wtBPanes.Select(p => $"name='{p.Name}',pid={p.ProcessId},paneRoot={p.PaneRootProcessId}"))}]");
+            return IntPtr.Zero;
+        }
+
+        var groundTruthA1 = GroundTruthWtHwndFor(sessionA1);
+        var groundTruthA2 = GroundTruthWtHwndFor(sessionA2);
+        var groundTruthB1 = GroundTruthWtHwndFor(sessionB1);
+        Assert.Equal(wtAHwnd, groundTruthA1);
+        Assert.Equal(wtAHwnd, groundTruthA2);
+        Assert.Equal(wtBHwnd, groundTruthB1);
+
+        // Each session's resolved host MUST point at the wt window that physically owns
+        // its pane. With the bug present, the resolver picks whichever wt hwnd EnumWindows
+        // hits first for the shared WindowsTerminal.exe pid → two of three sessions are
+        // bound to the wrong window.
+        var diagDetails = string.Join(
+            " | ",
+            allSessions.Select(s => $"{s.Label}: resolved={s.Host!.ParentHostHwnd}, expected={GroundTruthWtHwndFor(s)}"));
+        Assert.Equal(groundTruthA1, sessionA1.Host!.ParentHostHwnd);
+        Assert.Equal(groundTruthA2, sessionA2.Host!.ParentHostHwnd);
+        Assert.Equal(groundTruthB1, sessionB1.Host!.ParentHostHwnd);
+
+        // Sanity: pane runtime IDs must be distinct across sessions.
+        Assert.NotEqual(sessionA1.Host!.PaneRuntimeId, sessionA2.Host!.PaneRuntimeId);
+        Assert.NotEqual(sessionA2.Host!.PaneRuntimeId, sessionB1.Host!.PaneRuntimeId);
+        Assert.NotEqual(sessionA1.Host!.PaneRuntimeId, sessionB1.Host!.PaneRuntimeId);
+
+        // Click test: render the grid and click each session's link, asserting the
+        // correct wt window's correct tab is selected. Uses the per-session ground truth
+        // hwnd so we verify focus actually crosses between wt windows when needed.
+        var sessions = SessionService.LoadNamedSessions(
+                Program.SessionStateDir,
+                Program.PidRegistryFile,
+                Program.SessionStateFile,
+                Program.SessionAliasFile,
+                Program.SessionNameOverrideFile)
+            .Where(s => allSessions.Any(a => a.SessionId == s.Id))
+            .ToList();
+        Assert.Equal(3, sessions.Count);
+
+        using var hookService = new WindowEventHookService();
+        hookService.WindowCreated += hwnd =>
+        {
+            tracker.OnWindowCreated(hwnd);
+            var title = WindowFocusService.GetWindowTitle(hwnd);
+            if (!string.IsNullOrEmpty(title))
+            {
+                tracker.OnWindowTitleChanged(hwnd, title, ActiveStatusTracker.BuildSessionSummaryMap(sessions));
+            }
+        };
+        hookService.WindowDestroyed += hwnd =>
+        {
+            tracker.HandleWindowDestroyed(hwnd);
+            tracker.OnWindowDestroyed(hwnd);
+        };
+        hookService.WindowTitleChanged += (hwnd, title) =>
+        {
+            tracker.HandleWindowNameChanged(hwnd);
+            tracker.OnWindowTitleChanged(hwnd, title, ActiveStatusTracker.BuildSessionSummaryMap(sessions));
+        };
+        hookService.ForegroundChanged += hwnd =>
+        {
+            tracker.OnWindowCreated(hwnd);
+            var title = WindowFocusService.GetWindowTitle(hwnd);
+            if (!string.IsNullOrEmpty(title))
+            {
+                tracker.OnWindowTitleChanged(hwnd, title, ActiveStatusTracker.BuildSessionSummaryMap(sessions));
+            }
+        };
+        hookService.Start();
+
+        var snapshot = tracker.IncrementalRefresh(sessions);
+        using var gridHost = new Form
+        {
+            Width = 820,
+            Height = 280,
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(20, 20)
+        };
+        var grid = CreateGrid();
+        grid.Dock = DockStyle.Fill;
+        gridHost.Controls.Add(grid);
+        var visuals = new SessionGridVisuals(grid, tracker, CreateTestSettings());
+        visuals.Populate(sessions, snapshot, searchQuery: null);
+        gridHost.Show();
+        Application.DoEvents();
+
+        var prevSettings = Program._settings;
+        Program._settings = CreateTestSettings();
+        try
+        {
+            AssertClickFocusesCorrectTab(grid, paneGateway, groundTruthA1, sessionA1);
+            AssertClickFocusesCorrectTab(grid, paneGateway, groundTruthA2, sessionA2);
+            AssertClickFocusesCorrectTab(grid, paneGateway, groundTruthB1, sessionB1);
+            // Click back across the wt-A → wt-B boundary to ensure focus crosses windows
+            // (the bug presents most clearly when one wt is foreground and the click
+            // should bring the OTHER wt to the front and select its tab).
+            AssertClickFocusesCorrectTab(grid, paneGateway, groundTruthA1, sessionA1);
+        }
+        finally
+        {
+            Program._settings = prevSettings;
+        }
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Spawns a fresh wt.exe window via <c>-w new</c>, waits for its first tab's UIA pane
+    /// to register, then opens a SECOND empty tab via Ctrl+Shift+T. Does NOT type any
+    /// commands. Returns the new wt window's hwnd. Use when the test needs to stand up
+    /// MULTIPLE wt windows before any typing — opening more wt windows AFTER typing
+    /// races SendKeys delivery against the foreground change the new window triggers.
+    /// </summary>
+    private static IntPtr OpenFreshWtWithExtraTab(WindowsTerminalPaneGateway gateway, out Process? launcher)
+    {
+        var existingWtHwnds = EnumerateWindowsTerminalHwnds().ToHashSet();
+
+        launcher = Process.Start(new ProcessStartInfo
+        {
+            FileName = "wt.exe",
+            Arguments = "-w new",
+            UseShellExecute = false,
+            CreateNoWindow = false
+        });
+
+        IntPtr wtHwnd = IntPtr.Zero;
+        WaitUntil(
+            () =>
+            {
+                foreach (var hwnd in EnumerateWindowsTerminalHwnds())
+                {
+                    if (!existingWtHwnds.Contains(hwnd))
+                    {
+                        wtHwnd = hwnd;
+                        return true;
+                    }
+                }
+                return false;
+            },
+            20_000,
+            "Newly-spawned wt.exe window did not appear within 20s.");
+
+        WaitUntil(
+            () => gateway.EnumeratePanes(wtHwnd).Panes.Count >= 1,
+            15_000,
+            "wt.exe first tab's UIA pane did not appear within 15s.");
+        Thread.Sleep(1_500);
+
+        ForceForeground(wtHwnd);
+        Thread.Sleep(250);
+        SendKeys.SendWait("^+t");
+
+        WaitUntil(
+            () => gateway.EnumeratePanes(wtHwnd).Panes.Count >= 2,
+            15_000,
+            "wt.exe second tab did not appear within 15s after Ctrl+Shift+T.");
+        Thread.Sleep(1_500);
+
+        return wtHwnd;
+    }
+
+    /// <summary>
+    /// Spawns a fresh wt.exe window via <c>-w new</c>, waits for its single default tab's
+    /// UIA pane to register. Does NOT type any commands. Returns the new wt hwnd.
+    /// </summary>
+    private static IntPtr OpenFreshWtWithSingleTab(WindowsTerminalPaneGateway gateway, out Process? launcher)
+    {
+        var existingWtHwnds = EnumerateWindowsTerminalHwnds().ToHashSet();
+
+        launcher = Process.Start(new ProcessStartInfo
+        {
+            FileName = "wt.exe",
+            Arguments = "-w new",
+            UseShellExecute = false,
+            CreateNoWindow = false
+        });
+
+        IntPtr wtHwnd = IntPtr.Zero;
+        WaitUntil(
+            () =>
+            {
+                foreach (var hwnd in EnumerateWindowsTerminalHwnds())
+                {
+                    if (!existingWtHwnds.Contains(hwnd))
+                    {
+                        wtHwnd = hwnd;
+                        return true;
+                    }
+                }
+                return false;
+            },
+            20_000,
+            "Second wt.exe window did not appear within 20s.");
+
+        WaitUntil(
+            () => gateway.EnumeratePanes(wtHwnd).Panes.Count >= 1,
+            15_000,
+            "Second wt.exe window's first tab did not register a UIA pane within 15s.");
+        Thread.Sleep(1_500);
+
+        return wtHwnd;
+    }
+
+    /// <summary>
+    /// Bullet-proof foreground switch for IT use. <see cref="WindowFocusService.TryFocusWindowHandle"/>
+    /// returns true unconditionally, but the underlying SetForegroundWindow silently fails
+    /// when the calling process doesn't own the foreground (e.g. just after another wt
+    /// window spawned). The canonical fix: AttachThreadInput so the OS treats us as
+    /// "owning" the source thread, then SetForegroundWindow is allowed. After detaching
+    /// we verify GetForegroundWindow() == hwnd and retry up to N times if not.
+    /// </summary>
+    private static void ForceForeground(IntPtr hwnd, int retries = 8)
+    {
+        for (int attempt = 0; attempt < retries; attempt++)
+        {
+            uint thisThread = GetCurrentThreadId();
+            uint targetThread = GetWindowThreadProcessId(hwnd, out _);
+            uint fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+
+            bool attachedFg = false;
+            bool attachedTarget = false;
+            try
+            {
+                if (fgThread != 0 && thisThread != fgThread)
+                {
+                    attachedFg = AttachThreadInput(thisThread, fgThread, true);
+                }
+                if (targetThread != 0 && thisThread != targetThread && targetThread != fgThread)
+                {
+                    attachedTarget = AttachThreadInput(thisThread, targetThread, true);
+                }
+
+                ShowWindow(hwnd, SW_RESTORE);
+                BringWindowToTop(hwnd);
+
+                // Alt-key trick still helps when AttachThreadInput is partially blocked.
+                keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY, UIntPtr.Zero);
+                keybd_event(VK_MENU, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+                SetForegroundWindow(hwnd);
+            }
+            finally
+            {
+                if (attachedTarget)
+                {
+                    AttachThreadInput(thisThread, targetThread, false);
+                }
+                if (attachedFg)
+                {
+                    AttachThreadInput(thisThread, fgThread, false);
+                }
+            }
+
+            Thread.Sleep(150);
+            if (GetForegroundWindow() == hwnd)
+            {
+                return;
+            }
+        }
+
+        Assert.Fail(
+            $"ForceForeground failed after {retries} attempts. Target hwnd=0x{hwnd.ToInt64():X}, "
+            + $"foreground hwnd=0x{GetForegroundWindow().ToInt64():X} ('{WindowFocusService.GetWindowTitle(GetForegroundWindow())}'). "
+            + "SetForegroundWindow was likely blocked by Windows foreground lock — the test runner process "
+            + "doesn't own the foreground, AttachThreadInput workaround did not take effect.");
     }
 
     private sealed class RealCopilotSession
