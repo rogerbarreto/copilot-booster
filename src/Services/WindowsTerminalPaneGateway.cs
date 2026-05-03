@@ -46,7 +46,7 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 var hwnd = current.NativeWindowHandle == 0 ? IntPtr.Zero : new IntPtr(current.NativeWindowHandle);
                 var select = CreateSelectAction(tabItem);
                 var isSelected = IsSelected(tabItem);
-                panes.Add(new WindowsTerminalPaneInfo(name, hwnd, current.ProcessId, isSelected, select));
+                panes.Add(new WindowsTerminalPaneInfo(name, hwnd, current.ProcessId, isSelected, select, GetRuntimeId(tabItem)));
             }
 
             return new WindowsTerminalPaneEnumeration(panes, isPartial);
@@ -61,9 +61,78 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
         }
     }
 
+    public bool FocusPane(IntPtr wtHwnd, string paneRuntimeId)
+    {
+        if (string.IsNullOrWhiteSpace(paneRuntimeId))
+        {
+            return false;
+        }
+
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var rootElement = AutomationElement.FromHandle(wtHwnd);
+            if (rootElement == null)
+            {
+                return false;
+            }
+
+            var condition = new PropertyCondition(
+                AutomationElement.ControlTypeProperty,
+                ControlType.TabItem);
+            var tabItems = rootElement.FindAll(TreeScope.Descendants, condition);
+            if (tabItems == null || tabItems.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (AutomationElement tabItem in tabItems)
+            {
+                if (sw.ElapsedMilliseconds > 250)
+                {
+                    return false;
+                }
+
+                if (string.Equals(GetRuntimeId(tabItem), paneRuntimeId, StringComparison.Ordinal))
+                {
+                    return TrySelect(tabItem);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogInformation(
+                "Windows Terminal pane focus failed for hwnd {Hwnd}, runtime id {RuntimeId}: {Error}",
+                wtHwnd,
+                paneRuntimeId,
+                ex.Message);
+        }
+
+        return false;
+    }
+
     public IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd)
     {
         return this.EnumeratePanes(wtHwnd).Panes.Select(pane => (pane.Name, pane.Select)).ToList();
+    }
+
+    private static string? GetRuntimeId(AutomationElement element)
+    {
+        try
+        {
+            var runtimeId = element.GetRuntimeId();
+            return runtimeId == null || runtimeId.Length == 0
+                ? null
+                : string.Join(".", runtimeId);
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return null;
     }
 
     private static bool IsSelected(AutomationElement tabItem)
@@ -87,36 +156,41 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
 
     private static Action CreateSelectAction(AutomationElement tabItem)
     {
-        return () =>
-        {
-            try
-            {
-                if (tabItem.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object? selectionPattern))
-                {
-                    ((SelectionItemPattern)selectionPattern).Select();
-                    return;
-                }
-            }
-            catch (ElementNotAvailableException)
-            {
-            }
-            catch (InvalidOperationException)
-            {
-            }
+        return () => TrySelect(tabItem);
+    }
 
-            try
+    private static bool TrySelect(AutomationElement tabItem)
+    {
+        try
+        {
+            if (tabItem.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object? selectionPattern))
             {
-                if (tabItem.TryGetCurrentPattern(InvokePattern.Pattern, out object? invokePattern))
-                {
-                    ((InvokePattern)invokePattern).Invoke();
-                }
+                ((SelectionItemPattern)selectionPattern).Select();
+                return true;
             }
-            catch (ElementNotAvailableException)
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        try
+        {
+            if (tabItem.TryGetCurrentPattern(InvokePattern.Pattern, out object? invokePattern))
             {
+                ((InvokePattern)invokePattern).Invoke();
+                return true;
             }
-            catch (InvalidOperationException)
-            {
-            }
-        };
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return false;
     }
 }

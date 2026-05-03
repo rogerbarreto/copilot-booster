@@ -6,7 +6,7 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon>copilot.ico</ApplicationIcon>
     <AssemblyName>CopilotBooster</AssemblyName>
-    <Version>0.21.0</Version>
+    <Version>0.21.1</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <Nullable>enable</Nullable>

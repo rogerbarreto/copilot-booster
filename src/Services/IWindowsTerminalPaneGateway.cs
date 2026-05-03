@@ -9,7 +9,8 @@ internal sealed record WindowsTerminalPaneInfo(
     IntPtr Hwnd,
     int ProcessId,
     bool IsSelected,
-    Action Select);
+    Action Select,
+    string? RuntimeId = null);
 
 internal sealed record WindowsTerminalPaneEnumeration(
     IReadOnlyList<WindowsTerminalPaneInfo> Panes,
@@ -34,6 +35,11 @@ internal interface IWindowsTerminalPaneGateway
             .ToList();
         return new WindowsTerminalPaneEnumeration(panes, IsPartial: false);
     }
+
+    /// <summary>
+    /// Selects a known Windows Terminal pane/tab by UIA runtime id.
+    /// </summary>
+    bool FocusPane(IntPtr wtHwnd, string paneRuntimeId);
 
     /// <summary>
     /// Enumerates all selectable tab items in the WT window identified by <paramref name="wtHwnd"/>.

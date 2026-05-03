@@ -4,35 +4,41 @@ using System.Linq;
 
 namespace CopilotBooster.Services;
 
-internal readonly record struct WindowsTerminalPaneCacheKey(long WtWindowHwnd, int CopilotPid);
+internal readonly record struct WindowsTerminalPaneCacheKey(long WtWindowHwnd, string PaneRuntimeId);
 
 internal sealed record WindowsTerminalPaneCacheEntry(
     IntPtr WtWindowHwnd,
     int CopilotPid,
     IntPtr PaneHwnd,
-    string PaneTitle);
+    string PaneTitle,
+    string PaneRuntimeId);
 
 internal sealed class WindowsTerminalPaneCacheService
 {
     private readonly Dictionary<WindowsTerminalPaneCacheKey, WindowsTerminalPaneCacheEntry> _entries = [];
 
-    internal bool TryGet(IntPtr wtWindowHwnd, int copilotPid, out WindowsTerminalPaneCacheEntry entry)
+    internal bool TryGet(IntPtr wtWindowHwnd, string paneRuntimeId, out WindowsTerminalPaneCacheEntry entry)
     {
-        var key = new WindowsTerminalPaneCacheKey(wtWindowHwnd.ToInt64(), copilotPid);
+        var key = new WindowsTerminalPaneCacheKey(wtWindowHwnd.ToInt64(), paneRuntimeId);
         if (this._entries.TryGetValue(key, out var cached))
         {
             entry = cached;
             return true;
         }
 
-        entry = new WindowsTerminalPaneCacheEntry(IntPtr.Zero, 0, IntPtr.Zero, string.Empty);
+        entry = new WindowsTerminalPaneCacheEntry(IntPtr.Zero, 0, IntPtr.Zero, string.Empty, string.Empty);
         return false;
     }
 
-    internal void Set(IntPtr wtWindowHwnd, int copilotPid, IntPtr paneHwnd, string paneTitle)
+    internal void Set(IntPtr wtWindowHwnd, int copilotPid, IntPtr paneHwnd, string paneTitle, string? paneRuntimeId)
     {
-        var key = new WindowsTerminalPaneCacheKey(wtWindowHwnd.ToInt64(), copilotPid);
-        this._entries[key] = new WindowsTerminalPaneCacheEntry(wtWindowHwnd, copilotPid, paneHwnd, paneTitle);
+        if (string.IsNullOrWhiteSpace(paneRuntimeId))
+        {
+            return;
+        }
+
+        var key = new WindowsTerminalPaneCacheKey(wtWindowHwnd.ToInt64(), paneRuntimeId);
+        this._entries[key] = new WindowsTerminalPaneCacheEntry(wtWindowHwnd, copilotPid, paneHwnd, paneTitle, paneRuntimeId);
     }
 
     internal void InvalidateForTerminalWindow(IntPtr wtWindowHwnd)

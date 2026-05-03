@@ -130,8 +130,13 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             Assert.Equal("Windows Terminal", probe.Host!.HostKindLabel);
             Assert.NotEqual(IntPtr.Zero, GetWindowsTerminalHwnd(probe.Host));
             Assert.Contains(probe.Label, probe.Host.PaneTitle ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.False(string.IsNullOrWhiteSpace(probe.Host.PaneRuntimeId));
             this._wtWindowHwnds.Add(GetWindowsTerminalHwnd(probe.Host));
         }
+
+        Assert.Equal(
+            probes.Length,
+            probes.Select(probe => probe.Host!.PaneRuntimeId).Distinct(StringComparer.Ordinal).Count());
 
         var sessions = LoadProbeSessions(probes);
         Assert.Equal(probes.Length, sessions.Count);
@@ -154,6 +159,11 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             Assert.Equal(probe.Label, row.Cells["Session"].Value?.ToString());
             Assert.Contains("Copilot CLI", row.Cells["RunningApps"].Value?.ToString() ?? string.Empty);
         }
+
+        Assert.Equal(
+            probes.Length,
+            grid.Rows.Cast<DataGridViewRow>().Count(row =>
+                (row.Cells["RunningApps"].Value?.ToString() ?? string.Empty).Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase)));
 
         var paneGateway = new WindowsTerminalPaneGateway();
         foreach (var probe in probes)
@@ -265,7 +275,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
 
         for (int i = 1; i < probes.Count; i++)
         {
-            commands.Add($"split-pane --title \"{probes[i].Label}\" --suppressApplicationTitle powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{probes[i].ScriptPath}\"");
+            commands.Add($"new-tab --title \"{probes[i].Label}\" --suppressApplicationTitle powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File \"{probes[i].ScriptPath}\"");
         }
 
         var windowName = $"cb-it-{Guid.NewGuid():N}";

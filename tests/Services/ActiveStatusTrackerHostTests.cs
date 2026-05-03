@@ -255,6 +255,96 @@ public sealed class ActiveStatusTrackerHostTests
         Assert.Null(tracker.GetCopilotHost(sessionId));
     }
 
+    [Fact]
+    public void OnWindowTitleChanged_WindowsTerminalSameParentHwnd_KeepsBothCopilotHostsActive()
+    {
+        var firstSessionId = "session-run-tests";
+        var secondSessionId = "session-run-test-2";
+        var parentHwnd = new IntPtr(0xAAA);
+        var tree = new FakeProcessTree()
+            .Add(1000, 900, "copilot", IntPtr.Zero)
+            .Add(1001, 900, "copilot", IntPtr.Zero)
+            .Add(900, null, "WindowsTerminal", parentHwnd);
+        var gateway = new FakeWindowsTerminalPaneGateway([
+            new WindowsTerminalPaneInfo($"Run Tests - {firstSessionId}", IntPtr.Zero, 900, false, () => { }, "runtime-1"),
+            new WindowsTerminalPaneInfo($"Run Test 2 - {secondSessionId}", IntPtr.Zero, 900, true, () => { }, "runtime-2")
+        ]);
+        var tracker = CreateTracker(tree, gateway);
+        tracker.HandleInternalCopilotPidRegistered(firstSessionId, 1000);
+        tracker.HandleInternalCopilotPidRegistered(secondSessionId, 1001);
+
+        var firstHost = tracker.GetCopilotHost(firstSessionId);
+        var secondHost = tracker.GetCopilotHost(secondSessionId);
+        Assert.NotNull(firstHost);
+        Assert.NotNull(secondHost);
+        Assert.Equal(parentHwnd, firstHost!.HostHwnd);
+        Assert.Equal(parentHwnd, secondHost!.HostHwnd);
+        Assert.Equal("runtime-1", firstHost.PaneRuntimeId);
+        Assert.Equal("runtime-2", secondHost.PaneRuntimeId);
+        Assert.Contains("Copilot CLI", tracker.BuildActiveText(firstSessionId));
+        Assert.Contains("Copilot CLI", tracker.BuildActiveText(secondSessionId));
+
+        tracker.OnWindowTitleChanged(
+            parentHwnd,
+            "Run Test 2",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Run Tests"] = firstSessionId,
+                ["Run Test 2"] = secondSessionId
+            });
+
+        Assert.Contains("Copilot CLI", tracker.BuildActiveText(firstSessionId));
+        Assert.Contains("Copilot CLI", tracker.BuildActiveText(secondSessionId));
+    }
+
+    [Fact]
+    public void FocusActiveProcess_WindowsTerminalHostWithRuntimeId_FocusesPaneBeforeParentWindow()
+    {
+        var sessionId = "session-run-test-2";
+        var parentHwnd = new IntPtr(0xAAA);
+        var expectedHwnd = parentHwnd.ToInt64().ToString("X");
+        var calls = new List<string>();
+        var tree = new FakeProcessTree()
+            .Add(1001, 900, "copilot", IntPtr.Zero)
+            .Add(900, null, "WindowsTerminal", parentHwnd);
+        var gateway = new FakeWindowsTerminalPaneGateway([])
+        {
+            OnFocusPane = (hwnd, runtimeId) => calls.Add($"pane:{hwnd.ToInt64():X}:{runtimeId}")
+        };
+        var tracker = new ActiveStatusTracker(
+            new CopilotHostResolver(tree, ownPid: 0),
+            gateway,
+            new WindowsTerminalPaneCacheService(),
+            hwnd =>
+            {
+                calls.Add($"foreground:{hwnd.ToInt64():X}");
+                return true;
+            },
+            _ => true);
+        var hostInfo = new CopilotHostInfo(
+            parentHwnd,
+            900,
+            1001,
+            "WindowsTerminal",
+            "Windows Terminal",
+            ParentHostHwnd: parentHwnd,
+            PaneRuntimeId: "runtime-2");
+        tracker.SetCopilotHost(sessionId, hostInfo);
+        var previousSettings = Program._settings;
+        Program._settings = LauncherSettings.CreateDefault();
+
+        try
+        {
+            tracker.FocusActiveProcess(sessionId, clickedLineIndex: 0);
+        }
+        finally
+        {
+            Program._settings = previousSettings;
+        }
+
+        Assert.Equal([$"pane:{expectedHwnd}:runtime-2", $"foreground:{expectedHwnd}"], calls);
+    }
+
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
     {
         return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());
@@ -289,6 +379,13 @@ public sealed class ActiveStatusTrackerHostTests
         }
 
         internal int EnumerateCount { get; private set; }
+        internal Action<IntPtr, string>? OnFocusPane { get; init; }
+
+        public bool FocusPane(IntPtr wtHwnd, string paneRuntimeId)
+        {
+            this.OnFocusPane?.Invoke(wtHwnd, paneRuntimeId);
+            return true;
+        }
 
         public WindowsTerminalPaneEnumeration EnumeratePanes(IntPtr wtHwnd)
         {

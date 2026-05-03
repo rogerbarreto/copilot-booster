@@ -15,4 +15,5 @@ internal record CopilotHostInfo(
     string HostProcessName,
     string HostKindLabel,
     IntPtr ParentHostHwnd = default,
-    string? PaneTitle = null);
+    string? PaneTitle = null,
+    string? PaneRuntimeId = null);

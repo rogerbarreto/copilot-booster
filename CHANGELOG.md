@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.1] - 2026-05-03
+
+### Fixed
+
+- **Windows Terminal multi-tab discovery** — Copilot sessions in separate WT tabs that share one parent `wt.exe` HWND now remain independently active in the booster grid by carrying the UIA pane runtime id alongside the parent HWND.
+- **Windows Terminal tab focus** — clicking a WT-hosted Copilot CLI link now selects the cached UIA tab item with `SelectionItemPattern.Select()` / `InvokePattern.Invoke()` before foregrounding the WT parent window.
+
 ## [0.21.0] - 2026-05-03
 
 ### Added
