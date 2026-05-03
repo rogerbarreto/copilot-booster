@@ -114,5 +114,9 @@ public sealed class InternalSessionHostResolutionIntegrationTests : IDisposable
         public int? GetParentPid(int pid) => this._parents.TryGetValue(pid, out var p) ? p : null;
         public string? GetProcessName(int pid) => this._names.TryGetValue(pid, out var n) ? n : null;
         public IntPtr GetTopLevelWindow(int pid) => this._windows.TryGetValue(pid, out var w) ? w : IntPtr.Zero;
+        public IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid) =>
+            this._windows.TryGetValue(pid, out var w) && w != IntPtr.Zero
+                ? new[] { w }
+                : Array.Empty<IntPtr>();
     }
 }

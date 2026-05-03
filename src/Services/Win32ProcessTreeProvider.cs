@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -88,5 +89,10 @@ internal sealed class Win32ProcessTreeProvider : IProcessTreeProvider
     public IntPtr GetTopLevelWindow(int pid)
     {
         return WindowFocusService.FindWindowHandleByPid(pid);
+    }
+
+    public IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid)
+    {
+        return WindowFocusService.EnumerateWindowHandlesByPid(pid);
     }
 }

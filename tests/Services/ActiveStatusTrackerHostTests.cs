@@ -406,6 +406,10 @@ public sealed class ActiveStatusTrackerHostTests
         public int? GetParentPid(int pid) => this._parents.TryGetValue(pid, out var parent) ? parent : null;
         public string? GetProcessName(int pid) => this._names.TryGetValue(pid, out var name) ? name : null;
         public IntPtr GetTopLevelWindow(int pid) => this._windows.TryGetValue(pid, out var hwnd) ? hwnd : IntPtr.Zero;
+        public IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid) =>
+            this._windows.TryGetValue(pid, out var hwnd) && hwnd != IntPtr.Zero
+                ? new[] { hwnd }
+                : Array.Empty<IntPtr>();
     }
 
     private sealed class FakeWindowsTerminalPaneGateway : IWindowsTerminalPaneGateway

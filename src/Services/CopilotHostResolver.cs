@@ -16,7 +16,8 @@ internal sealed record WindowsTerminalHostContext(
     int HostPid,
     int PaneRootPid,
     string HostProcessName,
-    string HostKindLabel);
+    string HostKindLabel,
+    IReadOnlyList<IntPtr> CandidateHostHwnds);
 
 internal sealed class CopilotHostResolver
 {
@@ -38,6 +39,19 @@ internal sealed class CopilotHostResolver
     {
         this._provider = provider;
         this._ownPid = ownPid;
+    }
+
+    /// <summary>
+    /// Three-arg overload retained for unit tests that exercised the multi-wt-window
+    /// disambiguation through this resolver. The gateway argument is currently ignored
+    /// — disambiguation lives in <see cref="ActiveStatusTracker.ResolveCopilotHost"/>
+    /// where session terms are also available — but kept on the surface to avoid
+    /// breaking callers that stub it.
+    /// </summary>
+    internal CopilotHostResolver(IProcessTreeProvider provider, IWindowsTerminalPaneGateway? paneGateway, int ownPid)
+        : this(provider, ownPid)
+    {
+        _ = paneGateway;
     }
 
     /// <summary>
@@ -106,25 +120,33 @@ internal sealed class CopilotHostResolver
 
                 if (IsWindowsTerminalProcess(ancestor.ProcessName))
                 {
-                    var hwnd = this._provider.GetTopLevelWindow(ancestor.Pid);
-                    if (hwnd == IntPtr.Zero)
+                    var candidates = this._provider.EnumerateTopLevelWindows(ancestor.Pid);
+                    if (candidates.Count == 0)
+                    {
+                        // Older fakes that don't override EnumerateTopLevelWindows: fall back to GetTopLevelWindow.
+                        var single = this._provider.GetTopLevelWindow(ancestor.Pid);
+                        candidates = single == IntPtr.Zero ? Array.Empty<IntPtr>() : [single];
+                    }
+
+                    if (candidates.Count == 0)
                     {
                         RuntimeDiagnosticLog.Write("WT parent-chain copilotPid={0} reached WT pid={1} with no hwnd", copilotPid, ancestor.Pid);
                         return null;
                     }
 
                     RuntimeDiagnosticLog.Write(
-                        "WT context copilotPid={0} wtPid={1} paneRootPid={2} hwnd={3}",
+                        "WT context copilotPid={0} wtPid={1} paneRootPid={2} candidateHwnds=[{3}]",
                         copilotPid,
                         ancestor.Pid,
                         paneRootPid,
-                        hwnd);
+                        string.Join(",", candidates));
                     return new WindowsTerminalHostContext(
-                        hwnd,
+                        candidates[0],
                         ancestor.Pid,
                         paneRootPid,
                         ancestor.ProcessName,
-                        HostKindClassifier.Classify(ancestor.ProcessName));
+                        HostKindClassifier.Classify(ancestor.ProcessName),
+                        candidates);
                 }
 
                 paneRootPid = ancestor.Pid;

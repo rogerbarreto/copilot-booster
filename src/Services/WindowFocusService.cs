@@ -127,6 +127,36 @@ internal static partial class WindowFocusService
     }
 
     /// <summary>
+    /// Enumerates ALL visible top-level window handles owned by <paramref name="processId"/>
+    /// in <c>EnumWindows</c> order. Required for processes hosting multiple top-level
+    /// windows under a single PID (e.g. the Sun Valley <c>WindowsTerminal.exe</c> monarch:
+    /// one PID, N wt window hwnds).
+    /// </summary>
+    internal static IReadOnlyList<IntPtr> EnumerateWindowHandlesByPid(int processId)
+    {
+        uint targetPid = (uint)processId;
+        var matches = new List<IntPtr>();
+
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd))
+            {
+                return true;
+            }
+
+            GetWindowThreadProcessId(hwnd, out uint windowPid);
+            if (windowPid == targetPid)
+            {
+                matches.Add(hwnd);
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return matches;
+    }
+
+    /// <summary>
     /// Gets the process ID that owns the specified window handle.
     /// </summary>
     /// <param name="hwnd">The window handle.</param>

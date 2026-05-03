@@ -306,15 +306,7 @@ internal class ActiveStatusTracker
         var wtContext = this._hostResolver.ResolveWindowsTerminalContext(copilotPid);
         if (wtContext != null)
         {
-            var wtInfo = new CopilotHostInfo(
-                wtContext.HostHwnd,
-                wtContext.HostPid,
-                copilotPid,
-                wtContext.HostProcessName,
-                wtContext.HostKindLabel,
-                wtContext.HostHwnd,
-                PaneRootProcessId: wtContext.PaneRootPid);
-            return this.ResolveWindowsTerminalPane(sessionId, wtInfo, sessionSummary, wtContext.PaneRootPid);
+            return this.ResolveWindowsTerminalAcrossCandidates(sessionId, copilotPid, sessionSummary, wtContext);
         }
 
         if (info == null)
@@ -325,6 +317,77 @@ internal class ActiveStatusTracker
         return IsWindowsTerminalHost(info)
             ? this.ResolveWindowsTerminalPane(sessionId, info, sessionSummary, paneRootPid: null)
             : info;
+    }
+
+    /// <summary>
+    /// Picks the right wt window hwnd from <paramref name="wtContext"/>'s candidates by
+    /// asking the pane gateway which window's pane tree physically owns the copilot
+    /// session. Single-candidate path (the dominant case) collapses to the legacy
+    /// behaviour. Multi-candidate path: try each hwnd via <see cref="ResolveWindowsTerminalPane"/>;
+    /// keep the first one that produces a non-fallback pane match (real pane title /
+    /// runtime id / pane-root pid). If none match, return the result for the first
+    /// candidate so we still produce a host info (better than dropping the session).
+    /// </summary>
+    private CopilotHostInfo ResolveWindowsTerminalAcrossCandidates(
+        string sessionId,
+        int copilotPid,
+        string? sessionSummary,
+        WindowsTerminalHostContext wtContext)
+    {
+        var candidates = wtContext.CandidateHostHwnds;
+        if (candidates == null || candidates.Count == 0)
+        {
+            candidates = [wtContext.HostHwnd];
+        }
+
+        CopilotHostInfo? firstAttempt = null;
+        foreach (var candidateHwnd in candidates)
+        {
+            var wtInfo = new CopilotHostInfo(
+                candidateHwnd,
+                wtContext.HostPid,
+                copilotPid,
+                wtContext.HostProcessName,
+                wtContext.HostKindLabel,
+                candidateHwnd,
+                PaneRootProcessId: wtContext.PaneRootPid);
+            var resolved = this.ResolveWindowsTerminalPane(sessionId, wtInfo, sessionSummary, wtContext.PaneRootPid);
+
+            if (IsRealPaneMatch(resolved))
+            {
+                if (candidates.Count > 1)
+                {
+                    RuntimeDiagnosticLog.Write(
+                        "WT multi-hwnd disambiguated session={0} copilotPid={1} wtPid={2} chosenHwnd={3} candidates=[{4}]",
+                        sessionId,
+                        copilotPid,
+                        wtContext.HostPid,
+                        candidateHwnd,
+                        string.Join(",", candidates));
+                }
+                return resolved;
+            }
+
+            firstAttempt ??= resolved;
+        }
+
+        RuntimeDiagnosticLog.Write(
+            "WT multi-hwnd no pane match session={0} copilotPid={1} wtPid={2} candidates=[{3}] fallback={4}",
+            sessionId,
+            copilotPid,
+            wtContext.HostPid,
+            string.Join(",", candidates),
+            candidates[0]);
+        return firstAttempt!;
+    }
+
+    private static bool IsRealPaneMatch(CopilotHostInfo info)
+    {
+        // ResolveWindowsTerminalPane returns the wtWindowHwnd as both HostHwnd and
+        // ParentHostHwnd when no pane matched (the fallback path); a real pane match
+        // populates PaneRuntimeId AND/OR PaneTitle from the gateway.
+        return !string.IsNullOrEmpty(info.PaneRuntimeId)
+            || !string.IsNullOrEmpty(info.PaneTitle);
     }
 
     private CopilotHostInfo ResolveWindowsTerminalPane(string sessionId, CopilotHostInfo info, string? sessionSummary, int? paneRootPid)
@@ -387,15 +450,7 @@ internal class ActiveStatusTracker
         var liveWtContext = this._hostResolver.ResolveWindowsTerminalContext(hostInfo.CopilotPid);
         if (liveWtContext != null)
         {
-            var wtBase = new CopilotHostInfo(
-                liveWtContext.HostHwnd,
-                liveWtContext.HostPid,
-                hostInfo.CopilotPid,
-                liveWtContext.HostProcessName,
-                liveWtContext.HostKindLabel,
-                liveWtContext.HostHwnd,
-                PaneRootProcessId: liveWtContext.PaneRootPid);
-            var liveWt = this.ResolveWindowsTerminalPane(sessionId, wtBase, sessionSummary: null, liveWtContext.PaneRootPid);
+            var liveWt = this.ResolveWindowsTerminalAcrossCandidates(sessionId, hostInfo.CopilotPid, sessionSummary: null, liveWtContext);
             RuntimeDiagnosticLog.Write(
                 "FocusCopilotHost live-wt re-resolve session={0} copilotPid={1} prevHostKind={2} wtHwnd={3} runtimeId={4}",
                 sessionId,

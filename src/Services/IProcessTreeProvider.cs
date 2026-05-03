@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace CopilotBooster.Services;
 
@@ -22,4 +23,12 @@ internal interface IProcessTreeProvider
     /// "Focusable" = top-level, visible, not WS_EX_TOOLWINDOW. Same heuristic as <see cref="WindowFocusService.FindWindowHandleByPid"/>.
     /// </summary>
     IntPtr GetTopLevelWindow(int pid);
+
+    /// <summary>
+    /// Returns ALL focusable top-level visible HWNDs owned by <paramref name="pid"/> in
+    /// <c>EnumWindows</c> order, or an empty list if none. Necessary for processes that
+    /// host multiple top-level windows under a single PID — most notably the Sun Valley
+    /// Windows Terminal monarch (one <c>WindowsTerminal.exe</c> hosts every wt window).
+    /// </summary>
+    IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid);
 }
