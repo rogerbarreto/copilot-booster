@@ -1,14 +1,18 @@
 ﻿using System;
 using System.Globalization;
 using System.IO;
-using System.Linq;
+using System.Text;
 
 namespace CopilotBooster.Services;
 
 internal static class RuntimeDiagnosticLog
 {
-    private const int MaxLines = 1000;
+    private const long MaxFileSizeBytes = 256 * 1024;
+    private const long TrimToBytes = 128 * 1024;
+
     private static readonly object s_lock = new();
+    private static int s_writesSinceTrim;
+    private static bool s_initialized;
 
     internal static string LogFile { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -20,17 +24,21 @@ internal static class RuntimeDiagnosticLog
     {
         try
         {
+            var line = string.Create(
+                CultureInfo.InvariantCulture,
+                $"[{DateTime.UtcNow:o}] [tid={Environment.CurrentManagedThreadId}] {message}{Environment.NewLine}");
+
             lock (s_lock)
             {
-                var directory = Path.GetDirectoryName(LogFile);
-                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
+                EnsureInitialized();
+                File.AppendAllText(LogFile, line, Encoding.UTF8);
 
-                var line = $"[{DateTime.UtcNow:o}] {message}";
-                File.AppendAllText(LogFile, line + Environment.NewLine);
-                TrimIfNeeded();
+                // Cheap amortized trim: only stat + maybe-trim every N writes.
+                if (++s_writesSinceTrim >= 256)
+                {
+                    s_writesSinceTrim = 0;
+                    TrimIfOversized();
+                }
             }
         }
         catch
@@ -43,20 +51,55 @@ internal static class RuntimeDiagnosticLog
         Write(string.Format(CultureInfo.InvariantCulture, format, args));
     }
 
-    private static void TrimIfNeeded()
+    private static void EnsureInitialized()
     {
-        if (!File.Exists(LogFile))
+        if (s_initialized)
         {
             return;
         }
 
-        var lines = File.ReadAllLines(LogFile);
-        if (lines.Length <= MaxLines)
+        var directory = Path.GetDirectoryName(LogFile);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
         {
-            return;
+            Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllLines(LogFile, lines.Skip(lines.Length - MaxLines));
+        TrimIfOversized();
+        s_initialized = true;
+    }
+
+    private static void TrimIfOversized()
+    {
+        try
+        {
+            if (!File.Exists(LogFile))
+            {
+                return;
+            }
+
+            var info = new FileInfo(LogFile);
+            if (info.Length <= MaxFileSizeBytes)
+            {
+                return;
+            }
+
+            // Read the tail (TrimToBytes) and rewrite. Aligned to a newline.
+            using var fs = new FileStream(LogFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var startOffset = Math.Max(0, fs.Length - TrimToBytes);
+            fs.Seek(startOffset, SeekOrigin.Begin);
+            using var reader = new StreamReader(fs, Encoding.UTF8);
+            // Drop possibly-partial first line.
+            if (startOffset > 0)
+            {
+                _ = reader.ReadLine();
+            }
+
+            var tail = reader.ReadToEnd();
+            File.WriteAllText(LogFile, tail, Encoding.UTF8);
+        }
+        catch
+        {
+        }
     }
 }
 

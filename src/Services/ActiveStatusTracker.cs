@@ -820,14 +820,6 @@ internal class ActiveStatusTracker
             parts.Add("Teams");
         }
 
-        RuntimeDiagnosticLog.Write(
-            "ActiveText session={0} liveHost={1} activeSession={2} tracked={3} result={4}",
-            sessionId,
-            hasLiveCopilotHost,
-            this._activeSessionIds.Contains(sessionId),
-            this._activeTrackedWindows.TryGetValue(sessionId, out var diagnosticTracked) ? diagnosticTracked.Count : 0,
-            string.Join("|", parts));
-
         return string.Join("\n", parts);
     }
 
@@ -887,7 +879,6 @@ internal class ActiveStatusTracker
     internal void FocusActiveProcess(string sessionId, int clickedLineIndex)
     {
         var focusTargets = new List<(string name, Action focus)>();
-
         // Priority 1: Add host-resolved Copilot CLI first if available and alive
         if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
         {
@@ -984,6 +975,13 @@ internal class ActiveStatusTracker
 
         // Directly focus the target matching the clicked line
         var index = Math.Min(clickedLineIndex, focusTargets.Count - 1);
+        RuntimeDiagnosticLog.Write(
+            "FocusActiveProcess session={0} clickedLine={1} pickedIndex={2} pickedLabel={3} targets=[{4}]",
+            sessionId,
+            clickedLineIndex,
+            index,
+            focusTargets[index].name,
+            string.Join("|", focusTargets.Select((t, i) => string.Create(CultureInfo.InvariantCulture, $"#{i}:{t.name}"))));
         focusTargets[index].focus();
     }
 
