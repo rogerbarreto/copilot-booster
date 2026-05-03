@@ -80,6 +80,7 @@ The **Running** column tracks running contexts across multiple environments:
 |---------|-------------------|
 | **Terminal** | Windows launched via "Open Terminal" are tracked by PID and cached across restarts |
 | **Copilot CLI** | Detected via `events.jsonl` content parsing — working (spinner) or idle (bell) |
+| **Copilot Host** | The host process that owns each Copilot session (Windows Terminal, conhost, IDE shells) is tracked so click-to-focus lands on the right window — even pane-precise inside `wt.exe` |
 | **IDE** | IDEs launched via the Open menu are tracked by window handle and cached across restarts |
 | **Edge** | Browser workspaces tracked via UI Automation anchor-tab detection |
 | **Explorer** | Explorer windows opened via context menu are tracked by HWND |

@@ -1037,6 +1037,12 @@ internal partial class MainForm : Form
                 this.HandleEdgeSaveSignalAsync(hwnd, title);
             }
 
+            var paneAffected = this._activeTracker.HandleWindowNameChanged(hwnd);
+            foreach (var id in paneAffected)
+            {
+                this.RequestRefresh(sessionId: id, trackingChanged: true);
+            }
+
             var affected = this._activeTracker.OnWindowTitleChanged(hwnd, title, this.BuildSessionSummaryMap());
             foreach (var id in affected)
             {

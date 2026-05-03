@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows.Automation;
 using Microsoft.Extensions.Logging;
 
@@ -8,17 +9,18 @@ namespace CopilotBooster.Services;
 
 internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
 {
-    public IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd)
+    public WindowsTerminalPaneEnumeration EnumeratePanes(IntPtr wtHwnd)
     {
         try
         {
             var sw = Stopwatch.StartNew();
-            var tabs = new List<(string Name, Action Select)>();
+            var panes = new List<WindowsTerminalPaneInfo>();
+            bool isPartial = false;
 
             var rootElement = AutomationElement.FromHandle(wtHwnd);
             if (rootElement == null)
             {
-                return Array.Empty<(string, Action)>();
+                return new WindowsTerminalPaneEnumeration(Array.Empty<WindowsTerminalPaneInfo>(), IsPartial: false);
             }
 
             var condition = new PropertyCondition(
@@ -28,22 +30,26 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
             var tabItems = rootElement.FindAll(TreeScope.Descendants, condition);
             if (tabItems == null || tabItems.Count == 0)
             {
-                return Array.Empty<(string, Action)>();
+                return new WindowsTerminalPaneEnumeration(Array.Empty<WindowsTerminalPaneInfo>(), IsPartial: false);
             }
 
             foreach (AutomationElement tabItem in tabItems)
             {
                 if (sw.ElapsedMilliseconds > 250)
                 {
+                    isPartial = true;
                     break;
                 }
 
-                var name = tabItem.Current.Name;
+                var current = tabItem.Current;
+                var name = current.Name;
+                var hwnd = current.NativeWindowHandle == 0 ? IntPtr.Zero : new IntPtr(current.NativeWindowHandle);
                 var select = CreateSelectAction(tabItem);
-                tabs.Add((name, select));
+                var isSelected = IsSelected(tabItem);
+                panes.Add(new WindowsTerminalPaneInfo(name, hwnd, current.ProcessId, isSelected, select));
             }
 
-            return tabs;
+            return new WindowsTerminalPaneEnumeration(panes, isPartial);
         }
         catch (Exception ex)
         {
@@ -51,8 +57,32 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 "UIA tab enumeration failed for hwnd {Hwnd}: {Error}",
                 wtHwnd,
                 ex.Message);
-            return Array.Empty<(string, Action)>();
+            return new WindowsTerminalPaneEnumeration(Array.Empty<WindowsTerminalPaneInfo>(), IsPartial: false);
         }
+    }
+
+    public IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd)
+    {
+        return this.EnumeratePanes(wtHwnd).Panes.Select(pane => (pane.Name, pane.Select)).ToList();
+    }
+
+    private static bool IsSelected(AutomationElement tabItem)
+    {
+        try
+        {
+            if (tabItem.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object? selectionPattern))
+            {
+                return ((SelectionItemPattern)selectionPattern).Current.IsSelected;
+            }
+        }
+        catch (ElementNotAvailableException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return false;
     }
 
     private static Action CreateSelectAction(AutomationElement tabItem)

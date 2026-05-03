@@ -1,7 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace CopilotBooster.Services;
+
+internal sealed record WindowsTerminalPaneInfo(
+    string Name,
+    IntPtr Hwnd,
+    int ProcessId,
+    bool IsSelected,
+    Action Select);
+
+internal sealed record WindowsTerminalPaneEnumeration(
+    IReadOnlyList<WindowsTerminalPaneInfo> Panes,
+    bool IsPartial);
 
 /// <summary>
 /// Abstraction over UIAutomation queries on a Windows Terminal window.
@@ -10,12 +22,22 @@ namespace CopilotBooster.Services;
 internal interface IWindowsTerminalPaneGateway
 {
     /// <summary>
+    /// Enumerates all selectable panes/tabs in the WT window identified by <paramref name="wtHwnd"/>.
+    /// Returns an empty list on error or if no panes are found. Implementations MUST honor the
+    /// time budget — completing within 250ms is a soft contract; long-running enumerations should
+    /// bail and return what they have so far with <see cref="WindowsTerminalPaneEnumeration.IsPartial"/> true.
+    /// </summary>
+    WindowsTerminalPaneEnumeration EnumeratePanes(IntPtr wtHwnd)
+    {
+        var panes = this.EnumerateTabs(wtHwnd)
+            .Select(tab => new WindowsTerminalPaneInfo(tab.Name, IntPtr.Zero, 0, false, tab.Select))
+            .ToList();
+        return new WindowsTerminalPaneEnumeration(panes, IsPartial: false);
+    }
+
+    /// <summary>
     /// Enumerates all selectable tab items in the WT window identified by <paramref name="wtHwnd"/>.
-    /// Each tuple carries the tab's display name and an Action that, when invoked, selects the tab
-    /// (UIA SelectionItemPattern.Select or InvokePattern.Invoke).
-    /// Returns an empty list on error or if no tabs are found.
-    /// Implementations MUST honor the time budget — completing within 250ms is a soft contract;
-    /// long-running enumerations should bail and return what they have so far.
+    /// Kept for compatibility with the Phase 4 UIA gateway contract.
     /// </summary>
     IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd);
 }

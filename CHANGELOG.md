@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.21.0] - 2026-05-03
+
+### Added
+
+- **Copilot Host discovery** — every Copilot session now tracks the host process that spawned it (Windows Terminal, conhost, third-party terminals, IDE-hosted shells). Click-to-focus migrates to the correct host window even when the Copilot CLI itself has no visible window of its own.
+- **Windows Terminal multi-pane focus** — when multiple Copilot sessions run in different panes of the same `wt.exe` window, clicking a session in the booster focuses the *exact* pane via UI Automation (`SelectionItemPattern` / `InvokePattern`), not just the parent window. Pane handles are cached per WT window with automatic invalidation on tab/pane structure changes.
+- **Deferred session naming** — sessions that first appear with a GUID-only name (typical for fresh externally-spawned sessions) are auto-renamed when their `events.jsonl` records the first user message. The resolved name flows through the same booster-resolved-name pipeline used by internally-launched sessions.
+- **External session host resolution** — sessions detected via the Copilot log watcher (`~/.copilot/logs/`) now resolve their host process at discovery time, not on first focus, eliminating the "click and nothing happens" first-time delay.
+- **Live `wt.exe` multi-pane integration test** — local-only test that spins up Windows Terminal with multiple Copilot panes (each tagged via `copilot --deny-url=<guid>`), validates that the booster shows them as distinct sessions with the correct booster-resolved names, and verifies pane-precise focus dispatch.
+
+### Changed
+
+- **`workspace.yaml.summary` no longer holds GUIDs** — externally-discovered sessions write an empty summary on creation; the booster-resolved name is computed from `events.jsonl` content and stored as a sidecar (ADR-0001 compliance). No migration is performed on existing sessions — GUIDs may be legitimate names in rare cases.
+- **Focus migration priority order** — first try the cached host HWND (Priority 1), fall back to legacy title-scan (Priority 2), then PID-based heuristics (Priority 3). Avoids the previous behaviour of always landing on whichever window happened to match a brittle title pattern.
+- **`UseWPF` is now enabled** in the main project to access `System.Windows.Automation` for pane enumeration. No WPF UI is shipped — only the automation namespace is consumed.
+
+### Fixed
+
+- **Stale window-handle cache** when a Windows Terminal tab is closed/moved — the cache now invalidates on `WindowDestroyed` events for both the parent and the cached pane HWND, plus on WT name-changed events that signal a tab structure change.
+- **Integration tests run reliably on local machines** — Playwright tests now auto-install the chromium browser on first run via a self-bootstrap fixture; CI continues to install in `release.yml` as before. Tests requiring an interactive desktop session are now marked `[Trait("Category", "LocalOnly")]` and skip cleanly in CI rather than producing tolerated red runs.
+
 ## [0.20.1] - 2026-04-14
 
 ### Added

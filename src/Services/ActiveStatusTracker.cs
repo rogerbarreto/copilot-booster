@@ -31,7 +31,9 @@ internal class ActiveStatusTracker
     private readonly Dictionary<string, TeamsWindowService> _teamsWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<(string Label, IntPtr Hwnd)>> _explorerWindows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CopilotHostInfo> _copilotHosts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly CopilotHostResolver _hostResolver = new();
+    private readonly CopilotHostResolver _hostResolver;
+    private readonly IWindowsTerminalPaneGateway _windowsTerminalPaneGateway;
+    private readonly WindowsTerminalPaneCacheService _windowsTerminalPaneCache;
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     internal readonly EventsJournalService EventsJournal = new();
     private bool _handleCacheInitialLoadDone;
@@ -60,6 +62,21 @@ internal class ActiveStatusTracker
     /// Fired when a Copilot Host entry is removed for a session.
     /// </summary>
     internal event Action<string>? CopilotHostRemoved;
+
+    internal ActiveStatusTracker()
+        : this(new CopilotHostResolver(), new WindowsTerminalPaneGateway(), new WindowsTerminalPaneCacheService())
+    {
+    }
+
+    internal ActiveStatusTracker(
+        CopilotHostResolver hostResolver,
+        IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
+        WindowsTerminalPaneCacheService windowsTerminalPaneCache)
+    {
+        this._hostResolver = hostResolver;
+        this._windowsTerminalPaneGateway = windowsTerminalPaneGateway;
+        this._windowsTerminalPaneCache = windowsTerminalPaneCache;
+    }
 
     /// <summary>
     /// Seeds sessions present at startup. These will output "" instead of "bell"
@@ -134,7 +151,7 @@ internal class ActiveStatusTracker
     /// </summary>
     internal void HandleExternalSessionDiscovered(string sessionId, int copilotPid)
     {
-        var info = this._hostResolver.Resolve(copilotPid);
+        var info = this.ResolveCopilotHost(sessionId, copilotPid, sessionSummary: null);
         if (info == null)
         {
             return;
@@ -164,7 +181,7 @@ internal class ActiveStatusTracker
             return;
         }
 
-        var info = this._hostResolver.Resolve(copilotPid);
+        var info = this.ResolveCopilotHost(sessionId, copilotPid, sessionSummary: null);
         if (info == null)
         {
             return;
@@ -186,9 +203,11 @@ internal class ActiveStatusTracker
     /// </summary>
     internal void HandleWindowDestroyed(IntPtr hwnd)
     {
+        this._windowsTerminalPaneCache.InvalidatePane(hwnd);
+
         // Find any session whose host HWND matches and evict
         var toRemove = this._copilotHosts
-            .Where(kvp => kvp.Value.HostHwnd == hwnd)
+            .Where(kvp => kvp.Value.HostHwnd == hwnd || kvp.Value.ParentHostHwnd == hwnd)
             .Select(kvp => kvp.Key)
             .ToList();
 
@@ -196,6 +215,244 @@ internal class ActiveStatusTracker
         {
             this.RemoveCopilotHost(sid);
         }
+    }
+
+    internal HashSet<string> HandleWindowNameChanged(IntPtr hwnd)
+    {
+        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        this._windowsTerminalPaneCache.InvalidateForTerminalWindow(hwnd);
+
+        var toRemove = this._copilotHosts
+            .Where(kvp => IsWindowsTerminalHost(kvp.Value) && GetParentHostHwnd(kvp.Value) == hwnd)
+            .Select(kvp => kvp.Key)
+            .ToList();
+
+        foreach (var sid in toRemove)
+        {
+            this.RemoveCopilotHost(sid);
+            affected.Add(sid);
+        }
+
+        return affected;
+    }
+
+    private CopilotHostInfo? ResolveCopilotHost(string sessionId, int copilotPid, string? sessionSummary)
+    {
+        var info = this._hostResolver.Resolve(copilotPid);
+        if (info == null)
+        {
+            return null;
+        }
+
+        return IsWindowsTerminalHost(info)
+            ? this.ResolveWindowsTerminalPane(sessionId, info, sessionSummary)
+            : info;
+    }
+
+    private CopilotHostInfo ResolveWindowsTerminalPane(string sessionId, CopilotHostInfo info, string? sessionSummary)
+    {
+        var wtWindowHwnd = GetParentHostHwnd(info);
+        if (this._windowsTerminalPaneCache.TryGet(wtWindowHwnd, info.CopilotPid, out var cached))
+        {
+            return info with { HostHwnd = cached.PaneHwnd, ParentHostHwnd = wtWindowHwnd, PaneTitle = cached.PaneTitle };
+        }
+
+        var terms = BuildWindowsTerminalPaneMatchTerms(sessionId, sessionSummary);
+        var result = this._windowsTerminalPaneGateway.EnumeratePanes(wtWindowHwnd);
+        LogWindowsTerminalPaneEnumeration(result, wtWindowHwnd, info.CopilotPid);
+
+        var pane = FindMatchingPane(result.Panes, info.CopilotPid, terms, preferredTitle: null);
+        if (pane == null)
+        {
+            return info with { ParentHostHwnd = wtWindowHwnd };
+        }
+
+        var paneHwnd = pane.Hwnd == IntPtr.Zero ? wtWindowHwnd : pane.Hwnd;
+        this._windowsTerminalPaneCache.Set(wtWindowHwnd, info.CopilotPid, paneHwnd, pane.Name);
+        return info with { HostHwnd = paneHwnd, ParentHostHwnd = wtWindowHwnd, PaneTitle = pane.Name };
+    }
+
+    private void FocusCopilotHost(CopilotHostInfo hostInfo)
+    {
+        if (IsWindowsTerminalHost(hostInfo) && hostInfo.ParentHostHwnd != IntPtr.Zero)
+        {
+            this.TrySelectWindowsTerminalPane(hostInfo);
+            WindowFocusService.TryFocusWindowHandle(hostInfo.ParentHostHwnd);
+            return;
+        }
+
+        WindowFocusService.TryFocusWindowHandle(hostInfo.HostHwnd);
+    }
+
+    private bool TrySelectWindowsTerminalPane(CopilotHostInfo hostInfo)
+    {
+        var wtWindowHwnd = GetParentHostHwnd(hostInfo);
+        var terms = BuildWindowsTerminalPaneMatchTerms(string.Empty, sessionSummary: null);
+        var result = this._windowsTerminalPaneGateway.EnumeratePanes(wtWindowHwnd);
+        LogWindowsTerminalPaneEnumeration(result, wtWindowHwnd, hostInfo.CopilotPid);
+
+        var pane = FindMatchingPane(result.Panes, hostInfo.CopilotPid, terms, hostInfo.PaneTitle);
+        if (pane == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            pane.Select();
+            var paneHwnd = pane.Hwnd == IntPtr.Zero ? wtWindowHwnd : pane.Hwnd;
+            this._windowsTerminalPaneCache.Set(wtWindowHwnd, hostInfo.CopilotPid, paneHwnd, pane.Name);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogInformation(
+                "Windows Terminal pane selection failed for pid {CopilotPid} in hwnd {Hwnd}: {Error}",
+                hostInfo.CopilotPid,
+                wtWindowHwnd,
+                ex.Message);
+            return false;
+        }
+    }
+
+    private static void LogWindowsTerminalPaneEnumeration(WindowsTerminalPaneEnumeration result, IntPtr wtWindowHwnd, int copilotPid)
+    {
+        if (result.Panes.Count == 0)
+        {
+            Program.Logger.LogInformation(
+                "Windows Terminal pane enumeration returned no panes for pid {CopilotPid} in hwnd {Hwnd}; using parent window fallback",
+                copilotPid,
+                wtWindowHwnd);
+        }
+        else if (result.IsPartial)
+        {
+            Program.Logger.LogInformation(
+                "Windows Terminal pane enumeration returned partial results for pid {CopilotPid} in hwnd {Hwnd}; match may fall back to parent window",
+                copilotPid,
+                wtWindowHwnd);
+        }
+    }
+
+    private static WindowsTerminalPaneInfo? FindMatchingPane(
+        IReadOnlyList<WindowsTerminalPaneInfo> panes,
+        int copilotPid,
+        IReadOnlyList<string> terms,
+        string? preferredTitle)
+    {
+        if (!string.IsNullOrWhiteSpace(preferredTitle))
+        {
+            var preferredMatches = panes
+                .Where(pane => string.Equals(NormalizePaneTitle(pane.Name), NormalizePaneTitle(preferredTitle), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (preferredMatches.Count > 0)
+            {
+                return ChooseBestPane(preferredMatches);
+            }
+        }
+
+        var processMatches = panes.Where(pane => pane.ProcessId == copilotPid).ToList();
+        if (processMatches.Count > 0)
+        {
+            return ChooseBestPane(processMatches);
+        }
+
+        var titleMatches = panes.Where(pane => IsPaneTitleMatch(pane.Name, terms)).ToList();
+        return titleMatches.Count == 0 ? null : ChooseBestPane(titleMatches);
+    }
+
+    private static WindowsTerminalPaneInfo ChooseBestPane(List<WindowsTerminalPaneInfo> panes)
+    {
+        return panes.FirstOrDefault(pane => pane.IsSelected) ?? panes[0];
+    }
+
+    private static bool IsPaneTitleMatch(string paneTitle, IReadOnlyList<string> terms)
+    {
+        var normalizedTitle = NormalizePaneTitle(paneTitle);
+        foreach (var term in terms)
+        {
+            var normalizedTerm = NormalizePaneTitle(term);
+            if (string.Equals(normalizedTitle, normalizedTerm, StringComparison.OrdinalIgnoreCase)
+                || (normalizedTerm.Length >= 8 && normalizedTitle.Contains(normalizedTerm, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizePaneTitle(string title)
+    {
+        return WindowFocusService.StripLeadingEmoji(title).Trim();
+    }
+
+    private static List<string> BuildWindowsTerminalPaneMatchTerms(string sessionId, string? sessionSummary)
+    {
+        var terms = new List<string>();
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            AddPaneMatchTerm(terms, $"Copilot CLI - {sessionId}");
+            AddPaneMatchTerm(terms, sessionId);
+
+            var overrideEntry = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, sessionId);
+            AddPaneMatchTerm(terms, overrideEntry?.Name);
+            AddPaneMatchTerm(terms, TryReadWorkspaceSummary(sessionId));
+        }
+
+        AddPaneMatchTerm(terms, sessionSummary);
+        return terms;
+    }
+
+    private static void AddPaneMatchTerm(List<string> terms, string? term)
+    {
+        if (string.IsNullOrWhiteSpace(term) || s_ignoredSummaries.Contains(term))
+        {
+            return;
+        }
+
+        if (!terms.Contains(term, StringComparer.OrdinalIgnoreCase))
+        {
+            terms.Add(term);
+        }
+    }
+
+    private static string? TryReadWorkspaceSummary(string sessionId)
+    {
+        try
+        {
+            var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+            if (!File.Exists(workspaceFile))
+            {
+                return null;
+            }
+
+            foreach (var line in File.ReadLines(workspaceFile))
+            {
+                if (line.StartsWith("summary:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return line[8..].Trim().Trim('"');
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to read workspace summary for pane match: {Error}", ex.Message);
+        }
+
+        return null;
+    }
+
+    private static bool IsWindowsTerminalHost(CopilotHostInfo info)
+    {
+        return string.Equals(info.HostKindLabel, "Windows Terminal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.HostProcessName, "WindowsTerminal", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.HostProcessName, "wt", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(info.HostProcessName, "wt.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IntPtr GetParentHostHwnd(CopilotHostInfo info)
+    {
+        return info.ParentHostHwnd == IntPtr.Zero ? info.HostHwnd : info.ParentHostHwnd;
     }
 
     internal static HashSet<string> LoadActiveSessionIds()
@@ -432,7 +689,7 @@ internal class ActiveStatusTracker
         // Priority 1: Use host HWND if available and alive
         if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && WindowFocusService.IsWindowAlive(hostInfo.HostHwnd))
         {
-            WindowFocusService.TryFocusWindowHandle(hostInfo.HostHwnd);
+            this.FocusCopilotHost(hostInfo);
             return true;
         }
 
@@ -477,8 +734,8 @@ internal class ActiveStatusTracker
         // Priority 1: Add host-resolved Copilot CLI first if available and alive
         if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && WindowFocusService.IsWindowAlive(hostInfo.HostHwnd))
         {
-            var capturedHostHwnd = hostInfo.HostHwnd;
-            focusTargets.Add(("Copilot CLI", () => WindowFocusService.TryFocusWindowHandle(capturedHostHwnd)));
+            var capturedHostInfo = hostInfo;
+            focusTargets.Add(("Copilot CLI", () => this.FocusCopilotHost(capturedHostInfo)));
         }
 
         // Priority 2: Add tracked windows (legacy title-scan path)
@@ -487,7 +744,8 @@ internal class ActiveStatusTracker
             foreach (var (label, title, hwnd) in tracked)
             {
                 // Skip if this is the host HWND we already added (avoid duplicate)
-                if (this._copilotHosts.TryGetValue(sessionId, out var h) && h.HostHwnd == hwnd)
+                if (this._copilotHosts.TryGetValue(sessionId, out var h)
+                    && (h.HostHwnd == hwnd || h.ParentHostHwnd == hwnd))
                 {
                     continue;
                 }
@@ -935,6 +1193,7 @@ internal class ActiveStatusTracker
         }
 
         // T4: Re-resolve host for sessions whose host is missing or dead
+        this._windowsTerminalPaneCache.Revalidate();
         var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
         foreach (var session in activeSessions)
         {
@@ -949,7 +1208,7 @@ internal class ActiveStatusTracker
                 continue;
             }
 
-            var info = this._hostResolver.Resolve(session.CopilotPid);
+            var info = this.ResolveCopilotHost(session.Id, session.CopilotPid, session.Summary);
             if (info != null)
             {
                 this.SetCopilotHost(session.Id, info);

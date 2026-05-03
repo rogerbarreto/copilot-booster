@@ -17,7 +17,16 @@ internal static class WindowHandleCacheService
     /// HostPid and CopilotPid are used for "copilot-host" entry type.
     /// For copilot-host entries, FolderPath is repurposed to store HostKindLabel.
     /// </summary>
-    private record HandleEntry(string SessionId, string Type, string Name, string? FolderPath, long Hwnd, int? HostPid = null, int? CopilotPid = null);
+    private record HandleEntry(
+        string SessionId,
+        string Type,
+        string Name,
+        string? FolderPath,
+        long Hwnd,
+        int? HostPid = null,
+        int? CopilotPid = null,
+        long? ParentHostHwnd = null,
+        string? PaneTitle = null);
 
     /// <summary>
     /// Saves all tracked window handles to the cache file.
@@ -91,7 +100,17 @@ internal static class WindowHandleCacheService
                 if (host.HostHwnd != IntPtr.Zero)
                 {
                     // For copilot-host entries: FolderPath field is repurposed to store HostKindLabel
-                    entries.Add(new HandleEntry(kvp.Key, "copilot-host", host.HostProcessName, host.HostKindLabel, host.HostHwnd.ToInt64(), host.HostPid, host.CopilotPid));
+                    var parentHostHwnd = host.ParentHostHwnd == IntPtr.Zero ? host.HostHwnd : host.ParentHostHwnd;
+                    entries.Add(new HandleEntry(
+                        kvp.Key,
+                        "copilot-host",
+                        host.HostProcessName,
+                        host.HostKindLabel,
+                        host.HostHwnd.ToInt64(),
+                        host.HostPid,
+                        host.CopilotPid,
+                        parentHostHwnd.ToInt64(),
+                        host.PaneTitle));
                 }
             }
 
@@ -177,7 +196,15 @@ internal static class WindowHandleCacheService
                             if (actualPid == entry.HostPid.Value)
                             {
                                 // FolderPath is repurposed to store HostKindLabel
-                                copilotHosts[entry.SessionId] = new CopilotHostInfo(hwnd, entry.HostPid.Value, entry.CopilotPid.Value, entry.Name, entry.FolderPath ?? "Unknown");
+                                var parentHostHwnd = entry.ParentHostHwnd.HasValue ? new IntPtr(entry.ParentHostHwnd.Value) : hwnd;
+                                copilotHosts[entry.SessionId] = new CopilotHostInfo(
+                                    hwnd,
+                                    entry.HostPid.Value,
+                                    entry.CopilotPid.Value,
+                                    entry.Name,
+                                    entry.FolderPath ?? "Unknown",
+                                    parentHostHwnd,
+                                    entry.PaneTitle);
                             }
                         }
                         break;

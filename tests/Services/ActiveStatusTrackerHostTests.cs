@@ -174,4 +174,131 @@ public sealed class ActiveStatusTrackerHostTests
         Assert.Equal(100, firedInfo.HostPid);
         Assert.Equal(200, firedInfo.CopilotPid);
     }
+
+    [Fact]
+    public void HandleInternalCopilotPidRegistered_WindowsTerminal_StoresMatchedPaneHwnd()
+    {
+        var sessionId = "session-pane-match";
+        var parentHwnd = new IntPtr(0xAAA);
+        var paneHwnd = new IntPtr(0xBBB);
+        var tree = new FakeProcessTree()
+            .Add(1000, 900, "copilot", IntPtr.Zero)
+            .Add(900, null, "WindowsTerminal", parentHwnd);
+        var gateway = new FakeWindowsTerminalPaneGateway([
+            new WindowsTerminalPaneInfo("Unrelated", new IntPtr(0x111), 900, false, () => { }),
+            new WindowsTerminalPaneInfo($"Copilot CLI - {sessionId}", paneHwnd, 900, false, () => { })
+        ]);
+        var tracker = CreateTracker(tree, gateway);
+
+        tracker.HandleInternalCopilotPidRegistered(sessionId, 1000);
+
+        var host = tracker.GetCopilotHost(sessionId);
+        Assert.NotNull(host);
+        Assert.Equal(paneHwnd, host!.HostHwnd);
+        Assert.Equal(parentHwnd, host.ParentHostHwnd);
+        Assert.Equal($"Copilot CLI - {sessionId}", host.PaneTitle);
+        Assert.Equal(1, gateway.EnumerateCount);
+    }
+
+    [Fact]
+    public void HandleInternalCopilotPidRegistered_NonWindowsTerminal_DoesNotEnumeratePanes()
+    {
+        var tree = new FakeProcessTree()
+            .Add(1000, 900, "copilot", IntPtr.Zero)
+            .Add(900, null, "pwsh", new IntPtr(0x123));
+        var gateway = new FakeWindowsTerminalPaneGateway([]);
+        var tracker = CreateTracker(tree, gateway);
+
+        tracker.HandleInternalCopilotPidRegistered("session-pwsh", 1000);
+
+        var host = tracker.GetCopilotHost("session-pwsh");
+        Assert.NotNull(host);
+        Assert.Equal(new IntPtr(0x123), host!.HostHwnd);
+        Assert.Equal(0, gateway.EnumerateCount);
+    }
+
+    [Fact]
+    public void HandleInternalCopilotPidRegistered_WindowsTerminalEmptyGateway_FallsBackToParentHwnd()
+    {
+        var tree = new FakeProcessTree()
+            .Add(1000, 900, "copilot", IntPtr.Zero)
+            .Add(900, null, "WindowsTerminal", new IntPtr(0xAAA));
+        var gateway = new FakeWindowsTerminalPaneGateway([]);
+        var tracker = CreateTracker(tree, gateway);
+
+        tracker.HandleInternalCopilotPidRegistered("session-empty", 1000);
+
+        var host = tracker.GetCopilotHost("session-empty");
+        Assert.NotNull(host);
+        Assert.Equal(new IntPtr(0xAAA), host!.HostHwnd);
+        Assert.Equal(new IntPtr(0xAAA), host.ParentHostHwnd);
+        Assert.Null(host.PaneTitle);
+    }
+
+    [Fact]
+    public void HandleWindowNameChanged_WindowsTerminalParent_InvalidatesHostForRefresh()
+    {
+        var sessionId = "session-title-change";
+        var parentHwnd = new IntPtr(0xAAA);
+        var tree = new FakeProcessTree()
+            .Add(1000, 900, "copilot", IntPtr.Zero)
+            .Add(900, null, "WindowsTerminal", parentHwnd);
+        var gateway = new FakeWindowsTerminalPaneGateway([
+            new WindowsTerminalPaneInfo($"Copilot CLI - {sessionId}", new IntPtr(0xBBB), 900, false, () => { })
+        ]);
+        var tracker = CreateTracker(tree, gateway);
+        tracker.HandleInternalCopilotPidRegistered(sessionId, 1000);
+
+        var affected = tracker.HandleWindowNameChanged(parentHwnd);
+
+        Assert.Contains(sessionId, affected);
+        Assert.Null(tracker.GetCopilotHost(sessionId));
+    }
+
+    private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
+    {
+        return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());
+    }
+
+    private sealed class FakeProcessTree : IProcessTreeProvider
+    {
+        private readonly Dictionary<int, int?> _parents = [];
+        private readonly Dictionary<int, string?> _names = [];
+        private readonly Dictionary<int, IntPtr> _windows = [];
+
+        internal FakeProcessTree Add(int pid, int? parentPid, string? name, IntPtr window)
+        {
+            this._parents[pid] = parentPid;
+            this._names[pid] = name;
+            this._windows[pid] = window;
+            return this;
+        }
+
+        public int? GetParentPid(int pid) => this._parents.TryGetValue(pid, out var parent) ? parent : null;
+        public string? GetProcessName(int pid) => this._names.TryGetValue(pid, out var name) ? name : null;
+        public IntPtr GetTopLevelWindow(int pid) => this._windows.TryGetValue(pid, out var hwnd) ? hwnd : IntPtr.Zero;
+    }
+
+    private sealed class FakeWindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
+    {
+        private readonly IReadOnlyList<WindowsTerminalPaneInfo> _panes;
+
+        internal FakeWindowsTerminalPaneGateway(IReadOnlyList<WindowsTerminalPaneInfo> panes)
+        {
+            this._panes = panes;
+        }
+
+        internal int EnumerateCount { get; private set; }
+
+        public WindowsTerminalPaneEnumeration EnumeratePanes(IntPtr wtHwnd)
+        {
+            this.EnumerateCount++;
+            return new WindowsTerminalPaneEnumeration(this._panes, IsPartial: false);
+        }
+
+        public IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd)
+        {
+            return this._panes.Select(pane => (pane.Name, pane.Select)).ToList();
+        }
+    }
 }

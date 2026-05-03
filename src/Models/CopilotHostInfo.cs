@@ -13,4 +13,6 @@ internal record CopilotHostInfo(
     int HostPid,
     int CopilotPid,
     string HostProcessName,
-    string HostKindLabel);
+    string HostKindLabel,
+    IntPtr ParentHostHwnd = default,
+    string? PaneTitle = null);
