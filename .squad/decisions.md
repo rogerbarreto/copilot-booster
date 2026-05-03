@@ -1,5 +1,114 @@
 # Squad Decisions
 
+## 2026-05-03: Round 3 Completion — Copilot Host Discovery Phase 3 + All-Green Integration Directive
+
+**Date:** 2026-05-03  
+**Status:** Complete  
+**Contributors:** Trinity (E-Triggers, Cleanup, F-UIA), Tank (Round 3 tests), Roger Barreto (grilling + directive)
+
+### User Directive — All Integration Tests Must Be Green
+
+**By:** Roger Barreto  
+**Precedence:** Supersedes prior decisions to tolerate environmental baseline failures
+
+**The Directive:**
+All integration tests must be GREEN. Period. There is no acceptable baseline of failing integration tests — locally OR in CI. Tests that fail today because of environmental gaps (e.g., Playwright not installed locally) are TEST BUGS to be fixed, not "known baseline failures" to document and tolerate. Either:
+1. The test self-bootstraps its environment (e.g., `playwright install chromium` runs as IT collection fixture/setup), OR
+2. The test is explicitly skipped with a `[Trait("Category", ...)]` filter that the runner honors both locally and in CI (no red bar from missing setup).
+
+**Why:** The user's standing release rule ("all tests must pass before any release — both unit tests and integration tests") was being violated by the team accepting environmental reds as a normal-state baseline. The grilling exposed that this acceptance had become a process smell: inventing baseline-comparison ceremony to interpret test-output noise that shouldn't exist in the first place. Restoring the "binary green" bar is simpler, more honest, and matches the user's actual policy.
+
+**Supersedes:** Any prior decision to "document local Playwright pain in TROUBLESHOOTING.md", "maintain a tolerance list of named-diff baseline failures", or "compare test output against main to interpret failures". The right answer was always "auto-install Playwright (option c from earlier triage) or mark tests skippable so the local run is also green."
+
+### User Directive — Zero Warnings Policy
+
+**By:** Roger Barreto  
+**Status:** Ongoing
+
+There should be no warnings at all in the CI pipeline. All warnings must be addressed without excuse — they fail the pipeline.
+
+### Phase 3 Delivery Summary
+
+| Task | Owner | Status | Tests | Notes |
+|------|-------|--------|-------|-------|
+| T1/T2/T4/T5 Trigger Wiring | Trinity | ✅ | 647 unit | External discovery, PID registration, FullRefresh, window eviction, focus migration |
+| GUID Fallback Cleanup | Trinity | ✅ | Build clean | ADR-0001 compliance, no placeholder writes |
+| Deferred Name Resolution | Trinity | ✅ | Integration | First user.message extraction, sidecar update on change |
+| UIA Gateway (Windows Terminal) | Trinity | ✅ | 250ms time-box | SelectionItemPattern → InvokePattern fallback |
+| Test Coverage (Unit + IT) | Tank | ✅ | 10 unit + 20 IT | Host dict scaffolding + Phase 5 integration paths |
+
+**Unit Tests:** 647/647 pass (was 637, +10)  
+**Integration Tests:** 104 total with 13 pre-existing baseline reds (Playwright browser + LocalOnly skips) — now superseded by all-green directive.  
+**Build:** 0 warnings, 0 errors across all 3 projects  
+**Format:** `dotnet format --verify-no-changes` clean
+
+### Phase 3 Architecture — Trinity E-Triggers
+
+**File:** `.squad/decisions/inbox/trinity-0210-phase3-triggers.md`
+
+5 distinct triggers populate and maintain `_copilotHosts` dictionary:
+
+1. **T1 (External Session Discovery):** `CopilotLogWatcherService.ExternalSessionDiscovered` signature changed from `Action<string>` to `Action<string, int>` (sessionId + copilotPid). Handler calls `_hostResolver.Resolve(copilotPid)` and writes Booster-Resolved Name placeholder via sidecar.
+2. **T2 (Internal PID Registration):** `PidRegistryService.CopilotPidRegisteredStatic` static event with dedup logic (`s_lastCopilotPidByLauncherPidStatic` dict). Static event needed because `Program.cs` calls `UpdatePidSessionId` statically.
+3. **T4 (FullRefresh Re-Resolution):** `ActiveStatusTracker.FullRefresh` iterates `SessionService.GetActiveSessions()` after cleanup, re-resolving hosts for sessions with `CopilotPid > 0` where host is missing or dead.
+4. **T5 (Window Destruction):** `WindowEventHookService.WindowDestroyed` wired to `ActiveStatusTracker.HandleWindowDestroyed` for HWND-based host eviction.
+5. **Focus Migration:** `TryFocusCopilotCli` and `FocusActiveProcess` check `_copilotHosts` first (Priority 1: direct HWND), then legacy title-scan (Priority 2), then PID-based fallback (Priority 3).
+
+**Key Design Decisions:**
+- Short-circuit HWND-alive checks in T2 and T4 to avoid redundant re-resolution
+- Placeholder format: `"{HostProcessName}:Copilot"` (unresolved state, replaced by deferred path)
+- Focus dedup: `FocusActiveProcess` skips duplicate HWND insertion when host already added
+- Legacy paths preserved as safety net (no regression risk for older sessions)
+
+### Phase 3 Architecture — Trinity Cleanup
+
+**File:** `.squad/decisions/inbox/trinity-0210-cleanup-summary-and-deferred.md`
+
+Two components establish ADR-0001 compliance and deferred name resolution:
+
+1. **Drop GUID Fallback:** `CopilotLogWatcherService.CreateWorkspaceYamlFromPid` no longer writes `workspace.yaml.summary` when window title resolution fails. External sessions now create workspace.yaml with NO `summary:` field (vs. previous GUID fallback).
+2. **Deferred Resolution:** `EventsJournalService.TryResolveBoosterName` hook on `OnFileChanged` extracts first user.message content from events.jsonl and updates sidecar when content is available. Short-circuited once `ResolvedFromUserMessage == true` to avoid redundant extraction.
+
+**New Event:** `BoosterResolvedNameUpdated(sessionId)` for UI refresh signals.
+
+**Contract:**
+- `CreateWorkspaceYamlFromPid` NEVER writes GUID to `workspace.yaml.summary`
+- `TryResolveBoosterName` runs on FileSystemWatcher thread — subscribers must marshal to UI
+- Resolution happens at most once per session (idempotent after first success)
+
+### Phase 4 Architecture — Trinity F-UIA
+
+**File:** `.squad/decisions/inbox/trinity-0210-uia-gateway-impl.md`
+
+`WindowsTerminalPaneGateway` implements `IWindowsTerminalPaneGateway` via `System.Windows.Automation` to enable pane-level focus for Windows Terminal.
+
+**Key Design Decisions:**
+- **`<UseWPF>true</UseWPF>` enabled:** Direct `<Reference Include="UIAutomationClient" />` approach failed in .NET 10 with assembly resolution errors. UseWPF transitively provides assemblies from Desktop shared framework.
+- **250ms time-box:** `Stopwatch` elapsed check inside `foreach (AutomationElement tabItem)` loop. Breaks early if budget exceeded.
+- **Pattern preference:** Try `SelectionItemPattern.Select()` first, fall back to `InvokePattern.Invoke()`.
+- **Exception strategy:** Top-level try/catch logs warning and returns empty list. Per-action try/catch for pattern invocations (swallows `ElementNotAvailableException` and `InvalidOperationException`).
+
+**Consequence:** `System.Windows.Automation` is now available throughout the codebase. Tests can fake `IWindowsTerminalPaneGateway` without touching real UIA. Adding pane focus for other hosts (tmux, Warp) requires implementing a new gateway behind the same interface pattern.
+
+### Round 3 Test Coverage — Tank
+
+**File:** `.squad/decisions/inbox/tank-0210-round3-tests.md`
+
+30 new tests (10 unit + 20 integration) for Phase 3 scaffolding and Phase 5 integration:
+
+**Unit Tests (10 total):**
+- `ActiveStatusTrackerHostTests.cs`: Round-trip, idempotency, updates, removal, projection, unprojection, dedup, event data verification
+
+**Integration Tests (20 total):**
+- `InternalSessionHostResolutionIntegrationTests.cs`: Real process tree, PID skip, deep nesting, host classification
+- `InternalSessionTitleChangesIntegrationTests.cs`: HWND-based host path robustness against title changes (proves fix for the hardest existing bug)
+- `ExternalSessionWorkspaceYamlTests.cs`: No `summary:` writes (ADR-0001 compliance)
+- `DeferredNameResolutionIntegrationTests.cs`: Placeholder → resolved name transition
+
+**Test Count Growth:** 637 unit → 647 unit (+10), 84 IT → 104 IT (+20)
+
+---
+
 ## Issue #12: Async Worktree Creation with Cancellation
 
 **Date:** 2026-03-15  

@@ -10,6 +10,7 @@
 
 <!-- Append learnings below -->
 
+- **2026-05-03 — All-green integration directive (leadership note):** The grilling exposed that accepting environmental baseline failures as "normal" was a process smell. The team was building ceremony (baseline-comparison scripts, TROUBLESHOOTING docs) around test-output noise that shouldn't exist in the first place. User directive: binary green only — either self-bootstrap test environment (fixture installs) or skip explicitly (traits). This is simpler, more honest, and matches the user's actual release policy: "all tests must pass". Supersedes prior tolerance decisions.
 ### 2026-03-15 — Issue #12 Simplified Architecture
 
 - **Roger's simplification principle:** When the real bug is a timeout killing a process, fix the timeout — don't build an elaborate progress UI around it. The existing "Creating..." button UX is already good enough.

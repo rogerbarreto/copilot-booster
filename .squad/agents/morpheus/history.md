@@ -10,6 +10,8 @@
 
 <!-- Append learnings below -->
 
+- **2026-05-03 — All-green integration test directive (UI impact):** User grilling exposed that accepting environmental baseline failures (13 reds in current IT suite) violated standing release policy. New directive: all tests green at all times. Tests must either self-bootstrap environment or skip explicitly. This affects Phase 5+ UI integration tests that depend on Playwright or local-only environments — fixtures must auto-install or skip-traits must be honored by runner. No more ceremonial baseline-comparison workflows.
+
 ### 2026-03-15 — Issue #12 UI Design (Worktree Creation Dialog)
 
 - **WorkspaceCreatorVisuals.cs** is a 1252-line static class that builds the entire worktree creation dialog programmatically in `ShowWorkspaceCreator()`. No Designer file — all layout is manual coordinate-based.

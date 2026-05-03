@@ -10,6 +10,8 @@
 
 ## Learnings
 
+- **2026-05-03 — All-green integration test directive (validation impact):** User grilling established binary all-green policy: no tolerance for environmental baseline failures. Tests must self-bootstrap (e.g., Playwright auto-install in collection fixture) or skip explicitly with traits. This is a standing release policy enforcement — validates that team release quality is not compromised by accepting noise baseline.
+
 ### Issue #12 Validation (2026-03-15)
 
 **APIs validated (all confirmed):**
