@@ -236,23 +236,31 @@ public sealed class ActiveStatusTrackerHostTests
     }
 
     [Fact]
-    public void HandleWindowNameChanged_WindowsTerminalParent_InvalidatesHostForRefresh()
+    public void HandleWindowNameChanged_WindowsTerminalParent_PreservesHostsAndLinks()
     {
-        var sessionId = "session-title-change";
+        var firstSessionId = "session-run-test";
+        var secondSessionId = "session-run-test-2";
         var parentHwnd = new IntPtr(0xAAA);
         var tree = new FakeProcessTree()
             .Add(1000, 900, "copilot", IntPtr.Zero)
+            .Add(1001, 900, "copilot", IntPtr.Zero)
             .Add(900, null, "WindowsTerminal", parentHwnd);
         var gateway = new FakeWindowsTerminalPaneGateway([
-            new WindowsTerminalPaneInfo($"Copilot CLI - {sessionId}", new IntPtr(0xBBB), 900, false, () => { })
+            new WindowsTerminalPaneInfo($"Copilot CLI - {firstSessionId}", IntPtr.Zero, 900, false, () => { }, "runtime-1"),
+            new WindowsTerminalPaneInfo($"Copilot CLI - {secondSessionId}", IntPtr.Zero, 900, true, () => { }, "runtime-2")
         ]);
         var tracker = CreateTracker(tree, gateway);
-        tracker.HandleInternalCopilotPidRegistered(sessionId, 1000);
+        tracker.HandleInternalCopilotPidRegistered(firstSessionId, 1000);
+        tracker.HandleInternalCopilotPidRegistered(secondSessionId, 1001);
 
         var affected = tracker.HandleWindowNameChanged(parentHwnd);
 
-        Assert.Contains(sessionId, affected);
-        Assert.Null(tracker.GetCopilotHost(sessionId));
+        Assert.Contains(firstSessionId, affected);
+        Assert.Contains(secondSessionId, affected);
+        Assert.NotNull(tracker.GetCopilotHost(firstSessionId));
+        Assert.NotNull(tracker.GetCopilotHost(secondSessionId));
+        Assert.Contains("Copilot CLI", tracker.BuildActiveText(firstSessionId));
+        Assert.Contains("Copilot CLI", tracker.BuildActiveText(secondSessionId));
     }
 
     [Fact]
@@ -350,6 +358,7 @@ public sealed class ActiveStatusTrackerHostTests
                 calls.Add($"foreground:{hwnd.ToInt64():X}");
                 return true;
             },
+            _ => true,
             _ => true);
         var hostInfo = new CopilotHostInfo(
             parentHwnd,

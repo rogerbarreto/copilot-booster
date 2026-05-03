@@ -11,8 +11,9 @@ Use this skill when wiring UI Automation pane/tab selection for terminal hosts t
 5. Prefer deterministic exact user-visible titles (`SessionId`, launch title, workspace summary, override/alias) only as a fallback; avoid broad substring matching for human titles because `Run Test` can collide with `Run Test 2`.
 6. If multiple panes match, prefer the currently selected/active pane, then first match.
 7. Cache by `(parent HWND, pane runtime id)` and store the selected child HWND, title, and runtime id. Do not collapse multiple WT tabs to the parent HWND.
-8. Invalidate synchronously on parent name/tab changes and child/parent destruction. Do not run UIA inside WinEvent handlers.
+8. Do not evict host mappings on parent name/title changes. WT tab activation mutates the parent window title; keep `(sessionId -> copilotPid -> pane runtime id)` alive until the Copilot PID exits or the WT parent is destroyed.
 9. On focus, foreground the parent WT HWND first, then call a gateway method that re-walks UIA, finds the tab item by runtime id, selects/invokes it, and verifies `SelectionItemPattern.Current.IsSelected`. Use title/process matching only as a fallback when no runtime id is available.
+10. If UIA selection fails verification, compute current/target tab indices from UIA order and fall back to `Ctrl+Tab` / `Ctrl+Shift+Tab`, then verify the selected runtime id again.
 
 ## Windows Terminal Gotchas
 
@@ -21,7 +22,7 @@ Use this skill when wiring UI Automation pane/tab selection for terminal hosts t
 - `SelectionItemPattern.Select()` is preferred for tab activation; fall back to `InvokePattern.Invoke()`, then read back `SelectionItemPattern.Current.IsSelected` with a short poll before returning success.
 - Foreground WT before selecting its tab. Selecting while WT is unfocused can report success yet leave the previously active tab visible on some WT builds.
 - For WT XAML-Islands, tabs do not have distinct Win32 HWNDs. The stable dispatch identity is `(parent HWND, UIA runtime id)`.
-- Live E2E should assert UIA selected tab identity, WT window title, and a selected-pane content marker after click; selected-tab/title-only assertions can miss swapped session-to-pane mappings.
+- Live E2E should assert UIA selected tab identity, WT window title, and a selected-pane content marker after click; selected-tab/title-only assertions can miss swapped session-to-pane mappings. It must also switch the foreground WT tab and assert all session rows still show active Copilot CLI links before any focus click.
 - WT TextPattern alone may expose only tab-strip/title text. Walk the Raw UIA tree and collect text/name/value surfaces when a test needs selected-terminal content; seed a marker into the visible interactive prompt and fail if the expected marker is absent or another pane's marker is present.
 - Logging empty/partial enumeration at Information level makes UIA slowness visible without breaking focus fallback.
 

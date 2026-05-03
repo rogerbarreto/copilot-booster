@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
 using CopilotBooster.Models;
 using Microsoft.Extensions.Logging;
 
@@ -86,7 +88,15 @@ internal sealed class CopilotHostResolver
         try
         {
             int paneRootPid = copilotPid;
-            foreach (var ancestor in this.EnumerateAncestors(copilotPid))
+            var ancestors = this.EnumerateAncestors(copilotPid).ToList();
+            RuntimeDiagnosticLog.Write(
+                "WT parent-chain copilotPid={0} chain={1}",
+                copilotPid,
+                string.Join(" -> ", ancestors.Select(ancestor => string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{ancestor.Pid}:{ancestor.ProcessName ?? "<unknown>"}"))));
+
+            foreach (var ancestor in ancestors)
             {
                 if (ancestor.ProcessName == null)
                 {
@@ -99,9 +109,16 @@ internal sealed class CopilotHostResolver
                     var hwnd = this._provider.GetTopLevelWindow(ancestor.Pid);
                     if (hwnd == IntPtr.Zero)
                     {
+                        RuntimeDiagnosticLog.Write("WT parent-chain copilotPid={0} reached WT pid={1} with no hwnd", copilotPid, ancestor.Pid);
                         return null;
                     }
 
+                    RuntimeDiagnosticLog.Write(
+                        "WT context copilotPid={0} wtPid={1} paneRootPid={2} hwnd={3}",
+                        copilotPid,
+                        ancestor.Pid,
+                        paneRootPid,
+                        hwnd);
                     return new WindowsTerminalHostContext(
                         hwnd,
                         ancestor.Pid,
@@ -116,6 +133,7 @@ internal sealed class CopilotHostResolver
         catch (Exception ex)
         {
             Program.Logger.LogDebug("Windows Terminal context resolution failed for pid {Pid}: {Error}", copilotPid, ex.Message);
+            RuntimeDiagnosticLog.Write("WT context resolution failed copilotPid={0} error={1}", copilotPid, ex.Message);
         }
 
         return null;

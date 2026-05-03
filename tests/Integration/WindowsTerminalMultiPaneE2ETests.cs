@@ -19,7 +19,8 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
     private readonly HashSet<IntPtr> _wtWindowHwnds = [];
     private readonly HashSet<string> _createdSessionDirs = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _artifactRoot = Path.Combine(
-        Path.GetTempPath(),
+        Environment.CurrentDirectory,
+        "TestResults",
         $"copilot-booster-it-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
     private string? _markerRoot;
 
@@ -178,10 +179,18 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
             Assert.Contains("Copilot CLI", row.Cells["RunningApps"].Value?.ToString() ?? string.Empty);
         }
 
-        Assert.Equal(
-            probes.Length,
-            grid.Rows.Cast<DataGridViewRow>().Count(row =>
-                (row.Cells["RunningApps"].Value?.ToString() ?? string.Empty).Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase)));
+        AssertRowsContainCopilotCli(grid, probes);
+
+        var foregroundProbe = probes[1];
+        var foregroundWtHwnd = GetWindowsTerminalHwnd(foregroundProbe.Host!);
+        ClickWindowsTerminalTab(paneGateway, foregroundWtHwnd, foregroundProbe);
+        Thread.Sleep(500);
+        tracker.HandleWindowNameChanged(foregroundWtHwnd);
+        tracker.OnWindowTitleChanged(foregroundWtHwnd, WindowFocusService.GetWindowTitle(foregroundWtHwnd), ActiveStatusTracker.BuildSessionSummaryMap(sessions));
+        snapshot = tracker.IncrementalRefresh(sessions);
+        visuals.Populate(sessions, snapshot, searchQuery: null);
+        Application.DoEvents();
+        AssertRowsContainCopilotCli(grid, probes);
 
         var previousSettings = Program._settings;
         Program._settings = CreateTestSettings();
@@ -213,6 +222,22 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         var settings = LauncherSettings.CreateDefault();
         settings.SuppressSave = true;
         return settings;
+    }
+
+    private static void AssertRowsContainCopilotCli(TestDataGridView grid, IReadOnlyList<PaneProbe> probes)
+    {
+        foreach (var probe in probes)
+        {
+            var row = Assert.Single(
+                grid.Rows.Cast<DataGridViewRow>(),
+                candidate => string.Equals(candidate.Tag as string, probe.SessionId, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("Copilot CLI", row.Cells["RunningApps"].Value?.ToString() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Equal(
+            probes.Count,
+            grid.Rows.Cast<DataGridViewRow>().Count(row =>
+                (row.Cells["RunningApps"].Value?.ToString() ?? string.Empty).Contains("Copilot CLI", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static TestDataGridView CreateGrid()

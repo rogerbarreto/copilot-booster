@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Automation;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,32 @@ namespace CopilotBooster.Services;
 
 internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
 {
+    private const ushort VK_CONTROL = 0x11;
+    private const ushort VK_SHIFT = 0x10;
+    private const ushort VK_TAB = 0x09;
+    private const uint INPUT_KEYBOARD = 1;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint cInputs, INPUT[] pInputs, int cbSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint type;
+        public KEYBDINPUT ki;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public nuint dwExtraInfo;
+    }
+
     public WindowsTerminalPaneEnumeration EnumeratePanes(IntPtr wtHwnd)
     {
         try
@@ -78,33 +105,40 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
 
         try
         {
-            var sw = Stopwatch.StartNew();
-            var rootElement = AutomationElement.FromHandle(wtHwnd);
-            if (rootElement == null)
+            var tabItems = EnumerateTabItems(wtHwnd, 250);
+            if (tabItems.Count == 0)
             {
+                RuntimeDiagnosticLog.Write("WT focus dispatch hwnd={0} target={1} tabs=none", wtHwnd, paneRuntimeId);
                 return false;
             }
 
-            var condition = new PropertyCondition(
-                AutomationElement.ControlTypeProperty,
-                ControlType.TabItem);
-            var tabItems = rootElement.FindAll(TreeScope.Descendants, condition);
-            if (tabItems == null || tabItems.Count == 0)
+            RuntimeDiagnosticLog.Write(
+                "WT focus dispatch hwnd={0} target={1} tabs=[{2}]",
+                wtHwnd,
+                paneRuntimeId,
+                FormatTabDiagnostics(tabItems));
+
+            var targetIndex = tabItems.FindIndex(tab => string.Equals(GetRuntimeId(tab), paneRuntimeId, StringComparison.Ordinal));
+            if (targetIndex < 0)
             {
+                RuntimeDiagnosticLog.Write("WT focus dispatch target runtime not found hwnd={0} target={1}", wtHwnd, paneRuntimeId);
                 return false;
             }
 
-            foreach (AutomationElement tabItem in tabItems)
+            if (TryActivateAndVerify(tabItems[targetIndex], wtHwnd, paneRuntimeId))
             {
-                if (sw.ElapsedMilliseconds > 250)
-                {
-                    return false;
-                }
+                RuntimeDiagnosticLog.Write(
+                    "WT focus dispatch selected target via UIA hwnd={0} target={1} postSelected={2}",
+                    wtHwnd,
+                    paneRuntimeId,
+                    GetSelectedRuntimeId(wtHwnd) ?? "none");
+                return true;
+            }
 
-                if (string.Equals(GetRuntimeId(tabItem), paneRuntimeId, StringComparison.Ordinal))
-                {
-                    return TryActivateAndVerify(tabItem, wtHwnd, paneRuntimeId);
-                }
+            var currentIndex = tabItems.FindIndex(IsSelected);
+            if (TryFocusPaneWithKeyboardFallback(wtHwnd, paneRuntimeId, currentIndex, targetIndex, tabItems.Count))
+            {
+                return true;
             }
         }
         catch (Exception ex)
@@ -114,6 +148,7 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
                 wtHwnd,
                 paneRuntimeId,
                 ex.Message);
+            RuntimeDiagnosticLog.Write("WT focus dispatch failed hwnd={0} target={1} error={2}", wtHwnd, paneRuntimeId, ex.Message);
         }
 
         return false;
@@ -122,6 +157,72 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
     public IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd)
     {
         return this.EnumeratePanes(wtHwnd).Panes.Select(pane => (pane.Name, pane.Select)).ToList();
+    }
+
+    private static List<AutomationElement> EnumerateTabItems(IntPtr wtHwnd, int timeoutMs)
+    {
+        var rootElement = AutomationElement.FromHandle(wtHwnd);
+        if (rootElement == null)
+        {
+            return [];
+        }
+
+        var condition = new PropertyCondition(
+            AutomationElement.ControlTypeProperty,
+            ControlType.TabItem);
+        var rawTabItems = rootElement.FindAll(TreeScope.Descendants, condition);
+        var tabItems = new List<AutomationElement>();
+        if (rawTabItems == null || rawTabItems.Count == 0)
+        {
+            return tabItems;
+        }
+
+        var sw = Stopwatch.StartNew();
+        foreach (AutomationElement tabItem in rawTabItems)
+        {
+            if (sw.ElapsedMilliseconds > timeoutMs)
+            {
+                break;
+            }
+
+            tabItems.Add(tabItem);
+        }
+
+        return tabItems;
+    }
+
+    private static string FormatTabDiagnostics(IReadOnlyList<AutomationElement> tabItems)
+    {
+        return string.Join(
+            "; ",
+            tabItems.Select((tab, index) =>
+            {
+                try
+                {
+                    return $"#{index}:name='{tab.Current.Name}',runtime='{GetRuntimeId(tab) ?? "null"}',selected={IsSelected(tab)}";
+                }
+                catch (ElementNotAvailableException)
+                {
+                    return $"#{index}:<not-available>";
+                }
+                catch (InvalidOperationException)
+                {
+                    return $"#{index}:<invalid>";
+                }
+            }));
+    }
+
+    private static string? GetSelectedRuntimeId(IntPtr wtHwnd)
+    {
+        foreach (var tab in EnumerateTabItems(wtHwnd, 250))
+        {
+            if (IsSelected(tab))
+            {
+                return GetRuntimeId(tab);
+            }
+        }
+
+        return null;
     }
 
     public static string ReadWindowText(IntPtr wtHwnd, int maxLength = 20_000)
@@ -326,6 +427,129 @@ internal sealed class WindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
     private static Action CreateSelectAction(AutomationElement tabItem)
     {
         return () => _ = TryActivateAndVerify(tabItem, IntPtr.Zero, GetRuntimeId(tabItem) ?? string.Empty);
+    }
+
+    private static bool TryFocusPaneWithKeyboardFallback(
+        IntPtr wtHwnd,
+        string paneRuntimeId,
+        int currentIndex,
+        int targetIndex,
+        int tabCount)
+    {
+        if (currentIndex < 0 || targetIndex < 0 || tabCount <= 0)
+        {
+            RuntimeDiagnosticLog.Write(
+                "WT Ctrl+Tab fallback unavailable hwnd={0} target={1} currentIndex={2} targetIndex={3} tabCount={4}",
+                wtHwnd,
+                paneRuntimeId,
+                currentIndex,
+                targetIndex,
+                tabCount);
+            return false;
+        }
+
+        var forwardSteps = (targetIndex - currentIndex + tabCount) % tabCount;
+        var backwardSteps = (currentIndex - targetIndex + tabCount) % tabCount;
+        var backwards = backwardSteps < forwardSteps;
+        var steps = backwards ? backwardSteps : forwardSteps;
+        RuntimeDiagnosticLog.Write(
+            "WT Ctrl+Tab fallback hwnd={0} target={1} currentIndex={2} targetIndex={3} steps={4} backwards={5}",
+            wtHwnd,
+            paneRuntimeId,
+            currentIndex,
+            targetIndex,
+            steps,
+            backwards);
+
+        if (steps == 0)
+        {
+            return string.Equals(GetSelectedRuntimeId(wtHwnd), paneRuntimeId, StringComparison.Ordinal);
+        }
+
+        _ = WindowFocusService.TryFocusWindowHandle(wtHwnd);
+        for (var i = 0; i < steps; i++)
+        {
+            if (!SendCtrlTab(backwards))
+            {
+                return false;
+            }
+
+            Thread.Sleep(80);
+        }
+
+        var selectedRuntimeId = WaitForSelectedRuntimeId(wtHwnd, paneRuntimeId, 750);
+        RuntimeDiagnosticLog.Write(
+            "WT Ctrl+Tab fallback post-select hwnd={0} target={1} selected={2}",
+            wtHwnd,
+            paneRuntimeId,
+            selectedRuntimeId ?? "none");
+        return string.Equals(selectedRuntimeId, paneRuntimeId, StringComparison.Ordinal);
+    }
+
+    private static string? WaitForSelectedRuntimeId(IntPtr wtHwnd, string expectedRuntimeId, int timeoutMs)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        string? selectedRuntimeId;
+        do
+        {
+            selectedRuntimeId = GetSelectedRuntimeId(wtHwnd);
+            if (string.Equals(selectedRuntimeId, expectedRuntimeId, StringComparison.Ordinal))
+            {
+                return selectedRuntimeId;
+            }
+
+            Thread.Sleep(50);
+        } while (Environment.TickCount64 < deadline);
+
+        return selectedRuntimeId;
+    }
+
+    private static bool SendCtrlTab(bool backwards)
+    {
+        var inputs = backwards
+            ? new[]
+            {
+                KeyDown(VK_CONTROL),
+                KeyDown(VK_SHIFT),
+                KeyDown(VK_TAB),
+                KeyUp(VK_TAB),
+                KeyUp(VK_SHIFT),
+                KeyUp(VK_CONTROL)
+            }
+            :
+            [
+                KeyDown(VK_CONTROL),
+                KeyDown(VK_TAB),
+                KeyUp(VK_TAB),
+                KeyUp(VK_CONTROL)
+            ];
+
+        var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        if (sent != inputs.Length)
+        {
+            RuntimeDiagnosticLog.Write("WT Ctrl+Tab SendInput sent {0}/{1}; lastError={2}", sent, inputs.Length, Marshal.GetLastWin32Error());
+            return false;
+        }
+
+        return true;
+    }
+
+    private static INPUT KeyDown(ushort virtualKey)
+    {
+        return new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            ki = new KEYBDINPUT { wVk = virtualKey }
+        };
+    }
+
+    private static INPUT KeyUp(ushort virtualKey)
+    {
+        return new INPUT
+        {
+            type = INPUT_KEYBOARD,
+            ki = new KEYBDINPUT { wVk = virtualKey, dwFlags = KEYEVENTF_KEYUP }
+        };
     }
 
     private static bool TryActivateAndVerify(AutomationElement tabItem, IntPtr wtHwnd, string paneRuntimeId)

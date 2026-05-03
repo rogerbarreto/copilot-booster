@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using CopilotBooster.Models;
@@ -36,6 +37,7 @@ internal class ActiveStatusTracker
     private readonly WindowsTerminalPaneCacheService _windowsTerminalPaneCache;
     private readonly Func<IntPtr, bool> _focusWindowHandle;
     private readonly Func<IntPtr, bool> _isWindowAlive;
+    private readonly Func<int, bool> _isProcessAlive;
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     internal readonly EventsJournalService EventsJournal = new();
     private bool _handleCacheInitialLoadDone;
@@ -93,12 +95,41 @@ internal class ActiveStatusTracker
         WindowsTerminalPaneCacheService windowsTerminalPaneCache,
         Func<IntPtr, bool> focusWindowHandle,
         Func<IntPtr, bool> isWindowAlive)
+        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, isWindowAlive, IsProcessAlive)
+    {
+    }
+
+    internal ActiveStatusTracker(
+        CopilotHostResolver hostResolver,
+        IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
+        WindowsTerminalPaneCacheService windowsTerminalPaneCache,
+        Func<IntPtr, bool> focusWindowHandle,
+        Func<IntPtr, bool> isWindowAlive,
+        Func<int, bool> isProcessAlive)
     {
         this._hostResolver = hostResolver;
         this._windowsTerminalPaneGateway = windowsTerminalPaneGateway;
         this._windowsTerminalPaneCache = windowsTerminalPaneCache;
         this._focusWindowHandle = focusWindowHandle;
         this._isWindowAlive = isWindowAlive;
+        this._isProcessAlive = isProcessAlive;
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            return !Process.GetProcessById(pid).HasExited;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -146,7 +177,8 @@ internal class ActiveStatusTracker
             existing.HostPid == info.HostPid &&
             existing.CopilotPid == info.CopilotPid &&
             existing.ParentHostHwnd == info.ParentHostHwnd &&
-            string.Equals(existing.PaneRuntimeId, info.PaneRuntimeId, StringComparison.Ordinal))
+            string.Equals(existing.PaneRuntimeId, info.PaneRuntimeId, StringComparison.Ordinal) &&
+            existing.PaneRootProcessId == info.PaneRootProcessId)
         {
             return;
         }
@@ -206,7 +238,7 @@ internal class ActiveStatusTracker
     {
         // Don't re-resolve if we already have a host for this session and it's still alive
         var existing = this.GetCopilotHost(sessionId);
-        if (existing != null && this._isWindowAlive(existing.HostHwnd))
+        if (existing != null && this.IsCopilotHostActive(existing))
         {
             return;
         }
@@ -249,18 +281,20 @@ internal class ActiveStatusTracker
 
     internal HashSet<string> HandleWindowNameChanged(IntPtr hwnd)
     {
-        var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         this._windowsTerminalPaneCache.InvalidateForTerminalWindow(hwnd);
 
-        var toRemove = this._copilotHosts
+        var affected = this._copilotHosts
             .Where(kvp => IsWindowsTerminalHost(kvp.Value) && GetParentHostHwnd(kvp.Value) == hwnd)
             .Select(kvp => kvp.Key)
-            .ToList();
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var sid in toRemove)
+        if (affected.Count > 0)
         {
-            this.RemoveCopilotHost(sid);
-            affected.Add(sid);
+            RuntimeDiagnosticLog.Write(
+                "WT title/name changed hwnd={0}; preserving {1} host projection(s): {2}",
+                hwnd,
+                affected.Count,
+                string.Join(",", affected));
         }
 
         return affected;
@@ -278,7 +312,8 @@ internal class ActiveStatusTracker
                 copilotPid,
                 wtContext.HostProcessName,
                 wtContext.HostKindLabel,
-                wtContext.HostHwnd);
+                wtContext.HostHwnd,
+                PaneRootProcessId: wtContext.PaneRootPid);
             return this.ResolveWindowsTerminalPane(sessionId, wtInfo, sessionSummary, wtContext.PaneRootPid);
         }
 
@@ -298,6 +333,13 @@ internal class ActiveStatusTracker
         var terms = BuildWindowsTerminalPaneMatchTerms(sessionId, sessionSummary);
         var result = this._windowsTerminalPaneGateway.EnumeratePanes(wtWindowHwnd);
         LogWindowsTerminalPaneEnumeration(result, wtWindowHwnd, info.CopilotPid);
+        RuntimeDiagnosticLog.Write(
+            "WT resolve session={0} copilotPid={1} paneRootPid={2} hwnd={3} panes=[{4}]",
+            sessionId,
+            info.CopilotPid,
+            paneRootPid?.ToString(CultureInfo.InvariantCulture) ?? "null",
+            wtWindowHwnd,
+            FormatPaneDiagnostics(result.Panes));
 
         var pane = FindMatchingPane(result.Panes, info.CopilotPid, terms, preferredTitle: null, paneRootPid);
         if (pane == null)
@@ -307,11 +349,28 @@ internal class ActiveStatusTracker
 
         var paneHwnd = pane.Hwnd == IntPtr.Zero ? wtWindowHwnd : pane.Hwnd;
         this._windowsTerminalPaneCache.Set(wtWindowHwnd, info.CopilotPid, paneHwnd, pane.Name, pane.RuntimeId);
-        return info with { HostHwnd = paneHwnd, ParentHostHwnd = wtWindowHwnd, PaneTitle = pane.Name, PaneRuntimeId = pane.RuntimeId };
+        return info with
+        {
+            HostHwnd = paneHwnd,
+            ParentHostHwnd = wtWindowHwnd,
+            PaneTitle = pane.Name,
+            PaneRuntimeId = pane.RuntimeId,
+            PaneRootProcessId = paneRootPid ?? pane.PaneRootProcessId
+        };
     }
 
     private void FocusCopilotHost(CopilotHostInfo hostInfo)
     {
+        RuntimeDiagnosticLog.Write(
+            "FocusCopilotHost copilotPid={0} hostPid={1} host={2} parent={3} runtimeId={4} paneRootPid={5} paneTitle={6}",
+            hostInfo.CopilotPid,
+            hostInfo.HostPid,
+            hostInfo.HostHwnd,
+            hostInfo.ParentHostHwnd,
+            hostInfo.PaneRuntimeId ?? "null",
+            hostInfo.PaneRootProcessId?.ToString(CultureInfo.InvariantCulture) ?? "null",
+            hostInfo.PaneTitle ?? "null");
+
         if (IsWindowsTerminalHost(hostInfo) && hostInfo.ParentHostHwnd != IntPtr.Zero)
         {
             this._focusWindowHandle(hostInfo.ParentHostHwnd);
@@ -348,7 +407,7 @@ internal class ActiveStatusTracker
         var result = this._windowsTerminalPaneGateway.EnumeratePanes(wtWindowHwnd);
         LogWindowsTerminalPaneEnumeration(result, wtWindowHwnd, hostInfo.CopilotPid);
 
-        var pane = FindMatchingPane(result.Panes, hostInfo.CopilotPid, terms, hostInfo.PaneTitle, paneRootPid: null);
+        var pane = FindMatchingPane(result.Panes, hostInfo.CopilotPid, terms, hostInfo.PaneTitle, hostInfo.PaneRootProcessId);
         if (pane == null)
         {
             return false;
@@ -370,6 +429,15 @@ internal class ActiveStatusTracker
                 ex.Message);
             return false;
         }
+    }
+
+    private static string FormatPaneDiagnostics(IReadOnlyList<WindowsTerminalPaneInfo> panes)
+    {
+        return string.Join(
+            "; ",
+            panes.Select(pane => string.Create(
+                CultureInfo.InvariantCulture,
+                $"name='{pane.Name}',runtime='{pane.RuntimeId ?? "null"}',pid={pane.ProcessId},paneRoot={pane.PaneRootProcessId?.ToString(CultureInfo.InvariantCulture) ?? "null"},selected={pane.IsSelected}")));
     }
 
     private static void LogWindowsTerminalPaneEnumeration(WindowsTerminalPaneEnumeration result, IntPtr wtWindowHwnd, int copilotPid)
@@ -628,14 +696,23 @@ internal class ActiveStatusTracker
     internal string BuildActiveText(string sessionId)
     {
         var parts = new List<string>();
+        var hasLiveCopilotHost = this._copilotHosts.TryGetValue(sessionId, out var copilotHost)
+            && this.IsCopilotHostActive(copilotHost);
+        if (hasLiveCopilotHost)
+        {
+            parts.Add("Copilot CLI");
+        }
 
         if (this._activeTrackedWindows.TryGetValue(sessionId, out var tracked))
         {
-            // Count by type to decide on numbering
-            var terminals = tracked.Where(t => t.Label.StartsWith("Terminal", StringComparison.OrdinalIgnoreCase)).ToList();
-            var copilotClis = tracked.Where(t => t.Label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase)).ToList();
+            var visibleTracked = hasLiveCopilotHost
+                ? tracked.Where(t => !t.Label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase)).ToList()
+                : tracked;
+
+            var terminals = visibleTracked.Where(t => t.Label.StartsWith("Terminal", StringComparison.OrdinalIgnoreCase)).ToList();
+            var copilotClis = visibleTracked.Where(t => t.Label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase)).ToList();
             int cliIndex = 0;
-            foreach (var (label, _, _) in tracked)
+            foreach (var (label, _, _) in visibleTracked)
             {
                 if (label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase))
                 {
@@ -652,9 +729,8 @@ internal class ActiveStatusTracker
                 }
             }
         }
-        else if (this._activeSessionIds.Contains(sessionId))
+        else if (!hasLiveCopilotHost && this._activeSessionIds.Contains(sessionId))
         {
-            // Fallback: PID-based detection for Copilot CLI sessions without a titled window
             parts.Add("Copilot CLI");
         }
 
@@ -744,7 +820,21 @@ internal class ActiveStatusTracker
             parts.Add("Teams");
         }
 
+        RuntimeDiagnosticLog.Write(
+            "ActiveText session={0} liveHost={1} activeSession={2} tracked={3} result={4}",
+            sessionId,
+            hasLiveCopilotHost,
+            this._activeSessionIds.Contains(sessionId),
+            this._activeTrackedWindows.TryGetValue(sessionId, out var diagnosticTracked) ? diagnosticTracked.Count : 0,
+            string.Join("|", parts));
+
         return string.Join("\n", parts);
+    }
+
+    private bool IsCopilotHostActive(CopilotHostInfo hostInfo)
+    {
+        var focusHwnd = IsWindowsTerminalHost(hostInfo) ? GetParentHostHwnd(hostInfo) : hostInfo.HostHwnd;
+        return this._isWindowAlive(focusHwnd) && this._isProcessAlive(hostInfo.CopilotPid);
     }
 
     /// <summary>
@@ -754,7 +844,7 @@ internal class ActiveStatusTracker
     internal bool TryFocusCopilotCli(string sessionId)
     {
         // Priority 1: Use host HWND if available and alive
-        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this._isWindowAlive(hostInfo.HostHwnd))
+        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
         {
             this.FocusCopilotHost(hostInfo);
             return true;
@@ -799,7 +889,7 @@ internal class ActiveStatusTracker
         var focusTargets = new List<(string name, Action focus)>();
 
         // Priority 1: Add host-resolved Copilot CLI first if available and alive
-        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this._isWindowAlive(hostInfo.HostHwnd))
+        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
         {
             var capturedHostInfo = hostInfo;
             focusTargets.Add(("Copilot CLI", () => this.FocusCopilotHost(capturedHostInfo)));
@@ -1064,6 +1154,7 @@ internal class ActiveStatusTracker
         // Scan for open tracked windows by title (including session-summary matching)
         // Pass previously tracked HWNDs as fallback for Copilot CLI windows whose titles change dynamically
         this._activeTrackedWindows = WindowFocusService.FindTrackedWindows(BuildSessionSummaryMap(sessionSnapshot), this._activeTrackedWindows);
+        this.ReprojectActiveCopilotHosts();
 
         // Sync terminal cache with actual open windows
         var openTerminalIds = new HashSet<string>(this._activeTrackedWindows.Keys, StringComparer.OrdinalIgnoreCase);
@@ -1116,6 +1207,7 @@ internal class ActiveStatusTracker
                     this.ProjectCopilotHostToActiveWindows(kvp.Key, kvp.Value);
                 }
             }
+            this.ReprojectActiveCopilotHosts();
 
             // Also load legacy ide-cache.json if window-handles.json doesn't exist yet
             if (!File.Exists(Program.WindowHandleCacheFile) && File.Exists(Program.IdeCacheFile))
@@ -1270,7 +1362,7 @@ internal class ActiveStatusTracker
             }
 
             var existing = this.GetCopilotHost(session.Id);
-            if (existing != null && this._isWindowAlive(existing.HostHwnd))
+            if (existing != null && this.IsCopilotHostActive(existing))
             {
                 continue;
             }
@@ -1285,6 +1377,8 @@ internal class ActiveStatusTracker
                 this.RemoveCopilotHost(session.Id);
             }
         }
+
+        this.ReprojectActiveCopilotHosts();
 
         // Edge workspace scanning happens separately via ScanAndTrackEdgeWorkspaces()
         // which must run on the UI (STA) thread for UI Automation to work.
@@ -1394,6 +1488,11 @@ internal class ActiveStatusTracker
     {
         var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var match = WindowFocusService.MatchTrackedWindowTitle(title, sessionSummaries);
+        RuntimeDiagnosticLog.Write(
+            "WindowTitleChanged hwnd={0} title='{1}' titleMatch={2}",
+            hwnd,
+            title,
+            match.HasValue ? $"{match.Value.SessionId}:{match.Value.Label}" : "none");
 
         // Remove this HWND from any title-scan session it was previously tracked under.
         // Host-resolved Copilot CLI projections are keyed by session/runtime-id and survive WT title churn.
@@ -1662,6 +1761,15 @@ internal class ActiveStatusTracker
             }
         }
 
+        foreach (var sessionId in this._copilotHosts
+            .Where(kvp => kvp.Value.CopilotPid == pid)
+            .Select(kvp => kvp.Key)
+            .ToList())
+        {
+            this.RemoveCopilotHost(sessionId);
+            affected.Add(sessionId);
+        }
+
         return affected;
     }
 
@@ -1923,6 +2031,21 @@ internal class ActiveStatusTracker
     /// </summary>
     internal IEnumerable<EdgeWorkspaceService> GetTrackedEdgeWorkspaces()
         => this._edgeWorkspaces.Values.ToList();
+
+    private void ReprojectActiveCopilotHosts()
+    {
+        foreach (var kvp in this._copilotHosts.ToList())
+        {
+            if (this.IsCopilotHostActive(kvp.Value))
+            {
+                this.ProjectCopilotHostToActiveWindows(kvp.Key, kvp.Value);
+            }
+            else
+            {
+                this.UnprojectCopilotHostFromActiveWindows(kvp.Key, kvp.Value);
+            }
+        }
+    }
 
     /// <summary>
     /// Projects a CopilotHostInfo entry into _activeTrackedWindows as a "Copilot CLI" entry.

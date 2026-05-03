@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Windows Terminal multi-tab discovery** — Copilot sessions in separate WT tabs that share one parent `wt.exe` HWND now remain independently active in the booster grid by carrying the UIA pane runtime id alongside the parent HWND, preferring process-tree pane-root correlation over mutable tab-title matching.
 - **Windows Terminal tab focus** — clicking a WT-hosted Copilot CLI link now foregrounds the WT parent, selects the cached UIA tab item with `SelectionItemPattern.Select()` / `InvokePattern.Invoke()`, and verifies the selected tab/readback title before treating focus as successful.
 - **Windows Terminal live E2E coverage** — the LocalOnly WT regression now clicks the actual grid link for each session and verifies the selected UIA tab runtime id, tab name, WT window title, and UIA-visible in-pane marker after focus so swapped session/pane mappings fail the test.
+- **Windows Terminal title-bind regression** — WT tab title/name-change events no longer evict PID-resolved Copilot hosts or collapse both grid links onto the foreground tab; active CLI links are computed from the live Copilot PID and cached pane runtime id.
+- **Windows Terminal focus diagnostics and fallback** — WT host resolution/focus now writes capped runtime diagnostics to `%LOCALAPPDATA%\CopilotBooster\logs\diag.log` and falls back to verified Ctrl+Tab/Ctrl+Shift+Tab navigation when UIA tab selection does not stick.
 
 ## [0.21.0] - 2026-05-03
 

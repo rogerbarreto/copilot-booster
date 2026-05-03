@@ -27,7 +27,8 @@ internal static class WindowHandleCacheService
         int? CopilotPid = null,
         long? ParentHostHwnd = null,
         string? PaneTitle = null,
-        string? PaneRuntimeId = null);
+        string? PaneRuntimeId = null,
+        int? PaneRootProcessId = null);
 
     /// <summary>
     /// Saves all tracked window handles to the cache file.
@@ -112,7 +113,8 @@ internal static class WindowHandleCacheService
                         host.CopilotPid,
                         parentHostHwnd.ToInt64(),
                         host.PaneTitle,
-                        host.PaneRuntimeId));
+                        host.PaneRuntimeId,
+                        host.PaneRootProcessId));
                 }
             }
 
@@ -207,7 +209,8 @@ internal static class WindowHandleCacheService
                                     entry.FolderPath ?? "Unknown",
                                     parentHostHwnd,
                                     entry.PaneTitle,
-                                    entry.PaneRuntimeId);
+                                    entry.PaneRuntimeId,
+                                    entry.PaneRootProcessId);
                             }
                         }
                         break;
