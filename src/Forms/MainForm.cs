@@ -1096,6 +1096,24 @@ internal partial class MainForm : Form
             });
         };
 
+        // Tab switches inside a single wt window don't change the foreground
+        // hwnd, so the foreground hook above can't drive the booster grid's
+        // active-session highlight when the user manually flips tabs in their
+        // terminal. ActiveStatusTracker fires ActiveSessionHintChanged whenever
+        // OnWindowTitleChanged title-matches a Copilot CLI tab (the strongest
+        // possible signal of which session is now in front), so subscribe and
+        // mirror the SelectSessionById call from the foreground handler.
+        this._activeTracker.ActiveSessionHintChanged += sessionId =>
+        {
+            if (Program._settings.TrackActiveSession && this.IsHandleCreated)
+            {
+                this.BeginInvoke(() =>
+                {
+                    this._sessionsVisuals.SelectSessionById(sessionId, this._cachedSessions);
+                });
+            }
+        };
+
         this.Shown += async (s, e) =>
         {
             // On first launch with toast mode, slide up instead of just hiding

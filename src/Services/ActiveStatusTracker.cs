@@ -67,6 +67,18 @@ internal class ActiveStatusTracker
     /// </summary>
     internal event Action<string>? CopilotHostRemoved;
 
+    /// <summary>
+    /// Fired when an OnWindowTitleChanged title-match identifies a Copilot CLI
+    /// session, signalling the user just switched their attention to that
+    /// session's tab inside its host window. MainForm subscribes to drive the
+    /// active-session highlight in the booster grid -- the foreground hook's
+    /// ResolveSessionForHwnd path can't help when tab switches happen inside
+    /// a single wt window (foreground hwnd doesn't change). Always fires when
+    /// a Copilot CLI title-match resolves; consumers gate on UI settings and
+    /// session existence themselves.
+    /// </summary>
+    internal event Action<string>? ActiveSessionHintChanged;
+
     internal ActiveStatusTracker()
         : this(new CopilotHostResolver(), new WindowsTerminalPaneGateway(), new WindowsTerminalPaneCacheService())
     {
@@ -1707,6 +1719,14 @@ internal class ActiveStatusTracker
             if (label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase))
             {
                 this.UpdateCopilotHostPaneTitle(sessionId, title);
+
+                // Tab switches inside a single wt window don't change the
+                // foreground hwnd, so the booster's foreground hook can't drive
+                // the active-session highlight. Title-match on a Copilot CLI tab
+                // IS the user's intent signal that they just switched attention
+                // to this session -- propagate it so MainForm can update the
+                // grid highlight.
+                this.ActiveSessionHintChanged?.Invoke(sessionId);
             }
         }
 
