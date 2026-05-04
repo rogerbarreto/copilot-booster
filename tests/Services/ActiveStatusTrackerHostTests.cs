@@ -506,6 +506,133 @@ public sealed class ActiveStatusTrackerHostTests
         Assert.Equal(wtHwnd, tracker.GetCopilotHost(sessionId)!.ParentHostHwnd);
     }
 
+    [Fact]
+    public void ResolveSessionForHwnd_MultipleSessionsShareWtHwnd_ReturnsSessionWithSelectedPane()
+    {
+        // Reproduces Roger's 2026-05-04 finding: when a wt window hosts multiple
+        // copilot tabs (after FullRefresh title-scan rebind binds both sessions to
+        // the same wtHwnd in _copilotHosts → ProjectCopilotHostToActiveWindows
+        // adds a "Copilot CLI" entry with hwnd=wtHwnd to BOTH sessions in
+        // _activeTrackedWindows), the foreground-window hook fires
+        // OnWindowFocused(wtHwnd). MainForm calls ResolveSessionForHwnd(wtHwnd) to
+        // determine which session row to highlight. Pre-fix: returns whichever
+        // sessionId iterates first — for Roger that flipped to "Run Test 2" when
+        // he clicked the "Run Tests" link. Post-fix: when multiple candidates
+        // exist, disambiguate by the currently-selected pane's RuntimeId against
+        // each candidate session's CopilotHostInfo.PaneRuntimeId. Pane runtime ids
+        // are unique within a wt window so this cannot false-positive.
+        var wtHwnd = new IntPtr(0x900FBC);
+        var wtMonarchPid = 18144;
+        var runTestsSessionId = "fe873d35-af00-423d-a088-554eca62c38e";
+        var runTest2SessionId = "ea9da1be-8992-4f58-939a-1433797e4f3a";
+        const string runTestsRuntimeId = "42.9179664.4.2978";
+        const string runTest2RuntimeId = "42.9179664.4.2983";
+
+        var tree = new FakeProcessTree()
+            .Add(wtMonarchPid, null, "WindowsTerminal", wtHwnd)
+            .AddWindows(wtMonarchPid, wtHwnd);
+
+        // User just clicked "Run Tests" link → that pane is currently selected.
+        var paneRunTests = new WindowsTerminalPaneInfo(
+            Name: "Run Tests",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtMonarchPid,
+            IsSelected: true,
+            Select: () => { },
+            RuntimeId: runTestsRuntimeId,
+            PaneRootProcessId: null);
+        var paneRunTest2 = new WindowsTerminalPaneInfo(
+            Name: "Run Test 2",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtMonarchPid,
+            IsSelected: false,
+            Select: () => { },
+            RuntimeId: runTest2RuntimeId,
+            PaneRootProcessId: null);
+        var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
+        {
+            [wtHwnd] = new[] { paneRunTests, paneRunTest2 }
+        });
+        var tracker = CreateTracker(tree, gateway);
+
+        // Insert "Run Test 2" FIRST so it iterates first in _activeTrackedWindows.
+        // This locks in the bug deterministically: pre-fix, ResolveSessionForHwnd
+        // walks the dict in insertion order and returns the first match.
+        tracker.SetCopilotHost(runTest2SessionId, new CopilotHostInfo(
+            HostHwnd: wtHwnd,
+            HostPid: wtMonarchPid,
+            CopilotPid: 88860,
+            HostProcessName: "WindowsTerminal",
+            HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd,
+            PaneTitle: "Run Test 2",
+            PaneRuntimeId: runTest2RuntimeId,
+            PaneRootProcessId: null));
+        tracker.SetCopilotHost(runTestsSessionId, new CopilotHostInfo(
+            HostHwnd: wtHwnd,
+            HostPid: wtMonarchPid,
+            CopilotPid: 101056,
+            HostProcessName: "WindowsTerminal",
+            HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd,
+            PaneTitle: "Run Tests",
+            PaneRuntimeId: runTestsRuntimeId,
+            PaneRootProcessId: null));
+
+        var resolved = tracker.ResolveSessionForHwnd(wtHwnd);
+
+        Assert.Equal(runTestsSessionId, resolved);
+    }
+
+    [Fact]
+    public void ResolveSessionForHwnd_MultipleSessionsShareWtHwnd_OtherPaneSelected_ReturnsThatSession()
+    {
+        // Symmetric inverse of the disambiguation test: when the OTHER pane is
+        // selected, we must return THAT session — proving the disambiguation is
+        // driven by the runtime-id match, not by insertion order or stable-but-
+        // wrong logic. Same setup, only IsSelected flipped.
+        var wtHwnd = new IntPtr(0x900FBC);
+        var wtMonarchPid = 18144;
+        var sessionA = "session-a-runtime";
+        var sessionB = "session-b-runtime";
+        const string runtimeA = "42.9179664.4.2978";
+        const string runtimeB = "42.9179664.4.2983";
+
+        var tree = new FakeProcessTree()
+            .Add(wtMonarchPid, null, "WindowsTerminal", wtHwnd)
+            .AddWindows(wtMonarchPid, wtHwnd);
+
+        var paneA = new WindowsTerminalPaneInfo(
+            Name: "Pane A", Hwnd: IntPtr.Zero, ProcessId: wtMonarchPid,
+            IsSelected: false, Select: () => { },
+            RuntimeId: runtimeA, PaneRootProcessId: null);
+        var paneB = new WindowsTerminalPaneInfo(
+            Name: "Pane B", Hwnd: IntPtr.Zero, ProcessId: wtMonarchPid,
+            IsSelected: true, Select: () => { },
+            RuntimeId: runtimeB, PaneRootProcessId: null);
+        var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
+        {
+            [wtHwnd] = new[] { paneA, paneB }
+        });
+        var tracker = CreateTracker(tree, gateway);
+
+        // Insert sessionA first (iterates first) — but sessionB's pane is selected.
+        tracker.SetCopilotHost(sessionA, new CopilotHostInfo(
+            HostHwnd: wtHwnd, HostPid: wtMonarchPid, CopilotPid: 1001,
+            HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd, PaneTitle: "Pane A",
+            PaneRuntimeId: runtimeA, PaneRootProcessId: null));
+        tracker.SetCopilotHost(sessionB, new CopilotHostInfo(
+            HostHwnd: wtHwnd, HostPid: wtMonarchPid, CopilotPid: 2002,
+            HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd, PaneTitle: "Pane B",
+            PaneRuntimeId: runtimeB, PaneRootProcessId: null));
+
+        var resolved = tracker.ResolveSessionForHwnd(wtHwnd);
+
+        Assert.Equal(sessionB, resolved);
+    }
+
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
     {
         return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());

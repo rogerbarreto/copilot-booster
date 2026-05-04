@@ -699,13 +699,53 @@ internal class ActiveStatusTracker
     {
         int pid = WindowFocusService.GetWindowProcessId(hwnd);
 
-        // Check tracked windows (Terminal, Copilot CLI)
+        // Collect ALL sessions whose tracked windows include this hwnd. A single wt
+        // window typically hosts multiple copilot tabs (one per session) — they all
+        // map to the same wt hwnd, so the simple first-match returns whichever
+        // sessionId iterates first and silently mis-attributes the foreground tab.
+        var matchingSessions = new List<string>();
         foreach (var kvp in this._activeTrackedWindows)
         {
             if (kvp.Value.Any(t => t.Hwnd == hwnd))
             {
-                return kvp.Key;
+                matchingSessions.Add(kvp.Key);
             }
+        }
+
+        if (matchingSessions.Count == 1)
+        {
+            return matchingSessions[0];
+        }
+
+        if (matchingSessions.Count > 1)
+        {
+            // Multiple sessions share this hwnd — disambiguate via the currently-
+            // selected pane. Match the selected pane's UIA RuntimeId against each
+            // candidate session's stored CopilotHostInfo.PaneRuntimeId. This cannot
+            // false-positive: pane runtime ids are unique within a wt window.
+            try
+            {
+                var panes = this._windowsTerminalPaneGateway.EnumeratePanes(hwnd).Panes;
+                var selectedPane = panes.FirstOrDefault(p => p.IsSelected);
+                if (selectedPane != null && !string.IsNullOrEmpty(selectedPane.RuntimeId))
+                {
+                    foreach (var sessionId in matchingSessions)
+                    {
+                        if (this._copilotHosts.TryGetValue(sessionId, out var host)
+                            && !string.IsNullOrEmpty(host.PaneRuntimeId)
+                            && string.Equals(host.PaneRuntimeId, selectedPane.RuntimeId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return sessionId;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.Logger.LogDebug("ResolveSessionForHwnd pane disambiguation failed: {Error}", ex.Message);
+            }
+
+            return matchingSessions[0];
         }
 
         // Check tracked processes (IDEs)
