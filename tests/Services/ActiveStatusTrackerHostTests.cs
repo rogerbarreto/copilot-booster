@@ -704,6 +704,122 @@ public sealed class ActiveStatusTrackerHostTests
         Assert.Equal(sessionB, resolved);
     }
 
+    [Fact]
+    public void OnWindowTitleChanged_TitleMatch_UpdatesPaneTitleOnCopilotHost()
+    {
+        // Closes the second-order bug Roger reported 2026-05-04 21:16:
+        // clicking "Respond To Greeting" focuses the correct wt window but the tab
+        // stays on "Process Hi 2 Message". Root cause: TrySelectWindowsTerminalPane
+        // falls back to FindMatchingPane(panes, copilotPid, terms, hostInfo.PaneTitle,
+        // hostInfo.PaneRootProcessId). For two new tabs in the same wt:
+        //   - PaneRuntimeId is null on both hosts (FindMatchingPane returned null at
+        //     resolve time because UIA only exposes content for the SELECTED tab)
+        //   - PaneRootProcessId for the CLICKED inactive pane is null in the gateway
+        //     enumeration (same UIA quirk)
+        //   - terms built with empty sessionId yield no title match
+        //   - PaneTitle on the host is also null
+        // -> FindMatchingPane returns null -> Select never called -> tab stays.
+        //
+        // OnWindowTitleChanged already title-matches each tab title to its session
+        // (via session-summary equality or "Copilot CLI - <sessionId>" parse). The
+        // fix: persist that title onto _copilotHosts[sessionId].PaneTitle so future
+        // TrySelectWindowsTerminalPane calls have a preferred-title hint that UIA
+        // exposes on every tab regardless of selection.
+        var sessionId = "59add766-de3f-44e6-8aec-82dc4fe01f8c";
+        var copilotPid = 67592;
+        var pwshPid = 24180;
+        var wtPid = 18144;
+        var wtHwnd = new IntPtr(13369638);
+
+        var tree = new FakeProcessTree()
+            .Add(copilotPid, pwshPid, "copilot", IntPtr.Zero)
+            .Add(pwshPid, wtPid, "pwsh", IntPtr.Zero)
+            .Add(wtPid, null, "WindowsTerminal", wtHwnd)
+            .AddWindows(wtPid, wtHwnd);
+
+        // No pane in the enumeration matches the session — exactly mirrors the live
+        // wt state when FindMatchingPane returns null (different user-set tab name,
+        // no PaneRootProcessId on the inactive pane). The title-match path runs
+        // entirely on the title hook, not on UIA pane enumeration.
+        var unrelatedPane = new WindowsTerminalPaneInfo(
+            Name: "unrelated",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtPid,
+            IsSelected: true,
+            Select: () => { },
+            RuntimeId: "rt-unrelated",
+            PaneRootProcessId: 999999);
+        var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
+        {
+            [wtHwnd] = new[] { unrelatedPane }
+        });
+        var tracker = CreateTracker(tree, gateway);
+
+        // Seed the host with PaneTitle=null (the production state when the resolver
+        // failed to pin a unique pane for this session).
+        tracker.SetCopilotHost(sessionId, new CopilotHostInfo(
+            HostHwnd: wtHwnd, HostPid: wtPid, CopilotPid: copilotPid,
+            HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd, PaneTitle: null,
+            PaneRuntimeId: null,
+            PaneRootProcessId: pwshPid));
+
+        // Title hook fires when wt's tab title becomes the session's summary.
+        // MatchTrackedWindowTitle parses "Copilot CLI - <sessionId>" too -- using
+        // the explicit form here to lock the assertion onto title-match (not session-
+        // summary equality which would also match in this contrived test).
+        tracker.OnWindowTitleChanged(wtHwnd, $"Copilot CLI - {sessionId}", sessionSummaries: null);
+
+        var host = tracker.GetCopilotHost(sessionId);
+        Assert.NotNull(host);
+        // Pre-fix: PaneTitle stays null because OnWindowTitleChanged never propagates
+        // the observed title into _copilotHosts. Post-fix: title is persisted so the
+        // next FindMatchingPane(...) for this host has a preferredTitle hint that
+        // UIA reliably exposes for both selected and unselected tabs.
+        Assert.Equal($"Copilot CLI - {sessionId}", host!.PaneTitle);
+    }
+
+    [Fact]
+    public void OnWindowTitleChanged_SessionSummaryMatch_UpdatesPaneTitleOnCopilotHost()
+    {
+        // Inverse case driving the actual production scenario: user renames a wt
+        // tab to a string equal to the session summary (e.g., "Respond To Greeting"
+        // matching session 59add766 whose summary is "Respond To Greeting").
+        // MatchTrackedWindowTitle resolves via session-summary equality, NOT the
+        // "Copilot CLI - <sessionId>" parse path. Both paths must update PaneTitle.
+        var sessionId = "59add766-de3f-44e6-8aec-82dc4fe01f8c";
+        var copilotPid = 67592;
+        var pwshPid = 24180;
+        var wtPid = 18144;
+        var wtHwnd = new IntPtr(13369638);
+        const string sessionSummary = "Respond To Greeting";
+
+        var tree = new FakeProcessTree()
+            .Add(copilotPid, pwshPid, "copilot", IntPtr.Zero)
+            .Add(pwshPid, wtPid, "pwsh", IntPtr.Zero)
+            .Add(wtPid, null, "WindowsTerminal", wtHwnd)
+            .AddWindows(wtPid, wtHwnd);
+
+        var gateway = new FakeWindowsTerminalPaneGateway([]);
+        var tracker = CreateTracker(tree, gateway);
+
+        tracker.SetCopilotHost(sessionId, new CopilotHostInfo(
+            HostHwnd: wtHwnd, HostPid: wtPid, CopilotPid: copilotPid,
+            HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd, PaneTitle: null,
+            PaneRuntimeId: null,
+            PaneRootProcessId: pwshPid));
+
+        tracker.OnWindowTitleChanged(
+            wtHwnd,
+            sessionSummary,
+            sessionSummaries: new Dictionary<string, string> { [sessionSummary] = sessionId });
+
+        var host = tracker.GetCopilotHost(sessionId);
+        Assert.NotNull(host);
+        Assert.Equal(sessionSummary, host!.PaneTitle);
+    }
+
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
     {
         return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());

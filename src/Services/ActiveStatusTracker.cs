@@ -1697,6 +1697,17 @@ internal class ActiveStatusTracker
             // to first-by-Z-order), this signal is what gives us the truth. Propagate
             // it into _copilotHosts so click-to-focus targets the right wt window.
             this.RebindWindowsTerminalHostFromTitleMatch(sessionId, hwnd);
+
+            // Persist the observed tab title onto the host's PaneTitle so
+            // TrySelectWindowsTerminalPane can use it as a preferredTitle hint when
+            // the user later clicks the session link. UIA exposes tab names for
+            // unselected tabs even though it can't expose pane content (RuntimeId,
+            // PaneRootProcessId), so a remembered title is the only reliable way
+            // to find an inactive tab whose title doesn't include any session id.
+            if (label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase))
+            {
+                this.UpdateCopilotHostPaneTitle(sessionId, title);
+            }
         }
 
         return affected;
@@ -1741,6 +1752,43 @@ internal class ActiveStatusTracker
         var rebased = existing with { HostHwnd = hwnd, ParentHostHwnd = hwnd };
         var resolved = this.ResolveWindowsTerminalPane(sessionId, rebased, sessionSummary: null, paneRootPid: existing.PaneRootProcessId);
         this.SetCopilotHost(sessionId, resolved);
+    }
+
+    /// <summary>
+    /// Persists the last-observed wt tab title onto <see cref="CopilotHostInfo.PaneTitle"/>
+    /// so <see cref="TrySelectWindowsTerminalPane"/> has a preferredTitle hint to feed
+    /// <see cref="FindMatchingPane"/> when the user later clicks the session link. UIA
+    /// exposes tab names for unselected tabs even though it doesn't expose their pane
+    /// content (RuntimeId/PaneRootProcessId stay null on inactive panes), so a remembered
+    /// title is the only reliable disambiguator for clicking an inactive tab whose name
+    /// doesn't include any session identifier. No-op when host is missing, not a wt, or
+    /// the title is unchanged. Does NOT call <see cref="SetCopilotHost"/> to avoid
+    /// re-firing the CopilotHostResolved bus event for what's effectively a label-only
+    /// update — the projection key (PaneRuntimeId) is unchanged so no projection churn.
+    /// </summary>
+    private void UpdateCopilotHostPaneTitle(string sessionId, string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return;
+        }
+
+        if (!this._copilotHosts.TryGetValue(sessionId, out var existing))
+        {
+            return;
+        }
+
+        if (!IsWindowsTerminalHost(existing))
+        {
+            return;
+        }
+
+        if (string.Equals(existing.PaneTitle, title, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        this._copilotHosts[sessionId] = existing with { PaneTitle = title };
     }
 
     /// <summary>
