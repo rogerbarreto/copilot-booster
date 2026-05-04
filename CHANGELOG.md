@@ -4,36 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.21.1] - 2026-05-03
-
-### Fixed
-
-- **Windows Terminal multi-tab discovery** — Copilot sessions in separate WT tabs that share one parent `wt.exe` HWND now remain independently active in the booster grid by carrying the UIA pane runtime id alongside the parent HWND, preferring process-tree pane-root correlation over mutable tab-title matching.
-- **Windows Terminal tab focus** — clicking a WT-hosted Copilot CLI link now foregrounds the WT parent, selects the cached UIA tab item with `SelectionItemPattern.Select()` / `InvokePattern.Invoke()`, and verifies the selected tab/readback title before treating focus as successful.
-- **Windows Terminal live E2E coverage** — the LocalOnly WT regression now clicks the actual grid link for each session and verifies the selected UIA tab runtime id, tab name, WT window title, and UIA-visible in-pane marker after focus so swapped session/pane mappings fail the test.
-- **Windows Terminal title-bind regression** — WT tab title/name-change events no longer evict PID-resolved Copilot hosts or collapse both grid links onto the foreground tab; active CLI links are computed from the live Copilot PID and cached pane runtime id.
-- **Windows Terminal focus diagnostics and fallback** — WT host resolution/focus now writes capped runtime diagnostics to `%LOCALAPPDATA%\CopilotBooster\logs\diag.log` and falls back to verified Ctrl+Tab/Ctrl+Shift+Tab navigation when UIA tab selection does not stick.
-
-## [0.21.0] - 2026-05-03
+## [0.21.0] - 2026-05-04
 
 ### Added
 
 - **Copilot Host discovery** — every Copilot session now tracks the host process that spawned it (Windows Terminal, conhost, third-party terminals, IDE-hosted shells). Click-to-focus migrates to the correct host window even when the Copilot CLI itself has no visible window of its own.
-- **Windows Terminal multi-pane focus** — when multiple Copilot sessions run in different panes of the same `wt.exe` window, clicking a session in the booster focuses the *exact* pane via UI Automation (`SelectionItemPattern` / `InvokePattern`), not just the parent window. Pane handles are cached per WT window with automatic invalidation on tab/pane structure changes.
+- **Windows Terminal multi-pane / multi-tab focus** — when multiple Copilot sessions run in different panes or tabs of the same `wt.exe` window, clicking a session in the booster focuses the *exact* pane via UI Automation (`SelectionItemPattern.Select()` / `InvokePattern.Invoke()`), not just the parent window. Sessions that share one parent `wt.exe` HWND remain independently active in the booster grid by carrying the UIA pane runtime id alongside the parent HWND, preferring process-tree pane-root correlation over mutable tab-title matching. Pane handles are cached per WT window with automatic invalidation on tab/pane structure changes; UIA tab selection that does not stick falls back to verified `Ctrl+Tab` / `Ctrl+Shift+Tab` navigation.
+- **Active-session highlight follows the visible WT tab** — when the user manually switches tabs inside a `wt.exe` window hosting multiple Copilot sessions, the booster grid now updates its active-session highlight even though the foreground HWND has not changed. Title-match on a `Copilot CLI` tab is treated as the user's intent signal and propagated through a new `ActiveSessionHintChanged` event.
 - **Deferred session naming** — sessions that first appear with a GUID-only name (typical for fresh externally-spawned sessions) are auto-renamed when their `events.jsonl` records the first user message. The resolved name flows through the same booster-resolved-name pipeline used by internally-launched sessions.
 - **External session host resolution** — sessions detected via the Copilot log watcher (`~/.copilot/logs/`) now resolve their host process at discovery time, not on first focus, eliminating the "click and nothing happens" first-time delay.
-- **Live `wt.exe` multi-pane integration test** — local-only test that spins up Windows Terminal with multiple Copilot panes (each tagged via `copilot --deny-url=<guid>`), validates that the booster shows them as distinct sessions with the correct booster-resolved names, and verifies pane-precise focus dispatch.
+- **Runtime focus diagnostics** — WT host resolution and click-to-focus dispatch now write capped runtime diagnostics to `%LOCALAPPDATA%\CopilotBooster\logs\diag.log` to make multi-window / multi-tab focus issues debuggable in the field.
+- **Live `wt.exe` multi-pane integration tests** — local-only tests that spin up Windows Terminal with multiple Copilot tabs (each tagged via `copilot --deny-url=<guid>`), validate that the booster shows them as distinct sessions with the correct booster-resolved names, click the actual grid link for each session, and verify the selected UIA tab runtime id, tab name, WT window title, and UIA-visible in-pane marker after focus so swapped session/pane mappings fail the test.
 
 ### Changed
 
 - **`workspace.yaml.summary` no longer holds GUIDs** — externally-discovered sessions write an empty summary on creation; the booster-resolved name is computed from `events.jsonl` content and stored as a sidecar (ADR-0001 compliance). No migration is performed on existing sessions — GUIDs may be legitimate names in rare cases.
 - **Focus migration priority order** — first try the cached host HWND (Priority 1), fall back to legacy title-scan (Priority 2), then PID-based heuristics (Priority 3). Avoids the previous behaviour of always landing on whichever window happened to match a brittle title pattern.
+- **WT title/name-change events preserve PID-resolved Copilot hosts** — active CLI links are computed from the live Copilot PID and the cached pane runtime id, so user-driven tab renames no longer evict the host binding or collapse multiple grid links onto whichever tab is foreground.
 - **`UseWPF` is now enabled** in the main project to access `System.Windows.Automation` for pane enumeration. No WPF UI is shipped — only the automation namespace is consumed.
 
 ### Fixed
 
 - **Stale window-handle cache** when a Windows Terminal tab is closed/moved — the cache now invalidates on `WindowDestroyed` events for both the parent and the cached pane HWND, plus on WT name-changed events that signal a tab structure change.
-- **Integration tests run reliably on local machines** — Playwright tests now auto-install the chromium browser on first run via a self-bootstrap fixture; CI continues to install in `release.yml` as before. Tests requiring an interactive desktop session are now marked `[Trait("Category", "LocalOnly")]` and skip cleanly in CI rather than producing tolerated red runs.
+- **Integration tests run reliably on local machines** — Playwright tests now auto-install the chromium browser on first run via a self-bootstrap fixture; CI continues to install in `release.yml` as before. Tests requiring an interactive desktop session are now marked `[LocalOnlyFact]` and skip cleanly in CI rather than producing tolerated red runs.
 
 ## [0.20.1] - 2026-04-14
 

@@ -209,7 +209,7 @@ public sealed class CopilotHostResolverTests
 
         Assert.NotNull(result);
         Assert.Equal(new IntPtr(0x100), result!.HostHwnd);
-        Assert.Equal(new[] { new IntPtr(0x100), new IntPtr(0x200) }, result.CandidateHostHwnds);
+        Assert.Equal([new IntPtr(0x100), new IntPtr(0x200)], result.CandidateHostHwnds);
         Assert.Equal(5000, result.HostPid);
         Assert.Equal(6000, result.PaneRootPid);
     }
@@ -229,7 +229,7 @@ public sealed class CopilotHostResolverTests
 
         Assert.NotNull(result);
         Assert.Equal(new IntPtr(0x300), result!.HostHwnd);
-        Assert.Equal(new[] { new IntPtr(0x300) }, result.CandidateHostHwnds);
+        Assert.Equal([new IntPtr(0x300)], result.CandidateHostHwnds);
     }
 
     [Fact]

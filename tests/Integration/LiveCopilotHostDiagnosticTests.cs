@@ -1,12 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-
-using CopilotBooster.Services;
-
-using Xunit;
+﻿using System.Diagnostics;
 
 namespace CopilotBooster.IntegrationTests.Integration;
 

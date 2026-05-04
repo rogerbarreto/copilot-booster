@@ -951,7 +951,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         }
     }
 
-    [Fact]
+    [LocalOnlyFact]
     public async Task MultiWtWindows_HostBindingDoesNotScrambleAsync()
     {
         await RunOnStaThreadAsync(this.ExecuteMultiWtWindowsHostBindingAsync).ConfigureAwait(false);
@@ -1193,7 +1193,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    [Fact]
+    [LocalOnlyFact]
     public async Task MultiWtWindows_TitleMatchRebindsHostAfterFallbackAsync()
     {
         await RunOnStaThreadAsync(this.ExecuteMultiWtWindowsTitleMatchRebindAsync).ConfigureAwait(false);
@@ -1380,7 +1380,7 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
-    [Fact]
+    [LocalOnlyFact]
     public async Task MultiWtWindows_FullRefreshTitleScanRebindsCopilotHostAsync()
     {
         await RunOnStaThreadAsync(this.ExecuteMultiWtWindowsFullRefreshRebindAsync).ConfigureAwait(false);

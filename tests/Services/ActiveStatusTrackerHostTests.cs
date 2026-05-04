@@ -437,8 +437,8 @@ public sealed class ActiveStatusTrackerHostTests
             PaneRootProcessId: null);
         var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
         {
-            [wrongWtHwnd] = new[] { paneInWrongWt },
-            [correctWtHwnd] = new[] { paneInCorrectWt }
+            [wrongWtHwnd] = [paneInWrongWt],
+            [correctWtHwnd] = [paneInCorrectWt]
         });
         var tracker = CreateTracker(tree, gateway);
 
@@ -525,8 +525,8 @@ public sealed class ActiveStatusTrackerHostTests
         var wtMonarchPid = 18144;
         var runTestsSessionId = "fe873d35-af00-423d-a088-554eca62c38e";
         var runTest2SessionId = "ea9da1be-8992-4f58-939a-1433797e4f3a";
-        const string runTestsRuntimeId = "42.9179664.4.2978";
-        const string runTest2RuntimeId = "42.9179664.4.2983";
+        const string RunTestsRuntimeId = "42.9179664.4.2978";
+        const string RunTest2RuntimeId = "42.9179664.4.2983";
 
         var tree = new FakeProcessTree()
             .Add(wtMonarchPid, null, "WindowsTerminal", wtHwnd)
@@ -539,7 +539,7 @@ public sealed class ActiveStatusTrackerHostTests
             ProcessId: wtMonarchPid,
             IsSelected: true,
             Select: () => { },
-            RuntimeId: runTestsRuntimeId,
+            RuntimeId: RunTestsRuntimeId,
             PaneRootProcessId: null);
         var paneRunTest2 = new WindowsTerminalPaneInfo(
             Name: "Run Test 2",
@@ -547,11 +547,11 @@ public sealed class ActiveStatusTrackerHostTests
             ProcessId: wtMonarchPid,
             IsSelected: false,
             Select: () => { },
-            RuntimeId: runTest2RuntimeId,
+            RuntimeId: RunTest2RuntimeId,
             PaneRootProcessId: null);
         var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
         {
-            [wtHwnd] = new[] { paneRunTests, paneRunTest2 }
+            [wtHwnd] = [paneRunTests, paneRunTest2]
         });
         var tracker = CreateTracker(tree, gateway);
 
@@ -566,7 +566,7 @@ public sealed class ActiveStatusTrackerHostTests
             HostKindLabel: "Windows Terminal",
             ParentHostHwnd: wtHwnd,
             PaneTitle: "Run Test 2",
-            PaneRuntimeId: runTest2RuntimeId,
+            PaneRuntimeId: RunTest2RuntimeId,
             PaneRootProcessId: null));
         tracker.SetCopilotHost(runTestsSessionId, new CopilotHostInfo(
             HostHwnd: wtHwnd,
@@ -576,7 +576,7 @@ public sealed class ActiveStatusTrackerHostTests
             HostKindLabel: "Windows Terminal",
             ParentHostHwnd: wtHwnd,
             PaneTitle: "Run Tests",
-            PaneRuntimeId: runTestsRuntimeId,
+            PaneRuntimeId: RunTestsRuntimeId,
             PaneRootProcessId: null));
 
         var resolved = tracker.ResolveSessionForHwnd(wtHwnd);
@@ -595,8 +595,8 @@ public sealed class ActiveStatusTrackerHostTests
         var wtMonarchPid = 18144;
         var sessionA = "session-a-runtime";
         var sessionB = "session-b-runtime";
-        const string runtimeA = "42.9179664.4.2978";
-        const string runtimeB = "42.9179664.4.2983";
+        const string RuntimeA = "42.9179664.4.2978";
+        const string RuntimeB = "42.9179664.4.2983";
 
         var tree = new FakeProcessTree()
             .Add(wtMonarchPid, null, "WindowsTerminal", wtHwnd)
@@ -605,14 +605,14 @@ public sealed class ActiveStatusTrackerHostTests
         var paneA = new WindowsTerminalPaneInfo(
             Name: "Pane A", Hwnd: IntPtr.Zero, ProcessId: wtMonarchPid,
             IsSelected: false, Select: () => { },
-            RuntimeId: runtimeA, PaneRootProcessId: null);
+            RuntimeId: RuntimeA, PaneRootProcessId: null);
         var paneB = new WindowsTerminalPaneInfo(
             Name: "Pane B", Hwnd: IntPtr.Zero, ProcessId: wtMonarchPid,
             IsSelected: true, Select: () => { },
-            RuntimeId: runtimeB, PaneRootProcessId: null);
+            RuntimeId: RuntimeB, PaneRootProcessId: null);
         var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
         {
-            [wtHwnd] = new[] { paneA, paneB }
+            [wtHwnd] = [paneA, paneB]
         });
         var tracker = CreateTracker(tree, gateway);
 
@@ -621,12 +621,12 @@ public sealed class ActiveStatusTrackerHostTests
             HostHwnd: wtHwnd, HostPid: wtMonarchPid, CopilotPid: 1001,
             HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
             ParentHostHwnd: wtHwnd, PaneTitle: "Pane A",
-            PaneRuntimeId: runtimeA, PaneRootProcessId: null));
+            PaneRuntimeId: RuntimeA, PaneRootProcessId: null));
         tracker.SetCopilotHost(sessionB, new CopilotHostInfo(
             HostHwnd: wtHwnd, HostPid: wtMonarchPid, CopilotPid: 2002,
             HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
             ParentHostHwnd: wtHwnd, PaneTitle: "Pane B",
-            PaneRuntimeId: runtimeB, PaneRootProcessId: null));
+            PaneRuntimeId: RuntimeB, PaneRootProcessId: null));
 
         var resolved = tracker.ResolveSessionForHwnd(wtHwnd);
 
@@ -680,7 +680,7 @@ public sealed class ActiveStatusTrackerHostTests
             PaneRootProcessId: null); // inactive panes typically have no descendants
         var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
         {
-            [wtHwnd] = new[] { paneSelected, paneInactive }
+            [wtHwnd] = [paneSelected, paneInactive]
         });
         var tracker = CreateTracker(tree, gateway);
 
@@ -751,7 +751,7 @@ public sealed class ActiveStatusTrackerHostTests
             PaneRootProcessId: 999999);
         var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
         {
-            [wtHwnd] = new[] { unrelatedPane }
+            [wtHwnd] = [unrelatedPane]
         });
         var tracker = CreateTracker(tree, gateway);
 
@@ -792,7 +792,7 @@ public sealed class ActiveStatusTrackerHostTests
         var pwshPid = 24180;
         var wtPid = 18144;
         var wtHwnd = new IntPtr(13369638);
-        const string sessionSummary = "Respond To Greeting";
+        const string SessionSummary = "Respond To Greeting";
 
         var tree = new FakeProcessTree()
             .Add(copilotPid, pwshPid, "copilot", IntPtr.Zero)
@@ -812,12 +812,12 @@ public sealed class ActiveStatusTrackerHostTests
 
         tracker.OnWindowTitleChanged(
             wtHwnd,
-            sessionSummary,
-            sessionSummaries: new Dictionary<string, string> { [sessionSummary] = sessionId });
+            SessionSummary,
+            sessionSummaries: new Dictionary<string, string> { [SessionSummary] = sessionId });
 
         var host = tracker.GetCopilotHost(sessionId);
         Assert.NotNull(host);
-        Assert.Equal(sessionSummary, host!.PaneTitle);
+        Assert.Equal(SessionSummary, host!.PaneTitle);
     }
 
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
