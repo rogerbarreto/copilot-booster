@@ -727,15 +727,40 @@ internal class ActiveStatusTracker
             {
                 var panes = this._windowsTerminalPaneGateway.EnumeratePanes(hwnd).Panes;
                 var selectedPane = panes.FirstOrDefault(p => p.IsSelected);
-                if (selectedPane != null && !string.IsNullOrEmpty(selectedPane.RuntimeId))
+                if (selectedPane != null)
                 {
-                    foreach (var sessionId in matchingSessions)
+                    if (!string.IsNullOrEmpty(selectedPane.RuntimeId))
                     {
-                        if (this._copilotHosts.TryGetValue(sessionId, out var host)
-                            && !string.IsNullOrEmpty(host.PaneRuntimeId)
-                            && string.Equals(host.PaneRuntimeId, selectedPane.RuntimeId, StringComparison.OrdinalIgnoreCase))
+                        foreach (var sessionId in matchingSessions)
                         {
-                            return sessionId;
+                            if (this._copilotHosts.TryGetValue(sessionId, out var host)
+                                && !string.IsNullOrEmpty(host.PaneRuntimeId)
+                                && string.Equals(host.PaneRuntimeId, selectedPane.RuntimeId, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return sessionId;
+                            }
+                        }
+                    }
+
+                    // Fallback: when the resolver couldn't pin a unique pane during
+                    // initial host resolution (common for new tabs whose user-set
+                    // titles don't include any session metadata), each host's
+                    // PaneRuntimeId stays null. PaneRootProcessId is reliably set
+                    // from wtContext.PaneRootPid at create time AND the SELECTED
+                    // pane's PaneRootProcessId is reliably populated by the gateway
+                    // (UIA exposes the active pane's terminal hwnd descendant). Two
+                    // sessions in the same wt have distinct pwsh ancestors, so this
+                    // disambiguates without false-positive risk.
+                    if (selectedPane.PaneRootProcessId.HasValue)
+                    {
+                        foreach (var sessionId in matchingSessions)
+                        {
+                            if (this._copilotHosts.TryGetValue(sessionId, out var host)
+                                && host.PaneRootProcessId.HasValue
+                                && host.PaneRootProcessId.Value == selectedPane.PaneRootProcessId.Value)
+                            {
+                                return sessionId;
+                            }
                         }
                     }
                 }

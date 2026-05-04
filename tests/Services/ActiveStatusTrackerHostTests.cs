@@ -633,6 +633,77 @@ public sealed class ActiveStatusTrackerHostTests
         Assert.Equal(sessionB, resolved);
     }
 
+    [Fact]
+    public void ResolveSessionForHwnd_MultipleSessionsShareWtHwnd_NullRuntimeIds_DisambiguatesByPaneRootPid()
+    {
+        // Reproduces Roger's 2026-05-04 follow-up finding (live diag.log):
+        //   FocusCopilotHost session=59add766 ... host=13369638 runtimeId=null paneRootPid=24180
+        //   FocusCopilotHost session=fd5a52ff ... host=13369638 runtimeId=null paneRootPid=114552
+        // Two NEW tabs in an existing wt window — ResolveWindowsTerminalPane's
+        // FindMatchingPane returns null for both (UIA only exposes PaneRootProcessId
+        // for the SELECTED tab's content; inactive tabs return null/wt-pid), so both
+        // hosts end up with PaneRuntimeId=null. The runtime-id-only disambiguation
+        // can't tell them apart and falls back to first-match — same bug as before.
+        // PaneRootProcessId IS reliably set on each host (from wtContext.PaneRootPid
+        // at initial resolve time) and IS reliably set on the SELECTED pane, so we
+        // can disambiguate via that field instead.
+        var wtHwnd = new IntPtr(13369638);
+        var wtPid = 18144;
+        var sessionA = "59add766-de3f-44e6-8aec-82dc4fe01f8c";
+        var sessionB = "fd5a52ff-0896-4ff1-a24e-a4c40f6ec02d";
+        var pwshPidA = 24180;
+        var pwshPidB = 114552;
+
+        var tree = new FakeProcessTree()
+            .Add(wtPid, null, "WindowsTerminal", wtHwnd)
+            .AddWindows(wtPid, wtHwnd);
+
+        // Selected pane is sessionB's tab (user just clicked the fd5a52ff link).
+        // Its PaneRootProcessId is reliably the pwsh pid (114552). RuntimeId is set
+        // to the UIA runtime id but neither host's stored PaneRuntimeId equals it,
+        // so runtime-id matching alone can't pick the right session.
+        var paneSelected = new WindowsTerminalPaneInfo(
+            Name: "Process Hi 2 Message",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtPid,
+            IsSelected: true,
+            Select: () => { },
+            RuntimeId: "live-runtime-from-uia-not-stored-anywhere",
+            PaneRootProcessId: pwshPidB);
+        var paneInactive = new WindowsTerminalPaneInfo(
+            Name: "Respond To Greeting",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtPid,
+            IsSelected: false,
+            Select: () => { },
+            RuntimeId: "another-live-runtime",
+            PaneRootProcessId: null); // inactive panes typically have no descendants
+        var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
+        {
+            [wtHwnd] = new[] { paneSelected, paneInactive }
+        });
+        var tracker = CreateTracker(tree, gateway);
+
+        // Insert sessionA FIRST (iterates first → pre-fix bug returns this one).
+        // Both hosts have PaneRuntimeId=null exactly like the live diag.
+        tracker.SetCopilotHost(sessionA, new CopilotHostInfo(
+            HostHwnd: wtHwnd, HostPid: wtPid, CopilotPid: 67592,
+            HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd, PaneTitle: null,
+            PaneRuntimeId: null,
+            PaneRootProcessId: pwshPidA));
+        tracker.SetCopilotHost(sessionB, new CopilotHostInfo(
+            HostHwnd: wtHwnd, HostPid: wtPid, CopilotPid: 32996,
+            HostProcessName: "WindowsTerminal", HostKindLabel: "Windows Terminal",
+            ParentHostHwnd: wtHwnd, PaneTitle: null,
+            PaneRuntimeId: null,
+            PaneRootProcessId: pwshPidB));
+
+        var resolved = tracker.ResolveSessionForHwnd(wtHwnd);
+
+        Assert.Equal(sessionB, resolved);
+    }
+
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
     {
         return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());
