@@ -1193,6 +1193,382 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
+    [Fact]
+    public async Task MultiWtWindows_TitleMatchRebindsHostAfterFallbackAsync()
+    {
+        await RunOnStaThreadAsync(this.ExecuteMultiWtWindowsTitleMatchRebindAsync).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reproduces Roger's 2026-05-04 finding (image: _copilotHosts watch with two
+    /// sessions sharing host hwnd 0x90768 while the visible "Run Tests" wt is hwnd
+    /// 9441788). When real users name their wt tabs with arbitrary labels (no session
+    /// GUID, no sessionSummary substring), CopilotHostResolver's pane-term match fails
+    /// across all candidate wt hwnds → ResolveWindowsTerminalAcrossCandidates falls
+    /// back to the FIRST candidate hwnd (essentially Z-order at discovery time). For
+    /// 2-of-3 sessions in this scenario that's the wrong wt window.
+    ///
+    /// Booster's <see cref="ActiveStatusTracker.OnWindowTitleChanged"/> hook DOES
+    /// observe the right wt hwnd later: when copilot CLI sets the wt tab title to
+    /// "Copilot CLI - {sessionId}" or the session summary, the hook's title-match
+    /// correctly attributes that hwnd to the session. But pre-fix, the match is only
+    /// stored in <c>_activeTrackedWindows</c> — <c>_copilotHosts[sessionId].ParentHostHwnd</c>
+    /// stays stale at the resolver's wrong fallback. Click-to-focus then targets the
+    /// wrong wt window.
+    ///
+    /// Test shape (mirrors <see cref="MultiWtWindows_HostBindingDoesNotScrambleAsync"/>
+    /// but DELIBERATELY blocks the resolver's pane match so we land in fallback):
+    ///   - 2 wt windows (wt-A: 2 tabs, wt-B: 1 tab); 3 copilot sessions.
+    ///   - Rename labels are unique (used for ground truth) but NOT registered as
+    ///     SessionNameOverride and NOT used as workspace summary, so they aren't in
+    ///     BuildWindowsTerminalPaneMatchTerms's term list. Resolver finds no pane match
+    ///     and falls back to first-by-Z-order.
+    ///   - After Discover, simulate the title-change hook firing with
+    ///     "Copilot CLI - {sessionId}" pointing at each session's REAL wt hwnd
+    ///     (this is what production sees once copilot has started up).
+    ///   - Assert _copilotHosts[sessionId].ParentHostHwnd now equals the ground-truth
+    ///     wt hwnd (post-fix). Pre-fix this assertion fails for whichever sessions
+    ///     the resolver mis-bound.
+    /// </summary>
+    private async Task ExecuteMultiWtWindowsTitleMatchRebindAsync()
+    {
+        SkipIfPreflightFails();
+        Directory.CreateDirectory(Program.SessionStateDir);
+        Directory.CreateDirectory(Program.AppDataDir);
+        SweepOrphanItSessionDirs();
+
+        var sessionA1 = new RealCopilotSession("RebindA1-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionA2 = new RealCopilotSession("RebindA2-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionB1 = new RealCopilotSession("RebindB1-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var allSessions = new[] { sessionA1, sessionA2, sessionB1 };
+
+        // Note: deliberately NOT calling SessionNameOverrideService.Set with the rename
+        // label. We only want the label to drive UIA-pane-name-based ground truth lookup,
+        // NOT to feed BuildWindowsTerminalPaneMatchTerms's override-name path. This is
+        // what reproduces the production miss — real users don't name their tabs with
+        // strings that match the session GUID or the sessionSummary booster knows about.
+        foreach (var s in allSessions)
+        {
+            s.SessionId = Guid.NewGuid().ToString();
+            s.SessionDir = Path.Combine(Program.SessionStateDir, s.SessionId);
+            this._createdSessionDirs.Add(s.SessionDir);
+            this._createdSessionIds.Add(s.SessionId);
+            Directory.CreateDirectory(s.SessionDir);
+            File.WriteAllText(Path.Combine(s.SessionDir, SessionCleanupSentinel), DateTime.UtcNow.ToString("O"));
+            WriteMinimalWorkspaceYaml(Path.Combine(s.SessionDir, "workspace.yaml"), s.SessionId, Environment.CurrentDirectory);
+            WriteSessionStartEvent(Path.Combine(s.SessionDir, "events.jsonl"), s.SessionId, Environment.CurrentDirectory);
+        }
+
+        var paneGateway = new WindowsTerminalPaneGateway();
+
+        var wtAHwnd = OpenFreshWtWithExtraTab(paneGateway, out var wtAProcess);
+        if (wtAProcess != null)
+        {
+            this._startedProcesses.Add(wtAProcess);
+        }
+        this._wtWindowHwnds.Add(wtAHwnd);
+
+        var wtBHwnd = OpenFreshWtWithSingleTab(paneGateway, out var wtBProcess);
+        if (wtBProcess != null)
+        {
+            this._startedProcesses.Add(wtBProcess);
+        }
+        this._wtWindowHwnds.Add(wtBHwnd);
+        Assert.NotEqual(wtAHwnd, wtBHwnd);
+
+        TypeIntoTab(paneGateway, wtAHwnd, tabIndex: 0, $"copilot --resume \"{sessionA1.SessionId}\" --deny-url={sessionA1.Marker}");
+        TypeIntoTab(paneGateway, wtAHwnd, tabIndex: 1, $"copilot --resume \"{sessionA2.SessionId}\" --deny-url={sessionA2.Marker}");
+        TypeIntoTab(paneGateway, wtBHwnd, tabIndex: 0, $"copilot --resume \"{sessionB1.SessionId}\" --deny-url={sessionB1.Marker}");
+
+        (sessionA1.CopilotPid, sessionA1.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA1.Marker, 30_000);
+        (sessionA2.CopilotPid, sessionA2.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA2.Marker, 30_000);
+        (sessionB1.CopilotPid, sessionB1.PwshPid) = WaitForCopilotPidByDenyUrl(sessionB1.Marker, 30_000);
+        foreach (var s in allSessions)
+        {
+            this._copilotPids.Add(s.CopilotPid);
+            this._pwshPids.Add(s.PwshPid);
+        }
+
+        WaitUntil(
+            () =>
+            {
+                var aPanes = paneGateway.EnumeratePanes(wtAHwnd).Panes;
+                var bPanes = paneGateway.EnumeratePanes(wtBHwnd).Panes;
+                return aPanes.Count >= 2
+                    && aPanes.Take(2).All(p => p.Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase))
+                    && bPanes.Count >= 1
+                    && bPanes[0].Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase);
+            },
+            45_000,
+            "Copilot did not reach 'GitHub Copilot' title on all 3 panes within 45s.");
+
+        Thread.Sleep(2_000);
+
+        // Apply rename labels for GROUND TRUTH only (used to determine which wt window
+        // physically owns each session's pane). NOT registered as SessionNameOverride.
+        RenameTab(paneGateway, wtAHwnd, tabIndex: 0, sessionA1.Label);
+        RenameTab(paneGateway, wtAHwnd, tabIndex: 1, sessionA2.Label);
+        RenameTab(paneGateway, wtBHwnd, tabIndex: 0, sessionB1.Label);
+
+        var tracker = new ActiveStatusTracker();
+        foreach (var s in allSessions)
+        {
+            tracker.HandleExternalSessionDiscovered(s.SessionId, s.CopilotPid);
+            s.Host = tracker.GetCopilotHost(s.SessionId);
+            Assert.NotNull(s.Host);
+        }
+
+        var wtAPanes = paneGateway.EnumeratePanes(wtAHwnd).Panes;
+        var wtBPanes = paneGateway.EnumeratePanes(wtBHwnd).Panes;
+        IntPtr GroundTruthWtHwndFor(RealCopilotSession s)
+        {
+            bool MatchesPane(WindowsTerminalPaneInfo pane) =>
+                (pane.PaneRootProcessId.HasValue && pane.PaneRootProcessId.Value == s.PwshPid)
+                || pane.ProcessId == s.CopilotPid
+                || pane.Name.Contains(s.Label, StringComparison.OrdinalIgnoreCase);
+
+            if (wtAPanes.Any(MatchesPane))
+            {
+                return wtAHwnd;
+            }
+            if (wtBPanes.Any(MatchesPane))
+            {
+                return wtBHwnd;
+            }
+            Assert.Fail(
+                $"Could not locate a pane for session {s.Label} (copilotPid={s.CopilotPid}, pwshPid={s.PwshPid}) "
+                + $"in either wt window. wt-A panes: [{string.Join("|", wtAPanes.Select(p => $"name='{p.Name}',pid={p.ProcessId},paneRoot={p.PaneRootProcessId}"))}] "
+                + $"wt-B panes: [{string.Join("|", wtBPanes.Select(p => $"name='{p.Name}',pid={p.ProcessId},paneRoot={p.PaneRootProcessId}"))}]");
+            return IntPtr.Zero;
+        }
+
+        var groundTruthA1 = GroundTruthWtHwndFor(sessionA1);
+        var groundTruthA2 = GroundTruthWtHwndFor(sessionA2);
+        var groundTruthB1 = GroundTruthWtHwndFor(sessionB1);
+        Assert.Equal(wtAHwnd, groundTruthA1);
+        Assert.Equal(wtAHwnd, groundTruthA2);
+        Assert.Equal(wtBHwnd, groundTruthB1);
+
+        // Now simulate the title-change hook firing as production sees it: copilot CLI
+        // sets the wt tab title to "Copilot CLI - {sessionId}" once the session is up.
+        // The booster's hook calls OnWindowTitleChanged with the wt window's hwnd and
+        // that title — and BuildSessionSummaryMap is null/empty (the wt title is the
+        // strong sessionId-prefixed form, not a session-summary lookup).
+        tracker.OnWindowTitleChanged(groundTruthA1, $"Copilot CLI - {sessionA1.SessionId}", sessionSummaries: null);
+        tracker.OnWindowTitleChanged(groundTruthA2, $"Copilot CLI - {sessionA2.SessionId}", sessionSummaries: null);
+        tracker.OnWindowTitleChanged(groundTruthB1, $"Copilot CLI - {sessionB1.SessionId}", sessionSummaries: null);
+
+        // After title-match identifies the right wt hwnd for each session, the host
+        // tracking MUST reflect that — clicking the session's link in the booster grid
+        // navigates to ParentHostHwnd, so any staleness here visibly focuses the wrong
+        // wt window. This is the assertion that fails pre-fix for whichever sessions
+        // the resolver mis-bound.
+        var hostA1 = tracker.GetCopilotHost(sessionA1.SessionId);
+        var hostA2 = tracker.GetCopilotHost(sessionA2.SessionId);
+        var hostB1 = tracker.GetCopilotHost(sessionB1.SessionId);
+        Assert.NotNull(hostA1);
+        Assert.NotNull(hostA2);
+        Assert.NotNull(hostB1);
+
+        var diagDetails = string.Join(
+            " | ",
+            allSessions.Select(s => $"{s.Label}: hostHwnd={tracker.GetCopilotHost(s.SessionId)?.ParentHostHwnd}, expected={GroundTruthWtHwndFor(s)}"));
+        Assert.True(groundTruthA1 == hostA1!.ParentHostHwnd, $"sessionA1 host should rebind to {groundTruthA1} after title-change. Details: {diagDetails}");
+        Assert.True(groundTruthA2 == hostA2!.ParentHostHwnd, $"sessionA2 host should rebind to {groundTruthA2} after title-change. Details: {diagDetails}");
+        Assert.True(groundTruthB1 == hostB1!.ParentHostHwnd, $"sessionB1 host should rebind to {groundTruthB1} after title-change. Details: {diagDetails}");
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    [Fact]
+    public async Task MultiWtWindows_FullRefreshTitleScanRebindsCopilotHostAsync()
+    {
+        await RunOnStaThreadAsync(this.ExecuteMultiWtWindowsFullRefreshRebindAsync).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reproduces Roger's 2026-05-04 second-order finding: even after the
+    /// <see cref="ActiveStatusTracker.OnWindowTitleChanged"/> rebind shipped (commit
+    /// after <c>db79c81</c>), wt windows whose tabs were renamed BEFORE the booster
+    /// (re)started never trigger an <c>EVENT_OBJECT_NAMECHANGE</c> for those tabs —
+    /// the title hasn't CHANGED since the hook subscribed. The startup
+    /// <see cref="ActiveStatusTracker.FullRefresh"/> call DOES find the right wt hwnd
+    /// via title-scan (matching against <c>BuildSessionSummaryMap</c>) and stores it
+    /// in <c>_activeTrackedWindows[sessionId]</c>, but pre-fix nothing propagates
+    /// that ground truth back into <c>_copilotHosts[sessionId]</c>. Click-to-focus
+    /// reads <c>_copilotHosts</c> and targets the resolver's wrong fallback hwnd.
+    ///
+    /// Test shape:
+    ///   - 2 wt windows (wt-A: 2 tabs, wt-B: 1 tab); 3 copilot sessions.
+    ///   - Each session has Summary set in its workspace.yaml to the label that
+    ///     matches its tab title (so <c>BuildSessionSummaryMap</c> includes it).
+    ///   - Resolver's pane-term match still misses (rename label not in pane term
+    ///     list under any code path) → tracker falls back to first-by-Z-order.
+    ///   - DO NOT fire <c>OnWindowTitleChanged</c> (the renames pre-date the tracker).
+    ///   - Call <c>tracker.FullRefresh(sessions)</c>.
+    ///   - Assert <c>_copilotHosts[sessionId].ParentHostHwnd</c> equals the
+    ///     ground-truth wt hwnd. Pre-fix fails for misbound sessions; post-fix passes.
+    /// </summary>
+    private async Task ExecuteMultiWtWindowsFullRefreshRebindAsync()
+    {
+        SkipIfPreflightFails();
+        Directory.CreateDirectory(Program.SessionStateDir);
+        Directory.CreateDirectory(Program.AppDataDir);
+        SweepOrphanItSessionDirs();
+
+        var sessionA1 = new RealCopilotSession("FullRefreshA1-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionA2 = new RealCopilotSession("FullRefreshA2-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var sessionB1 = new RealCopilotSession("FullRefreshB1-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var allSessions = new[] { sessionA1, sessionA2, sessionB1 };
+
+        foreach (var s in allSessions)
+        {
+            s.SessionId = Guid.NewGuid().ToString();
+            s.SessionDir = Path.Combine(Program.SessionStateDir, s.SessionId);
+            this._createdSessionDirs.Add(s.SessionDir);
+            this._createdSessionIds.Add(s.SessionId);
+            Directory.CreateDirectory(s.SessionDir);
+            File.WriteAllText(Path.Combine(s.SessionDir, SessionCleanupSentinel), DateTime.UtcNow.ToString("O"));
+            // Use the same minimal workspace.yaml the other multi-wt tests use (extra
+            // fields like `name:`/`summary:` cause `copilot --resume` to reject loading
+            // the session). The session SUMMARY (which feeds BuildSessionSummaryMap and
+            // is what FullRefresh's title-scan matches against) is provided via
+            // SessionNameOverrideService — SessionService.LoadNamedSessions resolves
+            // displaySummary as override.Name when no workspace summary is present.
+            WriteMinimalWorkspaceYaml(Path.Combine(s.SessionDir, "workspace.yaml"), s.SessionId, Environment.CurrentDirectory);
+            WriteSessionStartEvent(Path.Combine(s.SessionDir, "events.jsonl"), s.SessionId, Environment.CurrentDirectory);
+            SessionNameOverrideService.Set(Program.SessionNameOverrideFile, s.SessionId, s.Label, resolvedFromUserMessage: true);
+        }
+
+        var paneGateway = new WindowsTerminalPaneGateway();
+
+        var wtAHwnd = OpenFreshWtWithExtraTab(paneGateway, out var wtAProcess);
+        if (wtAProcess != null)
+        {
+            this._startedProcesses.Add(wtAProcess);
+        }
+        this._wtWindowHwnds.Add(wtAHwnd);
+
+        var wtBHwnd = OpenFreshWtWithSingleTab(paneGateway, out var wtBProcess);
+        if (wtBProcess != null)
+        {
+            this._startedProcesses.Add(wtBProcess);
+        }
+        this._wtWindowHwnds.Add(wtBHwnd);
+        Assert.NotEqual(wtAHwnd, wtBHwnd);
+
+        TypeIntoTab(paneGateway, wtAHwnd, tabIndex: 0, $"copilot --resume \"{sessionA1.SessionId}\" --deny-url={sessionA1.Marker}");
+        TypeIntoTab(paneGateway, wtAHwnd, tabIndex: 1, $"copilot --resume \"{sessionA2.SessionId}\" --deny-url={sessionA2.Marker}");
+        TypeIntoTab(paneGateway, wtBHwnd, tabIndex: 0, $"copilot --resume \"{sessionB1.SessionId}\" --deny-url={sessionB1.Marker}");
+
+        (sessionA1.CopilotPid, sessionA1.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA1.Marker, 30_000);
+        (sessionA2.CopilotPid, sessionA2.PwshPid) = WaitForCopilotPidByDenyUrl(sessionA2.Marker, 30_000);
+        (sessionB1.CopilotPid, sessionB1.PwshPid) = WaitForCopilotPidByDenyUrl(sessionB1.Marker, 30_000);
+        foreach (var s in allSessions)
+        {
+            this._copilotPids.Add(s.CopilotPid);
+            this._pwshPids.Add(s.PwshPid);
+        }
+
+        WaitUntil(
+            () =>
+            {
+                var aPanes = paneGateway.EnumeratePanes(wtAHwnd).Panes;
+                var bPanes = paneGateway.EnumeratePanes(wtBHwnd).Panes;
+                return aPanes.Count >= 2
+                    && aPanes.Take(2).All(p => p.Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase))
+                    && bPanes.Count >= 1
+                    && bPanes[0].Name.Contains("GitHub Copilot", StringComparison.OrdinalIgnoreCase);
+            },
+            45_000,
+            "Copilot did not reach 'GitHub Copilot' title on all 3 panes within 45s.");
+
+        Thread.Sleep(2_000);
+
+        // Apply rename labels — these double as ground-truth pane labels AND match the
+        // session summary written into workspace.yaml above. FullRefresh's title-scan
+        // will use BuildSessionSummaryMap to attribute these tab titles to sessions.
+        RenameTab(paneGateway, wtAHwnd, tabIndex: 0, sessionA1.Label);
+        RenameTab(paneGateway, wtAHwnd, tabIndex: 1, sessionA2.Label);
+        RenameTab(paneGateway, wtBHwnd, tabIndex: 0, sessionB1.Label);
+
+        var tracker = new ActiveStatusTracker();
+        foreach (var s in allSessions)
+        {
+            tracker.HandleExternalSessionDiscovered(s.SessionId, s.CopilotPid);
+            s.Host = tracker.GetCopilotHost(s.SessionId);
+            Assert.NotNull(s.Host);
+        }
+
+        var wtAPanes = paneGateway.EnumeratePanes(wtAHwnd).Panes;
+        var wtBPanes = paneGateway.EnumeratePanes(wtBHwnd).Panes;
+        IntPtr GroundTruthWtHwndFor(RealCopilotSession s)
+        {
+            bool MatchesPane(WindowsTerminalPaneInfo pane) =>
+                (pane.PaneRootProcessId.HasValue && pane.PaneRootProcessId.Value == s.PwshPid)
+                || pane.ProcessId == s.CopilotPid
+                || pane.Name.Contains(s.Label, StringComparison.OrdinalIgnoreCase);
+
+            if (wtAPanes.Any(MatchesPane))
+            {
+                return wtAHwnd;
+            }
+            if (wtBPanes.Any(MatchesPane))
+            {
+                return wtBHwnd;
+            }
+            Assert.Fail(
+                $"Could not locate a pane for session {s.Label} (copilotPid={s.CopilotPid}, pwshPid={s.PwshPid}) "
+                + $"in either wt window. wt-A panes: [{string.Join("|", wtAPanes.Select(p => $"name='{p.Name}',pid={p.ProcessId},paneRoot={p.PaneRootProcessId}"))}] "
+                + $"wt-B panes: [{string.Join("|", wtBPanes.Select(p => $"name='{p.Name}',pid={p.ProcessId},paneRoot={p.PaneRootProcessId}"))}]");
+            return IntPtr.Zero;
+        }
+
+        var groundTruthA1 = GroundTruthWtHwndFor(sessionA1);
+        var groundTruthA2 = GroundTruthWtHwndFor(sessionA2);
+        var groundTruthB1 = GroundTruthWtHwndFor(sessionB1);
+        Assert.Equal(wtAHwnd, groundTruthA1);
+        Assert.Equal(wtAHwnd, groundTruthA2);
+        Assert.Equal(wtBHwnd, groundTruthB1);
+
+        // Critical: do NOT fire OnWindowTitleChanged here. The renames happened BEFORE
+        // this tracker existed (in production, before booster (re)started). The hook
+        // would only fire on subsequent CHANGES — which never come for an idle wt window.
+        // FullRefresh is the only path that reaches the right hwnd.
+        var loadedSessions = SessionService.LoadNamedSessions(
+            Program.SessionStateDir,
+            Program.PidRegistryFile,
+            aliasFile: Program.SessionAliasFile,
+            overrideFile: Program.SessionNameOverrideFile);
+
+        // Sanity: ensure our 3 sessions made it into the loaded list with the right summary.
+        var loadedTestSessions = loadedSessions.Where(s => allSessions.Any(t => string.Equals(t.SessionId, s.Id, StringComparison.OrdinalIgnoreCase))).ToList();
+        Assert.Equal(allSessions.Length, loadedTestSessions.Count);
+        foreach (var s in allSessions)
+        {
+            var loaded = loadedTestSessions.Single(l => string.Equals(l.Id, s.SessionId, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(s.Label, loaded.Summary);
+        }
+
+        tracker.FullRefresh(loadedSessions);
+
+        var hostA1 = tracker.GetCopilotHost(sessionA1.SessionId);
+        var hostA2 = tracker.GetCopilotHost(sessionA2.SessionId);
+        var hostB1 = tracker.GetCopilotHost(sessionB1.SessionId);
+        Assert.NotNull(hostA1);
+        Assert.NotNull(hostA2);
+        Assert.NotNull(hostB1);
+
+        var diagDetails = string.Join(
+            " | ",
+            allSessions.Select(s => $"{s.Label}: hostHwnd={tracker.GetCopilotHost(s.SessionId)?.ParentHostHwnd}, expected={GroundTruthWtHwndFor(s)}"));
+        Assert.True(groundTruthA1 == hostA1!.ParentHostHwnd, $"sessionA1 host should rebind to {groundTruthA1} after FullRefresh. Details: {diagDetails}");
+        Assert.True(groundTruthA2 == hostA2!.ParentHostHwnd, $"sessionA2 host should rebind to {groundTruthA2} after FullRefresh. Details: {diagDetails}");
+        Assert.True(groundTruthB1 == hostB1!.ParentHostHwnd, $"sessionB1 host should rebind to {groundTruthB1} after FullRefresh. Details: {diagDetails}");
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Spawns a fresh wt.exe window via <c>-w new</c>, waits for its first tab's UIA pane
     /// to register, then opens a SECOND empty tab via Ctrl+Shift+T. Does NOT type any

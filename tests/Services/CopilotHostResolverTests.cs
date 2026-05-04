@@ -37,7 +37,7 @@ public sealed class CopilotHostResolverTests
                 return list;
             }
             return this._windows.TryGetValue(pid, out var w) && w != IntPtr.Zero
-                ? new[] { w }
+                ? [w]
                 : Array.Empty<IntPtr>();
         }
     }

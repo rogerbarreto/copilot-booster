@@ -116,7 +116,7 @@ public sealed class InternalSessionHostResolutionIntegrationTests : IDisposable
         public IntPtr GetTopLevelWindow(int pid) => this._windows.TryGetValue(pid, out var w) ? w : IntPtr.Zero;
         public IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid) =>
             this._windows.TryGetValue(pid, out var w) && w != IntPtr.Zero
-                ? new[] { w }
+                ? [w]
                 : Array.Empty<IntPtr>();
     }
 }

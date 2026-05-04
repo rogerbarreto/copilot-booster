@@ -384,6 +384,128 @@ public sealed class ActiveStatusTrackerHostTests
         Assert.Equal([$"foreground:{expectedHwnd}", $"pane:{expectedHwnd}:runtime-2"], calls);
     }
 
+    [Fact]
+    public void OnWindowTitleChanged_TitleMatchIdentifiesDifferentWtHwnd_RebindsCopilotHost()
+    {
+        // Reproduces the bug Roger surfaced 2026-05-04 (image: _copilotHosts watch with two
+        // sessions sharing one host hwnd while the visible "Run Tests" wt is a different
+        // hwnd). Production scenario: Sun Valley wt monarch hosts multiple wt windows under
+        // a single WindowsTerminal.exe pid; CopilotHostResolver's pane-term match fails
+        // when a user's tab labels don't include the session sessionId/summary; the tracker
+        // falls back to the first candidate hwnd by Z-order. The OnWindowTitleChanged hook
+        // later observes the right wt hwnd via "Copilot CLI - <sessionId>" — but pre-fix
+        // that information only updates _activeTrackedWindows, never propagating into
+        // _copilotHosts where FocusCopilotHost reads from. Click-to-focus then targets the
+        // wrong wt window, exactly as Roger saw.
+        var sessionId = "session-pwsh-100856";
+        var copilotPid = 101056;
+        var pwshPid = 100856;
+        var wtMonarchPid = 18144;
+
+        // Two wt hwnds: 0x90768 (the "wrong" candidate the resolver falls back to) and
+        // 0x900FBC (the actually-correct hwnd whose tab title becomes "Copilot CLI -
+        // <sessionId>" once copilot starts up).
+        var wrongWtHwnd = new IntPtr(0x90768);
+        var correctWtHwnd = new IntPtr(0x900FBC);
+
+        var tree = new FakeProcessTree()
+            .Add(copilotPid, pwshPid, "copilot", IntPtr.Zero)
+            .Add(pwshPid, wtMonarchPid, "pwsh", IntPtr.Zero)
+            .Add(wtMonarchPid, null, "WindowsTerminal", IntPtr.Zero)
+            .AddWindows(wtMonarchPid, wrongWtHwnd, correctWtHwnd);
+
+        // Both wt windows return panes whose names DON'T match the session sessionId or
+        // any term in BuildWindowsTerminalPaneMatchTerms — like real users naming tabs
+        // "Add Grill With Docs Route" or "Run Tests" without any session metadata.
+        // Neither pane has PaneRootProcessId populated (also matching production
+        // behaviour where UIA only exposes pane-content hwnds for the foreground tab).
+        var paneInWrongWt = new WindowsTerminalPaneInfo(
+            Name: "Add Grill With Docs Route",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtMonarchPid,
+            IsSelected: true,
+            Select: () => { },
+            RuntimeId: "runtime-wrong",
+            PaneRootProcessId: null);
+        var paneInCorrectWt = new WindowsTerminalPaneInfo(
+            Name: "Run Tests",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtMonarchPid,
+            IsSelected: true,
+            Select: () => { },
+            RuntimeId: "runtime-correct",
+            PaneRootProcessId: null);
+        var gateway = FakeWindowsTerminalPaneGateway.PerHwnd(new Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>
+        {
+            [wrongWtHwnd] = new[] { paneInWrongWt },
+            [correctWtHwnd] = new[] { paneInCorrectWt }
+        });
+        var tracker = CreateTracker(tree, gateway);
+
+        // Discovery: resolver iterates candidates [wrongWtHwnd, correctWtHwnd], no pane
+        // matches via term/paneRootPid for either, so IsRealPaneMatch returns false on
+        // both → falls back to firstAttempt = wrongWtHwnd. This is the production bug.
+        tracker.HandleExternalSessionDiscovered(sessionId, copilotPid);
+        var hostAfterDiscovery = tracker.GetCopilotHost(sessionId);
+        Assert.NotNull(hostAfterDiscovery);
+        Assert.Equal(wrongWtHwnd, hostAfterDiscovery!.ParentHostHwnd);
+
+        // The WindowEventHookService later fires a title-change event when copilot CLI
+        // updates the wt tab title. MatchTrackedWindowTitle parses
+        // "Copilot CLI - <sessionId>" → (sessionId, "Copilot CLI"). This is the
+        // strongest-possible per-session identifier — it cannot false-positive across
+        // wt windows. The tracker MUST treat this signal as authoritative and rebind
+        // _copilotHosts[sessionId].ParentHostHwnd to the title-source hwnd.
+        tracker.OnWindowTitleChanged(correctWtHwnd, $"Copilot CLI - {sessionId}", sessionSummaries: null);
+
+        var hostAfterTitleMatch = tracker.GetCopilotHost(sessionId);
+        Assert.NotNull(hostAfterTitleMatch);
+        Assert.Equal(correctWtHwnd, hostAfterTitleMatch!.ParentHostHwnd);
+        // HostHwnd may be the pane hwnd or the wt window hwnd — but ParentHostHwnd must
+        // be the wt window hwnd identified by title-match.
+        Assert.Equal(wtMonarchPid, hostAfterTitleMatch.HostPid);
+    }
+
+    [Fact]
+    public void OnWindowTitleChanged_TitleMatchAgreesWithCurrentHwnd_NoRebindEvent()
+    {
+        // Inverse case: when title-match identifies the SAME hwnd that's already stored,
+        // we must not churn — no SetCopilotHost call, no event fire. Otherwise every
+        // title tick (copilot CLI updates its title frequently while working) would
+        // refire CopilotHostResolved on the UI bus and re-paint the grid.
+        var sessionId = "session-agreement";
+        var copilotPid = 200;
+        var pwshPid = 300;
+        var wtMonarchPid = 400;
+        var wtHwnd = new IntPtr(0xCCC);
+
+        var tree = new FakeProcessTree()
+            .Add(copilotPid, pwshPid, "copilot", IntPtr.Zero)
+            .Add(pwshPid, wtMonarchPid, "pwsh", IntPtr.Zero)
+            .Add(wtMonarchPid, null, "WindowsTerminal", wtHwnd)
+            .AddWindows(wtMonarchPid, wtHwnd);
+
+        var pane = new WindowsTerminalPaneInfo(
+            Name: $"Copilot CLI - {sessionId}",
+            Hwnd: IntPtr.Zero,
+            ProcessId: wtMonarchPid,
+            IsSelected: true,
+            Select: () => { },
+            RuntimeId: "runtime-only",
+            PaneRootProcessId: pwshPid);
+        var gateway = new FakeWindowsTerminalPaneGateway([pane]);
+        var tracker = CreateTracker(tree, gateway);
+
+        tracker.HandleExternalSessionDiscovered(sessionId, copilotPid);
+        int eventFireCount = 0;
+        tracker.CopilotHostResolved += (_, _) => eventFireCount++;
+
+        tracker.OnWindowTitleChanged(wtHwnd, $"Copilot CLI - {sessionId}", sessionSummaries: null);
+
+        Assert.Equal(0, eventFireCount);
+        Assert.Equal(wtHwnd, tracker.GetCopilotHost(sessionId)!.ParentHostHwnd);
+    }
+
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
     {
         return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());
@@ -394,6 +516,7 @@ public sealed class ActiveStatusTrackerHostTests
         private readonly Dictionary<int, int?> _parents = [];
         private readonly Dictionary<int, string?> _names = [];
         private readonly Dictionary<int, IntPtr> _windows = [];
+        private readonly Dictionary<int, List<IntPtr>> _multiWindows = [];
 
         internal FakeProcessTree Add(int pid, int? parentPid, string? name, IntPtr window)
         {
@@ -403,22 +526,46 @@ public sealed class ActiveStatusTrackerHostTests
             return this;
         }
 
+        internal FakeProcessTree AddWindows(int pid, params IntPtr[] hwnds)
+        {
+            this._multiWindows[pid] = [.. hwnds];
+            return this;
+        }
+
         public int? GetParentPid(int pid) => this._parents.TryGetValue(pid, out var parent) ? parent : null;
         public string? GetProcessName(int pid) => this._names.TryGetValue(pid, out var name) ? name : null;
         public IntPtr GetTopLevelWindow(int pid) => this._windows.TryGetValue(pid, out var hwnd) ? hwnd : IntPtr.Zero;
-        public IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid) =>
-            this._windows.TryGetValue(pid, out var hwnd) && hwnd != IntPtr.Zero
-                ? new[] { hwnd }
+        public IReadOnlyList<IntPtr> EnumerateTopLevelWindows(int pid)
+        {
+            if (this._multiWindows.TryGetValue(pid, out var multi))
+            {
+                return multi;
+            }
+            return this._windows.TryGetValue(pid, out var hwnd) && hwnd != IntPtr.Zero
+                ? [hwnd]
                 : Array.Empty<IntPtr>();
+        }
     }
 
     private sealed class FakeWindowsTerminalPaneGateway : IWindowsTerminalPaneGateway
     {
         private readonly IReadOnlyList<WindowsTerminalPaneInfo> _panes;
+        private readonly Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>>? _panesByHwnd;
 
         internal FakeWindowsTerminalPaneGateway(IReadOnlyList<WindowsTerminalPaneInfo> panes)
         {
             this._panes = panes;
+        }
+
+        private FakeWindowsTerminalPaneGateway(Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>> panesByHwnd, bool _)
+        {
+            this._panes = Array.Empty<WindowsTerminalPaneInfo>();
+            this._panesByHwnd = panesByHwnd;
+        }
+
+        internal static FakeWindowsTerminalPaneGateway PerHwnd(Dictionary<IntPtr, IReadOnlyList<WindowsTerminalPaneInfo>> panesByHwnd)
+        {
+            return new FakeWindowsTerminalPaneGateway(panesByHwnd, false);
         }
 
         internal int EnumerateCount { get; private set; }
@@ -433,11 +580,21 @@ public sealed class ActiveStatusTrackerHostTests
         public WindowsTerminalPaneEnumeration EnumeratePanes(IntPtr wtHwnd)
         {
             this.EnumerateCount++;
+            if (this._panesByHwnd != null)
+            {
+                return this._panesByHwnd.TryGetValue(wtHwnd, out var panes)
+                    ? new WindowsTerminalPaneEnumeration(panes, IsPartial: false)
+                    : new WindowsTerminalPaneEnumeration(Array.Empty<WindowsTerminalPaneInfo>(), IsPartial: false);
+            }
             return new WindowsTerminalPaneEnumeration(this._panes, IsPartial: false);
         }
 
         public IReadOnlyList<(string Name, Action Select)> EnumerateTabs(IntPtr wtHwnd)
         {
+            if (this._panesByHwnd != null && this._panesByHwnd.TryGetValue(wtHwnd, out var panes))
+            {
+                return panes.Select(pane => (pane.Name, pane.Select)).ToList();
+            }
             return this._panes.Select(pane => (pane.Name, pane.Select)).ToList();
         }
     }

@@ -1239,6 +1239,16 @@ internal class ActiveStatusTracker
         // Scan for open tracked windows by title (including session-summary matching)
         // Pass previously tracked HWNDs as fallback for Copilot CLI windows whose titles change dynamically
         this._activeTrackedWindows = WindowFocusService.FindTrackedWindows(BuildSessionSummaryMap(sessionSnapshot), this._activeTrackedWindows);
+
+        // Propagate title-scan ground truth into _copilotHosts BEFORE we project hosts
+        // back into _activeTrackedWindows. This is the FullRefresh complement to the
+        // OnWindowTitleChanged-driven rebind: when wt tabs are renamed before the
+        // booster starts, no EVENT_OBJECT_NAMECHANGE fires, so the title-change rebind
+        // never runs. The startup title-scan still finds the right wt hwnd via tab
+        // title match — without this rebind, _copilotHosts stays at the resolver's
+        // wrong fallback hwnd indefinitely and click-to-focus targets the wrong wt.
+        this.RebindCopilotHostsFromTitleScannedWindows();
+
         this.ReprojectActiveCopilotHosts();
 
         // Sync terminal cache with actual open windows
@@ -1613,9 +1623,111 @@ internal class ActiveStatusTracker
             }
 
             affected.Add(sessionId);
+
+            // Title-match is the strongest possible per-session identifier — both
+            // "Copilot CLI - {sessionId}" and a session-summary equality match cannot
+            // false-positive across wt windows. When the resolver mis-bound the host
+            // (CopilotHostResolver pane-term match misses for tabs renamed by users
+            // with arbitrary labels → ResolveWindowsTerminalAcrossCandidates falls back
+            // to first-by-Z-order), this signal is what gives us the truth. Propagate
+            // it into _copilotHosts so click-to-focus targets the right wt window.
+            this.RebindWindowsTerminalHostFromTitleMatch(sessionId, hwnd);
         }
 
         return affected;
+    }
+
+    /// <summary>
+    /// When <see cref="OnWindowTitleChanged"/> matches a session via title and the
+    /// stored <see cref="CopilotHostInfo"/> for that session is a Windows Terminal
+    /// host pointing at a different wt hwnd, rebind the host info to <paramref name="hwnd"/>
+    /// (and re-resolve pane info against the right wt window). No-op when no host is
+    /// stored, the host is not a wt, or the hwnd already matches.
+    /// </summary>
+    private void RebindWindowsTerminalHostFromTitleMatch(string sessionId, IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (!this._copilotHosts.TryGetValue(sessionId, out var existing))
+        {
+            return;
+        }
+
+        if (!IsWindowsTerminalHost(existing))
+        {
+            return;
+        }
+
+        if (existing.ParentHostHwnd == hwnd)
+        {
+            return;
+        }
+
+        RuntimeDiagnosticLog.Write(
+            "WT title-match rebind session={0} prevHwnd={1} newHwnd={2} copilotPid={3}",
+            sessionId,
+            existing.ParentHostHwnd,
+            hwnd,
+            existing.CopilotPid);
+
+        var rebased = existing with { HostHwnd = hwnd, ParentHostHwnd = hwnd };
+        var resolved = this.ResolveWindowsTerminalPane(sessionId, rebased, sessionSummary: null, paneRootPid: existing.PaneRootProcessId);
+        this.SetCopilotHost(sessionId, resolved);
+    }
+
+    /// <summary>
+    /// Walks <see cref="_activeTrackedWindows"/> after a title-scan refresh and
+    /// propagates any title-matched wt hwnd into <see cref="_copilotHosts"/>. Closes
+    /// the gap where <see cref="OnWindowTitleChanged"/> only fires on title CHANGES
+    /// (Win32 EVENT_OBJECT_NAMECHANGE) — when wt tabs were already named before the
+    /// booster started, no name-change event ever fires for them, so the rebind
+    /// never runs. This method runs unconditionally on every <see cref="FullRefresh"/>
+    /// so the startup title-scan ground truth flows into <see cref="_copilotHosts"/>.
+    ///
+    /// Safety filter: only rebinds to hwnds whose owning process id equals the
+    /// existing host's <see cref="CopilotHostInfo.HostPid"/>. <see cref="_activeTrackedWindows"/>
+    /// can contain hwnds from any visible top-level window whose title matched a
+    /// session (e.g., session-summary equality could match a Notepad window titled
+    /// the same). Without this guard, a wt-typed host could be rebound to a non-wt
+    /// hwnd in another process. The hook-driven path (OnWindowTitleChanged) does
+    /// NOT need this filter because the WindowEventHookService passes the hwnd that
+    /// fired the event directly, so the caller already validated provenance.
+    /// </summary>
+    private void RebindCopilotHostsFromTitleScannedWindows()
+    {
+        foreach (var kvp in this._activeTrackedWindows.ToList())
+        {
+            var sessionId = kvp.Key;
+            if (!this._copilotHosts.TryGetValue(sessionId, out var existing) || !IsWindowsTerminalHost(existing))
+            {
+                continue;
+            }
+
+            foreach (var entry in kvp.Value.ToList())
+            {
+                if (entry.Hwnd == IntPtr.Zero || entry.Hwnd == existing.ParentHostHwnd)
+                {
+                    continue;
+                }
+
+                var hwndPid = WindowFocusService.GetWindowProcessId(entry.Hwnd);
+                if (hwndPid <= 0 || hwndPid != existing.HostPid)
+                {
+                    continue;
+                }
+
+                this.RebindWindowsTerminalHostFromTitleMatch(sessionId, entry.Hwnd);
+                // After rebind, refresh `existing` snapshot so subsequent entries in
+                // this session's list re-evaluate against the new ParentHostHwnd.
+                if (this._copilotHosts.TryGetValue(sessionId, out var refreshed))
+                {
+                    existing = refreshed;
+                }
+            }
+        }
     }
 
     /// <summary>
