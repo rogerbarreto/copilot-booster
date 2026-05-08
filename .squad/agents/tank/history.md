@@ -41,6 +41,11 @@
 - **FakeProcessRunner contract:** Shared fake lives at `tests/Integration/TestTools/FakeProcessRunner.cs`. It implements `IProcessRunner.RunAsync(string fileName, IReadOnlyList<string> args, string cwd, int timeoutSeconds, CancellationToken ct)`, returns a canned `ProcessResult`, and records fileName, args, cwd, timeout for exact invocation assertions.
 - **AI detection tests use explicit CWD resolver:** When testing `AiDetectionService` with a temp session-state root, use the constructor overload that accepts `Func<string,string?> getSessionCwd`; the default workspace reader uses `Program.SessionStateDir`.
 
+- **2026-05-08 — Issue #18 strict AI validator matrix:** `tests/Services/AiResponseParserTests.cs` now covers pure JSON rejection, schema field/type/range failures, mixed valid plus invalid all-fail behavior, empty success, ordered success, top-3 confidence truncation, and inclusive confidence bounds against `AiParseResult`.
+- **2026-05-08 — Issue #18 failure classification unit tests:** `tests/Services/AiDetectionServiceTests.cs` validates `TryGetState(sid).FailureClass` for `ProcessSpawn`, `Timeout`, user cancel with null failure, `ProcessFailure`, `MalformedJson`, `SchemaViolation`, and `NoCandidates`.
+- **2026-05-08 — Issue #18 failure E2E harness:** `tests/Integration/AiDetectFailureIntegrationTests.cs` adds one STA integration test per failure class using real `DataGridView`, `ActiveStatusTracker`, `SessionGridVisuals`, `AiDetectionService`, `GitHubTrackingService`, fake `GitHubApiService`, and `FakeProcessRunner`.
+- **2026-05-08 — Shared logging and process fakes:** `FakeProcessRunner` supports `SetResult` and `ThrowOnNextCall(Exception)` for process boundary cases. `tests/Integration/TestTools/CapturingLogger.cs` captures `ILogger` level/message/exception so future AI slices can assert warning vs error without scraping log files.
+
 ## Team Updates from Other Sessions
 
 ### From Trinity (2026-05-08 Issue #17)
@@ -50,3 +55,4 @@
 ### From Morpheus (2026-05-08 Issue #17)
 
 - Morpheus wired menu nesting (GitHub > AI > Auto Detect) and context menu integration. `OnAiAutoDetect` handler starts detection service and listens for state changes. Grid refresh triggered by `DetectionStateChanged` event. `BuildGitHubAiMenuItem(string sid)` exposed `internal` for Tank's E2E verification via `InternalsVisibleTo`. Menu structure enables future GitHub feature growth without pollution.
+

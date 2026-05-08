@@ -221,6 +221,103 @@ RunAsync(string fileName, IReadOnlyList<string> args, string cwd, int timeoutSec
 
 ---
 
+## Issue #18: Strict Response Validator + 6 Failure Classes for AI Auto-Detect
+
+**Date:** 2026-05-08  
+**Status:** Complete  
+**Contributors:** Trinity (Services Dev), Tank (Tester)  
+
+### Strict Parser Architecture — Trinity
+
+**Decision:** `AiResponseParser.Parse` returns discriminated union `AiParseResult` instead of candidate list.
+
+```csharp
+internal abstract record AiParseResult
+{
+    internal sealed record Success(IReadOnlyList<AiCandidate> Candidates) : AiParseResult;
+    internal sealed record Failure(AiFailureClass Class, string Reason) : AiParseResult;
+}
+```
+
+**Strict Validation Rules:**
+- Rejects empty stdout, prose, markdown fences, non-object roots
+- Requires `candidates` field (array, not null)
+- Rejects candidate non-objects, missing required fields, wrong JSON types
+- Enforces case-sensitive type values: `issue` or `pr` only
+- Enforces non-positive item ids and PR numbers
+- Enforces confidence within inclusive [0.0, 1.0] range
+- Accepts up to 3 valid candidates; sorts by confidence descending (array-order tiebreak), truncates excess
+
+**Parser Contract:**
+- Empty stdout is malformed (no success object)
+- Empty candidates array is parse success (zero candidates, no reason)
+- Non-empty success with 1–3 candidates returns `Success(candidates)`
+- Any violation returns `Failure(class, reason)` where class is `MalformedJson` (JSON parse) or `SchemaViolation` (shape/type/range)
+
+**Why:** Deterministic classification allows downstream service to route failures to appropriate handling without nested if/catch chains. Empty success (zero candidates) is distinct from schema violation so `AiDetectionService` can classify it as `NoCandidates` (not parser error).
+
+### 6-Class Failure Classifier — Trinity
+
+**Decision:** `AiFailureClass` enum lives in `src/Services/` with six deterministic failure classes:
+
+```
+Timeout
+ProcessSpawn
+ProcessFailure
+MalformedJson
+SchemaViolation
+NoCandidates
+```
+
+**Classifier Routing in `AiDetectionService`:**
+
+1. **Process spawn:** Try-catch wrapper around `IProcessRunner.RunAsync` start; classify start exceptions (missing binary, access denied) as `ProcessSpawn`.
+2. **Timeout:** If process was killed AND `!ct.IsCancellationRequested`, classify as `Timeout`. If killed after user cancel, leave `FailureClass` null (not a failure).
+3. **Process exit:** On nonzero exit (before parsing stdout), classify as `ProcessFailure`.
+4. **Parser results:** Exit code zero → call `AiResponseParser.Parse(stdout)`:
+   - `Failure(MalformedJson, ...)` → `FailureClass = MalformedJson`
+   - `Failure(SchemaViolation, ...)` → `FailureClass = SchemaViolation`
+   - `Success([])` (empty) → `FailureClass = NoCandidates`
+   - `Success(candidates)` (non-empty) → proceed to threshold/apply logic
+
+**Logging Contract:**
+
+- **Start log:** `session_id`, `resolved_owner_repo`, `configured_timeout_seconds`
+- **Debug logs:** `exact_prompt_sent`, `raw_stdout`, `raw_stderr` (no redaction)
+- **End log:** `outcome`, `failure_class`, `reason`, `exit_code`, `candidate_count`, `top_confidence`, `applied_items`, `duration_ms`
+- **Log levels:** `Timeout` and `NoCandidates` use WARNING; `MalformedJson`, `SchemaViolation`, `ProcessSpawn`, `ProcessFailure` use ERROR
+
+**Observation Point:**
+- `DetectionState.FailureClass` is nullable `AiFailureClass?`
+- Tests and UI observe via `TryGetState(sid).FailureClass` (no new event arg)
+
+**Why:** Centralizing failure classification in the service (not in parser, not in runner) allows parser to focus on JSON purity and service to own orchestration semantics. Six classes are sufficient for slice #18; future slices (timeout settings, retry policy, etc.) will extend logging and thresholds without new classes.
+
+### Test Infrastructure Extensions — Tank
+
+**Decision:** Extend shared test doubles for AI detection slices.
+
+**FakeProcessRunner Extensions:**
+- Already implements `IProcessRunner.RunAsync(fileName, args, cwd, timeoutSeconds, ct)`
+- Add `SetResult(ProcessResult result)` for per-test canned outcomes
+- Add `ThrowOnNextCall(Exception ex)` for process spawn failure paths
+
+**CapturingLogger (New):**
+- Lives at `tests/Integration/TestTools/CapturingLogger.cs`
+- Implements `ILogger` to capture level/message/exception tuples
+- Used by E2E failure-class tests for log-level assertions without file scraping
+
+**Why:** FakeProcessRunner is already the shared copilot process boundary fake; extending it for canned results and exception support avoids test cloning. CapturingLogger is faster and more deterministic than scraping app log files for assertion.
+
+**Outcome:**
+- `tests/Services/AiResponseParserTests.cs` — ~28 strict-violation rows
+- `tests/Services/AiDetectionServiceTests.cs` — classifier unit tests for all six classes
+- `tests/Integration/AiDetectFailureIntegrationTests.cs` — six E2E tests (one per class)
+- `tests/Integration/TestTools/FakeProcessRunner.cs` — extended with SetResult/ThrowOnNextCall
+- `tests/Integration/TestTools/CapturingLogger.cs` — ILogger capture
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

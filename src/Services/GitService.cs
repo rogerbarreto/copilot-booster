@@ -9,11 +9,64 @@ using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
+internal enum GitHubRepoResolution
+{
+    Resolved,
+    NotAGitRepo,
+    NoRemote,
+    NonGitHubRemote
+}
+
+internal readonly record struct GitHubRepoResult(GitHubRepoResolution Status, string? Owner, string? Repo);
+
 /// <summary>
 /// Provides Git-related operations such as branch listing, worktree creation, and repository detection.
 /// </summary>
 internal static partial class GitService
 {
+    internal static GitHubRepoResult ResolveGitHubRepo(string cwd)
+    {
+        if (string.IsNullOrWhiteSpace(cwd) || !Directory.Exists(cwd))
+        {
+            return new GitHubRepoResult(GitHubRepoResolution.NotAGitRepo);
+        }
+
+        var (insideExitCode, insideStdout, _) = RunGit(cwd, "rev-parse --is-inside-work-tree");
+        if (insideExitCode != 0 || !insideStdout.Trim().Equals("true", StringComparison.OrdinalIgnoreCase))
+        {
+            return new GitHubRepoResult(GitHubRepoResolution.NotAGitRepo);
+        }
+
+        var sawRemote = false;
+        foreach (var remoteName in new[] { "upstream", "origin" })
+        {
+            var remoteUrl = GetRemoteUrl(cwd, remoteName);
+            if (string.IsNullOrWhiteSpace(remoteUrl))
+            {
+                continue;
+            }
+
+            sawRemote = true;
+            var parsed = ParseGitHubOwnerRepo(remoteUrl);
+            if (parsed != null)
+            {
+                return new GitHubRepoResult(GitHubRepoResolution.Resolved, parsed.Value.owner, parsed.Value.repo);
+            }
+        }
+
+        return sawRemote
+            ? new GitHubRepoResult(GitHubRepoResolution.NonGitHubRemote)
+            : new GitHubRepoResult(GitHubRepoResolution.NoRemote);
+    }
+
+    internal static (string owner, string repo)? TryResolveGitHubRepo(string cwd)
+    {
+        var result = ResolveGitHubRepo(cwd);
+        return result.Status == GitHubRepoResolution.Resolved
+            ? (result.Owner!, result.Repo!)
+            : null;
+    }
+
     /// <summary>
     /// Returns <c>true</c> if the given path is inside a Git repository.
     /// </summary>
@@ -410,6 +463,42 @@ internal static partial class GitService
         return exitCode == 0 ? stdout.Trim() : null;
     }
 
+    internal static GitHubRepoResult ResolveGitHubRepo(string cwd)
+    {
+        if (string.IsNullOrWhiteSpace(cwd) || !Directory.Exists(cwd))
+        {
+            return new GitHubRepoResult(GitHubRepoResolution.NotAGitRepo, null, null);
+        }
+
+        var (gitExitCode, _, _) = RunGitAtCwd(cwd, ["rev-parse", "--is-inside-work-tree"]);
+        if (gitExitCode != 0)
+        {
+            return new GitHubRepoResult(GitHubRepoResolution.NotAGitRepo, null, null);
+        }
+
+        var upstream = TryResolveRemote(cwd, "upstream");
+        if (upstream.HasValue)
+        {
+            return upstream.Value;
+        }
+
+        var origin = TryResolveRemote(cwd, "origin");
+        if (origin.HasValue)
+        {
+            return origin.Value;
+        }
+
+        return new GitHubRepoResult(GitHubRepoResolution.NoRemote, null, null);
+    }
+
+    internal static (string Owner, string Repo)? TryResolveGitHubRepo(string cwd)
+    {
+        var result = ResolveGitHubRepo(cwd);
+        return result.Status == GitHubRepoResolution.Resolved && result.Owner != null && result.Repo != null
+            ? (result.Owner, result.Repo)
+            : null;
+    }
+
     /// <summary>
     /// Detects the hosting platform from a remote URL.
     /// </summary>
@@ -516,7 +605,7 @@ internal static partial class GitService
             url = url[..^4];
         }
 
-        if (url.Contains("github.com"))
+        if (url.Contains("github.com", StringComparison.OrdinalIgnoreCase))
         {
             var httpsIdx = url.IndexOf("github.com/", StringComparison.OrdinalIgnoreCase);
             if (httpsIdx >= 0)

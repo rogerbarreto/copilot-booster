@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CopilotBooster.Models;
@@ -30,7 +29,7 @@ internal sealed class DetectionState
 
     internal IReadOnlyList<AiCandidate>? TopCandidates { get; set; }
 
-    internal string? FailureClass { get; set; }
+    internal AiFailureClass? FailureClass { get; set; }
 
     internal static DetectionState Idle => new();
 }
@@ -145,6 +144,9 @@ internal sealed class AiDetectionService : IDisposable
         var candidateCount = 0;
         double? topConfidence = null;
         var applied = new List<GitHubTrackedItem>();
+        AiFailureClass? failureClass = null;
+        string? failureReason = null;
+        int? failureExitCode = null;
 
         try
         {
@@ -189,7 +191,7 @@ internal sealed class AiDetectionService : IDisposable
                 "--log-dir", logDir
             };
 
-            Program.Logger.LogDebug("AI detection prompt for {SessionId}: {Prompt}", sessionId, prompt);
+            Program.Logger.LogDebug("AI detection debug session_id={SessionId} exact_prompt_sent={ExactPromptSent}", sessionId, prompt);
 
             ProcessResult processResult;
             try
@@ -198,43 +200,65 @@ internal sealed class AiDetectionService : IDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                outcome = "process_spawn";
-                state.FailureClass = outcome;
-                Program.Logger.LogError(ex, "AI detection process spawn failed for {SessionId}", sessionId);
+                failureClass = AiFailureClass.ProcessSpawn;
+                failureReason = ex.Message;
+                outcome = ToOutcome(failureClass.Value);
+                state.FailureClass = failureClass;
+                Program.Logger.LogDebug(ex, "AI detection process spawn exception session_id={SessionId}", sessionId);
                 return;
             }
 
-            Program.Logger.LogDebug("AI detection raw stdout for {SessionId}: {Stdout}", sessionId, processResult.Stdout);
-            Program.Logger.LogDebug("AI detection raw stderr for {SessionId}: {Stderr}", sessionId, processResult.Stderr);
+            Program.Logger.LogDebug("AI detection debug session_id={SessionId} raw_stdout={RawStdout}", sessionId, processResult.Stdout);
+            Program.Logger.LogDebug("AI detection debug session_id={SessionId} raw_stderr={RawStderr}", sessionId, processResult.Stderr);
 
             if (processResult.WasKilled)
             {
-                outcome = cts.IsCancellationRequested ? "cancelled" : "timeout";
-                state.FailureClass = outcome;
-                Program.Logger.LogWarning("AI detection ended with {Outcome} for {SessionId}", outcome, sessionId);
+                if (cts.IsCancellationRequested)
+                {
+                    outcome = "cancelled";
+                    return;
+                }
+
+                failureClass = AiFailureClass.Timeout;
+                failureReason = "process was killed after configured timeout";
+                outcome = ToOutcome(failureClass.Value);
+                state.FailureClass = failureClass;
                 return;
             }
 
             if (processResult.ExitCode != 0)
             {
-                outcome = "process_failure";
-                state.FailureClass = outcome;
-                Program.Logger.LogError("AI detection process failed for {SessionId} with exit code {ExitCode}: {Stderr}", sessionId, processResult.ExitCode, processResult.Stderr);
+                failureClass = AiFailureClass.ProcessFailure;
+                failureReason = string.IsNullOrWhiteSpace(processResult.Stderr) ? "process exited with non-zero exit code" : processResult.Stderr;
+                failureExitCode = processResult.ExitCode;
+                outcome = ToOutcome(failureClass.Value);
+                state.FailureClass = failureClass;
                 return;
             }
 
-            if (!IsParseableJson(processResult.Stdout))
+            var parseResult = AiResponseParser.Parse(processResult.Stdout);
+            if (parseResult is AiParseResult.Failure parseFailure)
             {
-                outcome = "malformed_json";
-                state.FailureClass = outcome;
-                Program.Logger.LogError("AI detection returned malformed JSON for {SessionId}", sessionId);
+                failureClass = parseFailure.Class;
+                failureReason = parseFailure.Reason;
+                outcome = ToOutcome(failureClass.Value);
+                state.FailureClass = failureClass;
                 return;
             }
 
-            var candidates = AiResponseParser.Parse(processResult.Stdout);
+            var candidates = ((AiParseResult.Success)parseResult).Candidates;
             candidateCount = candidates.Count;
             topConfidence = candidates.Count > 0 ? candidates.Max(c => c.Confidence) : null;
             state.TopCandidates = candidates;
+
+            if (candidates.Count == 0)
+            {
+                failureClass = AiFailureClass.NoCandidates;
+                failureReason = "response contained no candidates";
+                outcome = ToOutcome(failureClass.Value);
+                state.FailureClass = failureClass;
+                return;
+            }
 
             foreach (var candidate in candidates.Where(c => c.Confidence >= ConfidenceThreshold))
             {
@@ -264,28 +288,95 @@ internal sealed class AiDetectionService : IDisposable
             if (applied.Count > 0)
             {
                 this._toastSink(FormatSuccessToast(applied));
+                outcome = "success";
             }
-
-            outcome = applied.Count > 0 ? "success" : "no_candidates";
+            else
+            {
+                failureClass = AiFailureClass.NoCandidates;
+                failureReason = "no candidates met threshold or survived filtering";
+                outcome = ToOutcome(failureClass.Value);
+                state.FailureClass = failureClass;
+            }
         }
         catch (OperationCanceledException)
         {
             outcome = "cancelled";
-            state.FailureClass = outcome;
-            Program.Logger.LogWarning("AI detection cancelled for {SessionId}", sessionId);
         }
         catch (Exception ex)
         {
             outcome = "error";
-            state.FailureClass = outcome;
+            failureReason = ex.Message;
             Program.Logger.LogError(ex, "AI detection failed for {SessionId}", sessionId);
         }
         finally
         {
             stopwatch.Stop();
-            Program.Logger.LogInformation("AI detection end outcome={Outcome} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}", outcome, candidateCount, topConfidence, FormatAppliedItems(applied), stopwatch.ElapsedMilliseconds);
+            LogDetectionEnd(outcome, candidateCount, topConfidence, applied, stopwatch.ElapsedMilliseconds, failureClass, failureReason, failureExitCode);
             this.TransitionToIdle(sessionId, state, cts);
         }
+    }
+
+    private static void LogDetectionEnd(
+        string outcome,
+        int candidateCount,
+        double? topConfidence,
+        IReadOnlyList<GitHubTrackedItem> applied,
+        long durationMs,
+        AiFailureClass? failureClass,
+        string? failureReason,
+        int? failureExitCode)
+    {
+        if (failureClass == null)
+        {
+            Program.Logger.LogInformation(
+                "AI detection end outcome={Outcome} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                outcome,
+                candidateCount,
+                topConfidence,
+                FormatAppliedItems(applied),
+                durationMs);
+            return;
+        }
+
+        if (failureClass is AiFailureClass.Timeout or AiFailureClass.NoCandidates)
+        {
+            Program.Logger.LogWarning(
+                "AI detection end outcome={Outcome} failure_class={FailureClass} reason={Reason} exit_code={ExitCode} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                outcome,
+                failureClass,
+                failureReason,
+                failureExitCode,
+                candidateCount,
+                topConfidence,
+                FormatAppliedItems(applied),
+                durationMs);
+            return;
+        }
+
+        Program.Logger.LogError(
+            "AI detection end outcome={Outcome} failure_class={FailureClass} reason={Reason} exit_code={ExitCode} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+            outcome,
+            failureClass,
+            failureReason,
+            failureExitCode,
+            candidateCount,
+            topConfidence,
+            FormatAppliedItems(applied),
+            durationMs);
+    }
+
+    private static string ToOutcome(AiFailureClass failureClass)
+    {
+        return failureClass switch
+        {
+            AiFailureClass.Timeout => "timeout",
+            AiFailureClass.ProcessSpawn => "process_spawn",
+            AiFailureClass.ProcessFailure => "process_failure",
+            AiFailureClass.MalformedJson => "malformed_json",
+            AiFailureClass.SchemaViolation => "schema_violation",
+            AiFailureClass.NoCandidates => "no_candidates",
+            _ => failureClass.ToString()
+        };
     }
 
     private static (string owner, string repo)? ResolveOwnerRepo(string sessionId, string cwd)
@@ -347,7 +438,7 @@ internal sealed class AiDetectionService : IDisposable
         {
             var root = issueDoc.RootElement;
             var labels = new List<string>();
-            if (root.TryGetProperty("labels", out var labelsArray) && labelsArray.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty("labels", out var labelsArray) && labelsArray.ValueKind == System.Text.Json.JsonValueKind.Array)
             {
                 foreach (var label in labelsArray.EnumerateArray())
                 {
@@ -363,7 +454,7 @@ internal sealed class AiDetectionService : IDisposable
                 Type = "issue",
                 Number = number,
                 State = root.GetProperty("state").GetString() ?? "open",
-                StateReason = root.TryGetProperty("state_reason", out var stateReason) && stateReason.ValueKind != JsonValueKind.Null ? stateReason.GetString() : null,
+                StateReason = root.TryGetProperty("state_reason", out var stateReason) && stateReason.ValueKind != System.Text.Json.JsonValueKind.Null ? stateReason.GetString() : null,
                 Title = root.GetProperty("title").GetString() ?? "",
                 Author = root.TryGetProperty("user", out var user) && user.TryGetProperty("login", out var login) ? login.GetString() ?? "" : "",
                 Labels = labels,
@@ -406,35 +497,17 @@ internal sealed class AiDetectionService : IDisposable
 
     private static string? NormalizeType(string type)
     {
-        if (type.Equals("pr", StringComparison.OrdinalIgnoreCase))
+        if (type == "pr")
         {
             return "pr";
         }
 
-        if (type.Equals("issue", StringComparison.OrdinalIgnoreCase))
+        if (type == "issue")
         {
             return "issue";
         }
 
         return null;
-    }
-
-    private static bool IsParseableJson(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var _ = JsonDocument.Parse(value);
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
     }
 
     private static string FormatSuccessToast(IReadOnlyList<GitHubTrackedItem> applied)
