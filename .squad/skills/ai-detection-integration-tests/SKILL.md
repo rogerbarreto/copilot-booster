@@ -79,3 +79,26 @@ Use when testing the Issue #22 status corner flow.
 4. Click the corner via `HandleGitHubCellClick(rowIndex, pointInsideStatusRegion, cellBounds)`.
 5. Assert recorded message body, `AiDetectionService.TryGetState(sid).Status == Idle`, and `GetCornerIconForSession(sid) == null`.
 6. Click outside `GetStatusIconRegion(cellBounds)` to assert `OnGitHubColumnClick` fallthrough remains intact for undecided and error states.
+
+## Real `copilot -p` LocalOnly pattern
+
+Use when a test must cross the real Copilot CLI prompt boundary.
+
+1. Mark the class or method with `[Trait("Category", "LocalOnly")]` and the method with `[LocalOnlyFact]`.
+2. Pick a fixture from `~/.copilot/session-state/*` where `workspace.yaml` exists and `events.jsonl` is non-empty.
+3. Read `cwd:` from `workspace.yaml`, then `Assert.Skip` if it is missing, unavailable, or `GitService.TryResolveGitHubRepo(cwd)` returns null.
+4. Copy the fixture folder under `Path.GetTempPath()` using a fresh session id, and rewrite the copied `workspace.yaml` id plus cwd.
+5. Construct `AiDetectionService` with production `ProcessRunner`, real `GitHubApiService`, default `LauncherSettings.CreateDefault().AiDetection`, temp session-state root, and temp app-log root.
+6. Wait up to configured timeout plus a small buffer. Accept `Idle`, `Undecided`, and `Error` with `NoCandidates`. Skip on `ProcessSpawn` or `ProcessFailure` because these usually mean local copilot/auth setup is missing.
+7. Clean the temp fixture root and `SessionStateService.GetSessionDir(sessionId)`.
+
+## Parallel detection E2E pattern
+
+Use when asserting no queueing across sessions.
+
+1. Create a real grid and real `AiDetectionService`.
+2. Add five session rows with distinct ids and prior `GitHubTrackingData.Owner/Repo` so repo resolution is deterministic.
+3. Use one shared fake `IProcessRunner` keyed by the `--add-dir` session folder. Each call records start and returns a per-session `TaskCompletionSource`.
+4. Start all detections without awaiting each individually.
+5. Poll until every service state is `Running` and every fake invocation has started before releasing any result.
+6. Release completions one at a time and assert the released session reaches `Idle` while unreleased sessions remain `Running`.

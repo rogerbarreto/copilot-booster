@@ -1,4 +1,4 @@
-# Copilot Booster
+﻿# Copilot Booster
 
 <p align="center">
   <img src="images/logo.png" alt="Copilot Booster Logo" width="200">
@@ -263,6 +263,26 @@ Start a workspace from a GitHub issue number. Enter the issue number, click **Ch
 <p align="center">
   <img src="images/create-workspace-from-issue.png" alt="Create workspace from a GitHub Issue" width="450">
 </p>
+
+### AI auto-detect GitHub issue / PR
+
+AI auto-detect reads the selected session conversation, extracts explicit GitHub issue and PR references, validates them with `gh`, then adds above-threshold candidates to the session's tracked GitHub items.
+
+Use it from a session row: right-click → `GitHub` → `AI` → `Auto Detect GitHub Issue and PR`.
+
+Settings live under Settings → AI:
+
+| Field | Default | Range |
+|-------|---------|-------|
+| Enable AI auto-detect | On | On or off |
+| Per-detection timeout | 300s | 30 to 1800 |
+| Auto-apply confidence threshold | 0.5 | 0.0 to 1.0 |
+| Copilot CLI path | Empty uses PATH | Any executable path |
+| Model | Empty | Optional Copilot model name |
+
+Visual feedback appears in the GitHub column corner. A spinner means detection is running, and clicking it cancels after confirmation. A `?` icon means low confidence, and clicking it shows candidate details. A `!` icon means detection failed, and clicking it shows failure details.
+
+Contributor note: the real `copilot -p` integration test is marked `[LocalOnlyFact]`, skipped on CI, and only runs locally with `COPILOT_BOOSTER_RUN_LOCALONLY=1`.
 
 ---
 

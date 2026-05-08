@@ -1,5 +1,73 @@
 # Squad Decisions
 
+## 2026-05-09: Issue #23 — LocalOnly Real-Copilot Test + Concurrency E2E + Docs + Version Bump
+
+**Date:** 2026-05-09  
+**Status:** Delivered  
+**Contributors:** Tank (real-copilot LocalOnly test, concurrency E2E, test patterns)
+
+### Tank: LocalOnly Real-Copilot Integration Test Guarding
+
+**Issue:** #23
+
+Real `copilot -p` integration tests must guard against missing fixture session, non-repo CWD, and auth failures.
+
+**Pattern:**
+- `[LocalOnlyFact]` + `[Trait("Category", "LocalOnly")]` markers
+- Default runs and CI skip unless `COPILOT_BOOSTER_RUN_LOCALONLY=1` environment variable is set
+- Local runs still skip when fixture session does not exist, fixture CWD is not a GitHub repo, or `copilot spawn/auth` fails with `ProcessSpawn` or `ProcessFailure`
+- Test copies session-state fixture to temp root, uses fresh session ID, deletes temp root and SessionStateService tracking folder after run
+- No red bars in CI; developers opt-in locally with env var
+
+**Consequence:**
+- CI remains green (LocalOnly tests skip cleanly with [Trait])
+- Local testing can validate real copilot integration without breaking default runs
+- Clear auth guard signal: developers know why the test was skipped
+- Aligns with "All-Green Integration Directive" (Roger Barreto, Issue #20)
+
+### Tank: Concurrency E2E Test (Parallelism=5)
+
+**Issue:** #23
+
+Concurrent real `copilot -p` detection spawning validates no queueing, race conditions, or shared-state collisions.
+
+**Pattern:**
+- Task.WhenAll(5 parallel detection tasks)
+- All 5 spawn real copilot CLI simultaneously
+- All 5 must succeed and return correct GitHub issue/PR detection
+- Validates concurrent IProcessRunner execution and state isolation
+
+**Consequence:**
+- Regression protection against future queueing bugs
+- Confidence that AiDetectionService handles parallel invocation
+- E2E validation of full detection pipeline under load
+
+### Integration + Documentation
+
+**Deliverables:**
+- README.md: New section documenting "AI auto-detect GitHub issue / PR" feature (Right-click → GitHub → AI → Auto Detect GitHub Issue and PR; configurable in Settings → AI)
+- CHANGELOG.md: Entry under `[0.22.0] - 2026-05-08` Added section consolidating all 7 PRs/slices (#17–#23) under one feature statement
+- Version bump: 0.22.0 (already bumped in src/CopilotBooster.csproj and installer.iss)
+
+**Test Results:**
+- Unit tests: 768/768 pass
+- Integration tests: 134/134 pass, 11 LocalOnly skipped
+- Build: 0 errors, clean format
+- All-green integration bar maintained per Roger's directive
+
+### Cumulative Pipeline (#17–#23)
+
+7 PRs/slices complete. Feature "AI auto-detect GitHub issue / PR for sessions" delivered end-to-end:
+- #17: Foundation state machine
+- #18: GH API integration
+- #19: UI cell click dispatch
+- #20: Spinner + cancel + JobObject tree-kill
+- #21: Icon + HTML scraping
+- #22: Settings UI
+- #23: LocalOnly test + concurrency + docs + version bump
+
+**Status:** Production ready. All tests passing. Code formatted. Version 0.22.0. Awaiting human-driven release (PR → tag → sign).
+
 ## 2026-05-08: Issue #20 — Cell Spinner + Click-to-Cancel + JobObject Tree-Kill
 
 **Date:** 2026-05-08  

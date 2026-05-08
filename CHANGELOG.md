@@ -1,8 +1,14 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [0.22.0] - 2026-05-08
+
+### Added
+
+- AI auto-detect GitHub issue / PR for sessions. Right-click → GitHub → AI → Auto Detect GitHub Issue and PR. Configurable in Settings → AI. (#17 #18 #19 #20 #21 #22 #23)
 
 ## [0.21.0] - 2026-05-04
 
