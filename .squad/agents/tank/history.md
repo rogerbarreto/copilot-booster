@@ -1,4 +1,4 @@
-# Tank — History
+﻿# Tank — History
 
 ## Core Context
 
@@ -37,3 +37,16 @@
 - **wt.exe multi-pane live IT pattern (0.21.0 Round 5b):** Keep the test `[LocalOnlyFact]` plus `[Trait("Category", "LocalOnly")]`; the default run skips it and release `-notrait "Category=LocalOnly"` filters it out entirely. Preflight checks must skip (not fail) when `wt.exe`, interactive desktop, or `copilot --deny-url` support is missing.
 - **--deny-url process discovery (0.21.0 Round 5b):** Use a per-pane PowerShell wrapper that starts `copilot --deny-url=<guid>`, then queries `Win32_Process.CommandLine` for that GUID and writes the real Copilot PID to a marker file. Map PID → session via `~/.copilot/logs/process-*-<pid>.log` and `CopilotLogWatcherService.TryParseLogContent`.
 - **Windows Terminal automation gotchas (0.21.0 Round 5b):** Launch WT directly with semicolon-separated commands in `ProcessStartInfo.Arguments`; no PowerShell escaping of `;` is needed because we do not invoke a shell. Use `--title` + `--suppressApplicationTitle`, append deterministic `user.message` events, then re-resolve host entries so pane matching can use Booster-resolved labels.
+- **2026-05-08: AI detect E2E grid wiring:** For AI detection grid tests, create a real `DataGridView`, `ActiveStatusTracker`, and `SessionGridVisuals`; set `GetGitHubValue` to the same compact `PR#N` format as MainForm; subscribe to `AiDetectionService.DetectionStateChanged` and call `tracker.IncrementalRefresh(sessions)` plus `visuals.UpdateGridIncremental(snapshot)` so the GitHub cell re-renders after `GitHubTrackingService.AddItem` writes disk state.
+- **FakeProcessRunner contract:** Shared fake lives at `tests/Integration/TestTools/FakeProcessRunner.cs`. It implements `IProcessRunner.RunAsync(string fileName, IReadOnlyList<string> args, string cwd, int timeoutSeconds, CancellationToken ct)`, returns a canned `ProcessResult`, and records fileName, args, cwd, timeout for exact invocation assertions.
+- **AI detection tests use explicit CWD resolver:** When testing `AiDetectionService` with a temp session-state root, use the constructor overload that accepts `Func<string,string?> getSessionCwd`; the default workspace reader uses `Program.SessionStateDir`.
+
+## Team Updates from Other Sessions
+
+### From Trinity (2026-05-08 Issue #17)
+
+- Trinity implemented `AiDetectionService` with full state machine (Idle → Pending → Running → Complete/Failed). Public contract: `StartDetectionAsync(sid)`, `CancelDetection(sid)`, `TryGetState(sid)` overloads, `DetectionStateChanged(sid, oldStatus, newStatus)` event. Process runner abstracted via `IProcessRunner` interface (paired with `FakeProcessRunner` for tests). Prompt builder and response parser are internal service classes. All 667 unit tests pass.
+
+### From Morpheus (2026-05-08 Issue #17)
+
+- Morpheus wired menu nesting (GitHub > AI > Auto Detect) and context menu integration. `OnAiAutoDetect` handler starts detection service and listens for state changes. Grid refresh triggered by `DetectionStateChanged` event. `BuildGitHubAiMenuItem(string sid)` exposed `internal` for Tank's E2E verification via `InternalsVisibleTo`. Menu structure enables future GitHub feature growth without pollution.

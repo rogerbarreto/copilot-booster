@@ -28,7 +28,8 @@
     <Compile Remove="**\*.cs" />
     <Compile Include="Integration\**\*.cs" />
     <!-- Exclude simulator tool source files from test compilation -->
-    <Compile Remove="Integration\TestTools\**\*.cs" />
+    <Compile Remove="Integration\TestTools\IdeSimVS\**\*.cs" />
+    <Compile Remove="Integration\TestTools\IdeSimVSCode\**\*.cs" />
   </ItemGroup>
 
   <!-- Build IDE simulators into the test output directory -->

@@ -283,6 +283,11 @@ internal partial class MainForm
             }
         };
 
+        this._sessionsVisuals.OnAiAutoDetect += (sid) =>
+        {
+            _ = this.AiDetectionService.StartDetectionAsync(sid);
+        };
+
         this._sessionsVisuals.OnShowCiJobs += (sid, prNumber) =>
         {
             var data = GitHubTrackingService.Load(sid);

@@ -1,10 +1,24 @@
-# Trinity — History
+﻿# Trinity — History
 
 ## Core Context
 
 - **Project:** A C# WinForms (.NET 10) desktop application that enhances GitHub Copilot workflow with session management, IDE integration, and GitHub tracking.
 - **Role:** Services Dev
 - **Joined:** 2026-03-15T15:50:59.673Z
+
+### Previous Phase Learnings (0.21.0 — Copilot Host Discovery + Async Worktree)
+
+**Phase 1 Foundations (Copilot Host Discovery):** Implemented 5 core components: `HostKindClassifier`, `BoosterResolvedNameFormatter`, `FirstUserMessageExtractor`, `SessionNameOverrideService`, `CopilotHostInfo` record. Built unified name resolution chain with priority (Alias → ws.summary → sidecar override → folder → fallback).
+
+**Phase 2 Host Discovery Primitives:** Implemented `IProcessTreeProvider` abstraction with Win32 Toolhelp32 backend for testability. `CopilotHostResolver` walks parent tree with cycle detection. Extended `WindowHandleCacheService` with copilot-host entries keyed by HWND.
+
+**Phase 3 ActiveStatusTracker Scaffolding:** Added `_copilotHosts` dictionary and projection into `_activeTrackedWindows`. Implemented host accessor methods and persistence via cache service.
+
+**Phase 4 Windows Terminal UIA Integration:** Implemented `WindowsTerminalPaneGateway` using System.Windows.Automation. Enabled `<UseWPF>true</UseWPF>` in csproj. 250ms time-box for tab enumeration. SelectionItemPattern.Select() with InvokePattern fallback.
+
+**Issue #12 Async Worktree Operations:** Designed and implemented `RunGitAsync`, concurrent stdout/stderr reading, process tree kill on cancellation, 3 async worktree method overloads, 3 async WorkspaceCreationService overloads. All sync methods kept unchanged for backward compatibility.
+
+**All-Green Integration Test Directive:** All integration tests must pass without baseline failures. Tests self-bootstrap environment (Playwright) or skip explicitly with traits.
 
 ## Learnings
 
@@ -28,3 +42,16 @@
 - **2026-03-16 — Phase 4 UIA gateway implementation:** Implemented `WindowsTerminalPaneGateway` using `System.Windows.Automation` to enumerate Windows Terminal tabs via UIAutomation. Enabled `<UseWPF>true</UseWPF>` in `CopilotBooster.csproj` — direct `<Reference Include="UIAutomationClient" />` approach failed in .NET 10 with assembly resolution errors. UseWPF transitively provides UIAutomationClient and UIAutomationTypes assemblies. Binary size impact not measured (Phase 3 code incomplete, preventing full build). Implementation: `AutomationElement.FromHandle(wtHwnd)` → `FindAll(TreeScope.Descendants, ControlType.TabItem)` → 250ms time-box with `Stopwatch`. Each Select action tries `SelectionItemPattern.Select()` first, falls back to `InvokePattern.Invoke()`, swallows `ElementNotAvailableException` and `InvalidOperationException`. Top-level try/catch logs warning and returns empty list on any UIA failure.
 - **Playwright self-bootstrap pattern (0.21.0 Round 4):** Local IT runs auto-install chromium via xUnit collection fixture. Probe `Playwright.CreateAsync().Chromium.LaunchAsync()` once per test process; on missing browser call `Microsoft.Playwright.Program.Main(["install", "chromium"])`. First run 36s (with install), cached 29s, vs. 39s pre-bootstrap with 13 reds. Fixture is transparent — CI's existing `playwright install chromium` release step makes the fixture a fast probe.
 - **2026-03-16 — Phase 3 summary write cleanup and deferred name resolution:** Modified `CopilotLogWatcherService.CreateWorkspaceYamlFromPid` (line ~401) to comply with ADR-0001: removed GUID fallback (`?? sessionId`) from summary write. Now passes `GetWindowTitleByPid(pid) ?? string.Empty` to the shared `CreateWorkspaceYaml` helper (line ~369), which checks `!string.IsNullOrWhiteSpace(sessionName)` before writing `summary:` and `name:` fields. External sessions discovered via log watcher never write a GUID to `workspace.yaml.summary`; the T1 trigger (sister task) sets the Booster-Resolved Name placeholder in the sidecar instead. Added deferred name resolution to `EventsJournalService.OnFileChanged`: new `TryResolveBoosterName` method (line ~440) checks if the current override has `ResolvedFromUserMessage == false`, extracts first user.message via `FirstUserMessageExtractor.Extract`, formats via `BoosterResolvedNameFormatter.Format`, and updates sidecar with `resolvedFromUserMessage: true`. New event `BoosterResolvedNameUpdated` (Action<string>) fires on successful resolution for MainForm to trigger UI refresh. Resolution is short-circuited once `ResolvedFromUserMessage == true` (no redundant extraction). Updated `ExternalSessionDiscovered` event signature from `Action<string>` to `Action<string, int>` (added copilotPid parameter) for consistency with ActiveStatusTracker T1 trigger expectations.
+### 2026-05-08 Issue #17 AI detection service layer
+
+Added `IProcessRunner` plus `ProcessResult`, `ProcessRunner`, `AiPromptBuilder`, `AiResponseParser`, and `AiDetectionService`. Public contract for Morpheus and Tank: `StartDetectionAsync(string sessionId)`, `CancelDetection(string sessionId)`, `TryGetState(string sessionId)`, `TryGetState(string sessionId, out DetectionState?)`, and `DetectionStateChanged(string sid, DetectionStatus oldStatus, DetectionStatus newStatus)`. `AiDetectionService` constructor accepts `GitHubApiService`, `IProcessRunner`, `Func<string,string?>` CWD resolver, `Action<string>` toast sink, optional `GitHubPollingService`, session-state root, and log root. A compatibility constructor also accepts `(IProcessRunner, GitHubApiService, GitHubPollingService?, Action<string>, sessionStateRoot, logRoot)`. Prompt template lives verbatim in `AiPromptBuilder`; logs go under `<app log root>\copilot-booster-detect\<timestamp>-<sid8>`. Slice #17 intentionally keeps lenient JSON parsing, origin-only repo fallback, hardcoded settings, and simple child kill with TODOs for slices #18, #19, #20, and #21.
+
+## Team Updates from Other Sessions
+
+### From Morpheus (2026-05-08 Issue #17)
+
+- Morpheus completed UI wiring for AI detection context menu (GitHub > AI > Auto Detect). `MainForm.ContextMenu.cs` subscribes `OnAiAutoDetect` and calls `AiDetectionService.StartDetectionAsync(sid)`. Listens for `DetectionStateChanged` and calls `RequestRefresh(sessionId: sid, trackingChanged: true)` on completion. Menu structure locked; future status cells go in slices #20–#22.
+
+### From Tank (2026-05-08 Issue #17)
+
+- Tank implemented `FakeProcessRunner` at `tests/Integration/TestTools/FakeProcessRunner.cs` as shared test double for all AI detection slices. Public contract fixed: `RunAsync(fileName, args, cwd, timeoutSeconds, ct)`. Grid E2E test wires real `DataGridView` + `ActiveStatusTracker` + `SessionGridVisuals`, verifies GitHub cell re-renders after state change. All 667 unit tests pass, 99/104 integration tests pass, 5 LocalOnly skip.

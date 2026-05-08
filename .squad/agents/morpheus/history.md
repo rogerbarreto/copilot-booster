@@ -1,4 +1,4 @@
-# Morpheus — History
+﻿# Morpheus — History
 
 ## Core Context
 
@@ -9,6 +9,23 @@
 ## Learnings
 
 <!-- Append learnings below -->
+
+### 2026-05-08 Issue #17 AI context menu wiring
+
+* `ExistingSessionsVisuals.BuildGridContextMenu()` owns the session row context menu. The GitHub group parent is the local `ToolStripMenuItem menuGitHub`, populated inside `gridContextMenu.Opening`.
+* Added nested path `GitHub` > `AI` > `Auto Detect GitHub Issue and PR` via internal `BuildGitHubAiMenuItem(string sid)`. Tank can call this helper and `PerformClick()` the leaf to verify `OnAiAutoDetect` receives the session id.
+* `MainForm.ContextMenu.cs` subscribes `OnAiAutoDetect` and starts `AiDetectionService.StartDetectionAsync(sid)`. `MainForm` listens for detection leaving Running and calls `RequestRefresh(sessionId: sid, trackingChanged: true)` on the UI thread.
+* No GitHub cell rendering or gating lives in this slice. Keep spinner, status icons, disabled states and tooltips in later slices.
+
+## Team Updates from Other Sessions
+
+### From Trinity (2026-05-08 Issue #17)
+
+- Trinity completed `AiDetectionService` with public contract: `StartDetectionAsync(sid)`, `CancelDetection(sid)`, `TryGetState(sid)` overloads, `DetectionStateChanged` event. Constructor signature fixed for Morpheus to accept `GitHubApiService`, `IProcessRunner`, CWD resolver func, toast sink func, optional polling service, and root directories. Service API locked; no breaking changes expected.
+
+### From Tank (2026-05-08 Issue #17)
+
+- Tank verified menu wiring via E2E grid test. `BuildGitHubAiMenuItem(string sid)` is `internal` and accessible to Tank's integration tests via `InternalsVisibleTo`. Grid GitHub cell updates on `DetectionStateChanged` event and UI refresh. All 99/104 integration tests pass.
 
 - **2026-05-03 — All-green integration test directive (UI impact):** User grilling exposed that accepting environmental baseline failures (13 reds in current IT suite) violated standing release policy. New directive: all tests green at all times. Tests must either self-bootstrap environment or skip explicitly. This affects Phase 5+ UI integration tests that depend on Playwright or local-only environments — fixtures must auto-install or skip-traits must be honored by runner. No more ceremonial baseline-comparison workflows.
 

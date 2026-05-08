@@ -160,6 +160,9 @@ internal class ExistingSessionsVisuals
     /// <summary>Fired when user selects "Add Issue..." from context menu. Args: sessionId.</summary>
     internal event Action<string>? OnAddIssue;
 
+    /// <summary>Fired when user selects "Auto Detect GitHub Issue and PR" from context menu. Args: sessionId.</summary>
+    internal event Action<string>? OnAiAutoDetect;
+
     /// <summary>Fired when user selects "Show CI Jobs" for a tracked PR. Args: sessionId, prNumber.</summary>
     internal event Action<string, int>? OnShowCiJobs;
 
@@ -1131,6 +1134,8 @@ internal class ExistingSessionsVisuals
             addIssue.Click += (_, _) => this.OnAddIssue?.Invoke(sid);
             menuGitHub.DropDownItems.Add(addIssue);
 
+            menuGitHub.DropDownItems.Add(this.BuildGitHubAiMenuItem(sid));
+
             // List tracked items
             var data = GitHubTrackingService.Load(sid);
             if (data != null && data.Items.Count > 0)
@@ -1486,6 +1491,21 @@ internal class ExistingSessionsVisuals
                 }
             }
         };
+    }
+
+    internal ToolStripMenuItem BuildGitHubAiMenuItem(string sid)
+    {
+        var menuAi = new ToolStripMenuItem("AI");
+        var autoDetect = new ToolStripMenuItem("Auto Detect GitHub Issue and PR")
+        {
+            Enabled = true
+        };
+
+        // TODO: gating per slice #19 / #21
+        autoDetect.Click += (_, _) => this.OnAiAutoDetect?.Invoke(sid);
+        menuAi.DropDownItems.Add(autoDetect);
+
+        return menuAi;
     }
 
     /// <summary>

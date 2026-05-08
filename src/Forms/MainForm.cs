@@ -44,7 +44,7 @@ internal partial class MainForm : Form
     private readonly Dictionary<string, long> _lastSavedBySession = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly GitHubApiService _githubApi;
-    private GitHubPollingService? _githubPoller;
+    private readonly GitHubPollingService _githubPoller;
 
     // Window pin mode state
     private bool _pinMode;
@@ -103,6 +103,8 @@ internal partial class MainForm : Form
     /// </summary>
     public string? SelectedSessionId { get; private set; }
 
+    internal AiDetectionService AiDetectionService { get; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MainForm"/> class.
     /// </summary>
@@ -117,6 +119,23 @@ internal partial class MainForm : Form
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
         this._githubApi = new GitHubApiService(() => Program._settings.GitHubToken);
+        this._githubPoller = new GitHubPollingService(this._githubApi,
+            () => this._cachedSessions.Select(s => s.Id).ToList());
+        this.AiDetectionService = new AiDetectionService(
+            this._githubApi,
+            new ProcessRunner(),
+            this.GetSessionCwdForAiDetection,
+            msg =>
+            {
+                if (this.IsHandleCreated && this.InvokeRequired)
+                {
+                    this.BeginInvoke(() => this._toast.Show(msg));
+                }
+                else
+                {
+                    this._toast.Show(msg);
+                }
+            });
         this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
         this._activeTracker.EventsJournal.StartWatching();
@@ -185,6 +204,8 @@ internal partial class MainForm : Form
 
         this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsPanel, this._activeTracker);
         this._toast = ToastPanel.AttachTo(this._sessionsPanel);
+        this.WireGitHubPollingEvents();
+        this.WireAiDetectionEvents();
         this.WireSessionsEvents();
         this.SetupUpdateBanner();
         this.SetupTrayIcon();
@@ -844,10 +865,53 @@ internal partial class MainForm : Form
         this._workspaceWatcher?.Dispose();
         this._contextWatcher?.Dispose();
         this._logWatcher?.Dispose();
-        this._githubPoller?.Dispose();
+        this.AiDetectionService.Dispose();
+        this._githubPoller.Dispose();
         this._activeTracker.SaveWindowHandleCache();
 
         base.OnFormClosing(e);
+    }
+
+    private void WireGitHubPollingEvents()
+    {
+        this._githubPoller.ItemUpdated += sid =>
+        {
+            if (this.IsHandleCreated)
+            {
+                this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
+            }
+        };
+
+        this._githubPoller.NewActivityDetected += (sid, type, number, title) =>
+        {
+            var prefix = type == "pr" ? "PR" : "Issue";
+            var session = this._cachedSessions.FirstOrDefault(s => s.Id == sid);
+            var sessionName = session != null
+                ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
+                : sid[..Math.Min(8, sid.Length)];
+
+            var message = $"🔔 {prefix} #{number} has new activity\n{title}";
+
+            if (this.IsHandleCreated)
+            {
+                this.BeginInvoke(() => this._toast.Show(message));
+            }
+
+            this._trayIcon?.ShowBalloonTip(5000, $"GitHub: {prefix} #{number}", title, ToolTipIcon.Info);
+        };
+    }
+
+    private void WireAiDetectionEvents()
+    {
+        this.AiDetectionService.DetectionStateChanged += (sid, oldState, newState) =>
+        {
+            if (oldState == DetectionStatus.Running
+                && newState != DetectionStatus.Running
+                && this.IsHandleCreated)
+            {
+                this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
+            }
+        };
     }
 
     private void WireSessionsEvents()
@@ -1132,32 +1196,6 @@ internal partial class MainForm : Form
             this._fullRefreshTimer?.Start();
 
             // Start GitHub polling
-            this._githubPoller = new GitHubPollingService(this._githubApi,
-                () => this._cachedSessions.Select(s => s.Id).ToList());
-            this._githubPoller.ItemUpdated += sid =>
-            {
-                if (this.IsHandleCreated)
-                {
-                    this.BeginInvoke(() => this.RequestRefresh(sessionId: sid, trackingChanged: true));
-                }
-            };
-            this._githubPoller.NewActivityDetected += (sid, type, number, title) =>
-            {
-                var prefix = type == "pr" ? "PR" : "Issue";
-                var session = this._cachedSessions.FirstOrDefault(s => s.Id == sid);
-                var sessionName = session != null
-                    ? (!string.IsNullOrEmpty(session.Alias) ? session.Alias : session.Summary)
-                    : sid[..Math.Min(8, sid.Length)];
-
-                var message = $"🔔 {prefix} #{number} has new activity\n{title}";
-
-                if (this.IsHandleCreated)
-                {
-                    this.BeginInvoke(() => this._toast.Show(message));
-                }
-
-                this._trayIcon?.ShowBalloonTip(5000, $"GitHub: {prefix} #{number}", title, ToolTipIcon.Info);
-            };
             this._githubPoller.Start();
 
             this.CheckForMissingAllowedDirs();
@@ -1174,7 +1212,19 @@ internal partial class MainForm : Form
         {
             this._windowHookService?.Dispose();
             this._processExitTracker?.Dispose();
+
         };
+    }
+
+    private string? GetSessionCwdForAiDetection(string sessionId)
+    {
+        var session = this._cachedSessions.FirstOrDefault(s => s.Id == sessionId);
+        if (!string.IsNullOrWhiteSpace(session?.Cwd))
+        {
+            return session.Cwd;
+        }
+
+        return this._interactionManager.GetSessionCwd(sessionId);
     }
 
     private async Task CheckForUpdateInBackgroundAsync()
