@@ -1,5 +1,80 @@
 # Squad Decisions
 
+## 2026-05-08: Issue #20 — Cell Spinner + Click-to-Cancel + JobObject Tree-Kill
+
+**Date:** 2026-05-08  
+**Status:** Delivered  
+**Contributors:** Trinity (ProcessRunner JobObject), Morpheus (UI spinner + confirm dialog), Tank (state machine + tree-kill tests)
+
+### Trinity: JobObject Tree-Kill in ProcessRunner
+
+**Issue:** #20  
+
+Production `ProcessRunner` owns process tree termination with a raw Win32 Job Object.
+
+**Pattern:**
+- Create Job Object
+- Set `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` through `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`
+- Start child process
+- Assign child handle to the job immediately after `Process.Start()`
+- On linked cancellation or timeout, call `TerminateJobObject(job, 1)`
+- Always close the job handle in `finally`
+
+**Service contract:**
+- `IProcessRunner.RunAsync(...)` signature unchanged
+- `ProcessResult.WasKilled == true` signals cancellation or timeout tree termination
+- `AiDetectionService` classifies `WasKilled && cts.IsCancellationRequested` as `cancelled`, not a failure
+- `DetectionStateChanged(sid, Running, Idle)` remains the spinner clear signal for Morpheus
+
+### Morpheus: IConfirmDialog Seam for Cancel Confirmation
+
+**Issue:** #20  
+
+Use `src/Forms/IConfirmDialog.cs` interface for the cancel confirmation seam.
+
+**Shape:**
+```csharp
+internal interface IConfirmDialog
+{
+    bool Confirm(string title, string body, string yesLabel, string noLabel);
+}
+```
+
+**Production implementation:** `MessageBoxConfirmDialog` wraps `MessageBox.Show(YesNo)`. Since native WinForms cannot customize button text, message appends:
+```
+Yes = Stop
+No = Keep running
+```
+
+**Consequences:**
+- Tank can fake `IConfirmDialog` and assert title, body, and labels
+- `SessionGridVisuals.HandleGitHubCellClick(...)` stays testable without showing UI
+- Custom Form can replace `MessageBoxConfirmDialog` later if exact button text becomes mandatory
+
+**Deliverables:**
+- Top-right 16x16 corner spinner region in SessionGridVisuals
+- ONE shared `System.Windows.Forms.Timer` for all running rows
+- Click-to-cancel with confirm dialog
+- Spinner-frame icon rendering in GitHubIconRenderer
+- Test seams: `HandleGitHubCellClick`, `GetStatusIconRegion`, `IsSpinnerVisibleForSession`
+
+### Tank: Spinner Test Serialization Decision
+
+**Issue:** #20  
+
+`AiDetectSpinnerCancelIntegrationTests` belongs to `WindowEventHookCollection` serialized subset.
+
+**Why:** The class does not start `WindowEventHookService`, but uses WinForms timer state plus `Application.DoEvents()` inside the same desktop test process. In full integration runs, parallel execution intermittently left `_spinnerTimer.Enabled` true after the service returned to idle. Serialization preserves the all-green integration bar.
+
+**Scope:** Only this spinner/cancel class was added. No global integration parallelism change.
+
+**Deliverables:**
+- Cancel state transition tests
+- Dispose-cancels-all test
+- Spinner state machine tests
+- Confirm/fallthrough E2E integration tests
+- Real tree-kill test with PowerShell child process spawning and PID diff capture
+
 ## 2026-05-03: Round 3 Completion — Copilot Host Discovery Phase 3 + All-Green Integration Directive
 
 **Date:** 2026-05-03  

@@ -10,6 +10,14 @@
 
 <!-- Append learnings below -->
 
+### 2026-05-08 Issue #20 GitHub cell spinner and cancel region
+
+* GitHub cell reserves a cell-relative top-right `16x16` status region through `SessionGridVisuals.GetStatusIconRegion(Rectangle cellBounds)`. The region consumes clicks even when idle, so the PR and issue strip does not receive corner clicks.
+* `SessionGridVisuals` owns one shared `System.Windows.Forms.Timer` for GitHub status animation. It starts on visible `DetectionStatus.Running`, advances an 8-frame spinner, invalidates only running GitHub cells with `InvalidateCell`, and stops when no visible row is running.
+* Tooltip routing is two-region. Corner plus non-idle state shows `"Detecting GitHub link... click to cancel."`; every other GitHub-cell position falls through to the existing PR and issue tooltip.
+* `IConfirmDialog` lives in `src/Services/IConfirmDialog.cs`. Production `MessageBoxConfirmDialog` uses `MessageBoxButtons.YesNo` and appends `Yes = Stop` plus `No = Keep running` to the body.
+* Tank seams exposed on `SessionGridVisuals`: `HandleGitHubCellClick(int rowIndex, Point clickPos, Rectangle cellBounds)`, static `GetStatusIconRegion(Rectangle cellBounds)`, and `IsSpinnerVisibleForSession(string sid)`.
+
 ### 2026-05-08 Issue #19 AI context menu gating
 
 * Wired `ExistingSessionsVisuals.BuildGitHubAiMenuItem` to render the AI leaf through `GetEvaluatedAiMenuItem(sid, cwd)` so the item calls `AiDetectionService.EvaluateMenuState(sid, cwd)` each time the row context menu is rebuilt.

@@ -26,6 +26,8 @@ internal sealed class FakeProcessRunner : IProcessRunner
         this._nextException = ex;
     }
 
+    internal TaskCompletionSource<ProcessResult>? Completion { get; set; }
+
     public Task<ProcessResult> RunAsync(
         string fileName,
         IReadOnlyList<string> args,
@@ -33,7 +35,7 @@ internal sealed class FakeProcessRunner : IProcessRunner
         int timeoutSeconds,
         CancellationToken cancellationToken)
     {
-        this.Calls.Add(new FakeProcessRunnerCall(fileName, args.ToArray(), cwd, timeoutSeconds));
+        this.Calls.Add(new FakeProcessRunnerCall(fileName, args.ToArray(), cwd, timeoutSeconds, cancellationToken));
         if (this._nextException != null)
         {
             var ex = this._nextException;
@@ -41,8 +43,8 @@ internal sealed class FakeProcessRunner : IProcessRunner
             throw ex;
         }
 
-        return Task.FromResult(this._result);
+        return this.Completion?.Task ?? Task.FromResult(this._result);
     }
 }
 
-internal sealed record FakeProcessRunnerCall(string FileName, string[] Args, string Cwd, int TimeoutSeconds);
+internal sealed record FakeProcessRunnerCall(string FileName, string[] Args, string Cwd, int TimeoutSeconds, CancellationToken CancellationToken);

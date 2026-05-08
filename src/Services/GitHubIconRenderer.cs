@@ -112,6 +112,23 @@ internal static class GitHubIconRenderer
         return bmp;
     }
 
+    /// <summary>
+    /// Gets a spinner frame for AI detection progress.
+    /// </summary>
+    internal static Bitmap GetSpinnerIcon(int frame, int size = 16)
+    {
+        var normalizedFrame = ((frame % 8) + 8) % 8;
+        var key = $"spinner_{normalizedFrame}_{size}";
+        if (s_cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var bmp = RenderSpinner(normalizedFrame, OpenGreen, size);
+        s_cache[key] = bmp;
+        return bmp;
+    }
+
     private static Bitmap RenderIcon(Action<Graphics, Color, int> drawAction, Color color, int size)
     {
         var bmp = new Bitmap(size, size);
@@ -120,6 +137,33 @@ internal static class GitHubIconRenderer
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         drawAction(g, color, size);
+        return bmp;
+    }
+
+    private static Bitmap RenderSpinner(int frame, Color color, int size)
+    {
+        var bmp = new Bitmap(size, size);
+        bmp.MakeTransparent();
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+        const int DotCount = 8;
+        float center = (size - 1) / 2f;
+        float radius = size * 0.34f;
+        float dotSize = Math.Max(2f, size * 0.18f);
+
+        for (int i = 0; i < DotCount; i++)
+        {
+            var index = (i + frame) % DotCount;
+            var alpha = 70 + (index * 185 / (DotCount - 1));
+            using var brush = new SolidBrush(Color.FromArgb(alpha, color));
+            var angle = (Math.PI * 2 * i / DotCount) - (Math.PI / 2);
+            var x = center + ((float)Math.Cos(angle) * radius) - (dotSize / 2);
+            var y = center + ((float)Math.Sin(angle) * radius) - (dotSize / 2);
+            g.FillEllipse(brush, x, y, dotSize, dotSize);
+        }
+
         return bmp;
     }
 

@@ -45,6 +45,7 @@ internal partial class MainForm : Form
     private readonly HashSet<string> _saveInProgress = new(StringComparer.OrdinalIgnoreCase);
     private readonly GitHubApiService _githubApi;
     private readonly GitHubPollingService _githubPoller;
+    private readonly IConfirmDialog _confirmDialog;
 
     // Window pin mode state
     private bool _pinMode;
@@ -121,6 +122,7 @@ internal partial class MainForm : Form
         this._githubApi = new GitHubApiService(() => Program._settings.GitHubToken);
         this._githubPoller = new GitHubPollingService(this._githubApi,
             () => this._cachedSessions.Select(s => s.Id).ToList());
+        this._confirmDialog = new MessageBoxConfirmDialog(this);
         this.AiDetectionService = new AiDetectionService(
             this._githubApi,
             new ProcessRunner(),
@@ -206,6 +208,8 @@ internal partial class MainForm : Form
         {
             AiDetectionService = this.AiDetectionService
         };
+        this._sessionsVisuals.GridVisuals.AiDetectionService = this.AiDetectionService;
+        this._sessionsVisuals.GridVisuals.ConfirmDialog = this._confirmDialog;
         this._toast = ToastPanel.AttachTo(this._sessionsPanel);
         this.WireGitHubPollingEvents();
         this.WireAiDetectionEvents();
@@ -868,6 +872,7 @@ internal partial class MainForm : Form
         this._workspaceWatcher?.Dispose();
         this._contextWatcher?.Dispose();
         this._logWatcher?.Dispose();
+        this._sessionsVisuals.GridVisuals.Dispose();
         this.AiDetectionService.Dispose();
         this._githubPoller.Dispose();
         this._activeTracker.SaveWindowHandleCache();

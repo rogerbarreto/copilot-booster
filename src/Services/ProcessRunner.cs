@@ -32,57 +32,100 @@ internal sealed class ProcessRunner : IProcessRunner
             process.StartInfo.ArgumentList.Add(arg);
         }
 
-        process.Start();
-
+        var job = Win32JobObject.CreateKillOnCloseJob();
+        var jobAssigned = false;
         var wasKilled = false;
-        using var registration = linkedCts.Token.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    // TODO(slice #20): replace this simple child kill with JobObject-based process tree termination.
-                    process.Kill();
-                    wasKilled = true;
-                }
-            }
-            catch (InvalidOperationException)
-            {
-            }
-            catch (Exception ex)
-            {
-                Program.Logger.LogDebug("Failed to kill process {FileName}: {Error}", fileName, ex.Message);
-            }
-        });
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
 
         try
         {
-            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
-        {
-            wasKilled = true;
+            process.Start();
             try
             {
-                if (!process.HasExited)
-                {
-                    // TODO(slice #20): replace this simple child kill with JobObject-based process tree termination.
-                    process.Kill();
-                }
+                Win32JobObject.AssignProcess(job, process.Handle);
+                jobAssigned = true;
             }
-            catch (InvalidOperationException)
+            catch
             {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                throw;
             }
 
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            using var registration = linkedCts.Token.Register(() =>
+            {
+                try
+                {
+                    wasKilled = true;
+                    TerminateProcessTree(job, jobAssigned, process, fileName);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+                catch (Exception ex)
+                {
+                    Program.Logger.LogDebug("Failed to kill process tree {FileName}: {Error}", fileName, ex.Message);
+                }
+            });
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            try
+            {
+                await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
+            {
+                wasKilled = true;
+                TerminateProcessTree(job, jobAssigned, process, fileName);
+
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
+            var exitCode = process.HasExited ? process.ExitCode : -1;
+            return new ProcessResult(exitCode, stdout, stderr, wasKilled);
+        }
+        finally
+        {
+            Win32JobObject.Close(job);
+        }
+    }
+
+    private static void TerminateProcessTree(IntPtr job, bool jobAssigned, Process process, string fileName)
+    {
+        if (jobAssigned)
+        {
+            try
+            {
+                Win32JobObject.Terminate(job, 1);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Program.Logger.LogDebug("Failed to terminate JobObject for {FileName}: {Error}", fileName, ex.Message);
+            }
         }
 
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        var stderr = await stderrTask.ConfigureAwait(false);
-        var exitCode = process.HasExited ? process.ExitCode : -1;
-        return new ProcessResult(exitCode, stdout, stderr, wasKilled);
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 }

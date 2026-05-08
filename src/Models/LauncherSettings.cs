@@ -17,6 +17,8 @@ internal class LauncherSettings
 
     private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
 
+    private AiDetectionSettings _aiDetection = new();
+
     /// <summary>
     /// Gets or sets the list of tools the launcher is allowed to use.
     /// </summary>
@@ -221,6 +223,16 @@ internal class LauncherSettings
     /// </summary>
     [JsonPropertyName("githubToken")]
     public string? GitHubToken { get; set; }
+
+    /// <summary>
+    /// Gets or sets the AI detection settings.
+    /// </summary>
+    [JsonPropertyName("aiDetection")]
+    public AiDetectionSettings AiDetection
+    {
+        get => this._aiDetection;
+        set => this._aiDetection = value ?? new AiDetectionSettings();
+    }
 
     /// <summary>
     /// Gets or sets whether the welcome popup (star request) has been dismissed by the user.

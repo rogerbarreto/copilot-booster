@@ -152,6 +152,65 @@ public sealed class AiDetectionServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task CancelDetection_RunningDetectionCancelsTokenAndReturnsIdleWithoutFailureAsync()
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        var runner = new ControlledProcessRunner();
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot);
+        service.DetectionStateChanged += (sid, oldState, newState) =>
+        {
+            if (sid == this._sessionId)
+            {
+                transitions.Add((oldState, newState));
+            }
+        };
+
+        var detectionTask = service.StartDetectionAsync(this._sessionId);
+        var call = await runner.WaitForCallAsync(0).ConfigureAwait(false);
+
+        Assert.Equal(DetectionStatus.Running, service.TryGetState(this._sessionId).Status);
+        service.CancelDetection(this._sessionId);
+        Assert.True(call.CancellationToken.IsCancellationRequested);
+
+        call.Complete(new ProcessResult(-1, "", "", true));
+        await detectionTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+        Assert.Null(service.TryGetState(this._sessionId).FailureClass);
+        Assert.Equal([(DetectionStatus.Idle, DetectionStatus.Running), (DetectionStatus.Running, DetectionStatus.Idle)], transitions);
+    }
+
+    [Fact]
+    public async Task Dispose_RunningDetectionsCancelsAllTokensAndReturnsSessionsToIdleAsync()
+    {
+        var repoRoot = FindRepoRoot();
+        var sessionIds = new[] { this._sessionId, Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+        foreach (var sessionId in sessionIds)
+        {
+            await this.WriteSessionAsync(sessionId, repoRoot).ConfigureAwait(false);
+        }
+
+        var runner = new ControlledProcessRunner();
+        var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot);
+        var detectionTasks = sessionIds.Select(service.StartDetectionAsync).ToArray();
+        await runner.WaitForCallCountAsync(sessionIds.Length).ConfigureAwait(false);
+
+        service.Dispose();
+
+        Assert.All(runner.Calls, call => Assert.True(call.CancellationToken.IsCancellationRequested));
+        foreach (var call in runner.Calls)
+        {
+            call.Complete(new ProcessResult(-1, "", "", true));
+        }
+
+        await Task.WhenAll(detectionTasks).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+        Assert.All(sessionIds, sessionId => Assert.Equal(DetectionStatus.Idle, service.TryGetState(sessionId).Status));
+        Assert.All(sessionIds, sessionId => Assert.Null(service.TryGetState(sessionId).FailureClass));
+    }
+
     public static IEnumerable<object[]> FailureClassificationRows()
     {
         yield return [-1, "", "", true, AiFailureClass.Timeout.ToString()];
@@ -170,12 +229,17 @@ public sealed class AiDetectionServiceTests : IDisposable
         return service;
     }
 
-    private async Task WriteSessionAsync(string repoRoot)
+    private Task WriteSessionAsync(string repoRoot)
     {
-        var sessionDir = Path.Combine(this._sessionRoot, this._sessionId);
+        return this.WriteSessionAsync(this._sessionId, repoRoot);
+    }
+
+    private async Task WriteSessionAsync(string sessionId, string repoRoot)
+    {
+        var sessionDir = Path.Combine(this._sessionRoot, sessionId);
         Directory.CreateDirectory(sessionDir);
-        await File.WriteAllTextAsync(Path.Combine(sessionDir, "workspace.yaml"), $"id: {this._sessionId}\ncwd: {repoRoot}\nsummary: test\n", TestContext.Current.CancellationToken).ConfigureAwait(false);
-        GitHubTrackingService.Save(this._sessionId, new GitHubTrackingData { Owner = "rogerbarreto", Repo = "copilot-booster" });
+        await File.WriteAllTextAsync(Path.Combine(sessionDir, "workspace.yaml"), $"id: {sessionId}\ncwd: {repoRoot}\nsummary: test\n", TestContext.Current.CancellationToken).ConfigureAwait(false);
+        GitHubTrackingService.Save(sessionId, new GitHubTrackingData { Owner = "rogerbarreto", Repo = "copilot-booster" });
     }
 
     private string CreateGitRepo(string remoteName, string remoteUrl)
@@ -275,6 +339,80 @@ public sealed class AiDetectionServiceTests : IDisposable
         }
     }
 
+    private sealed class ControlledProcessRunner : IProcessRunner
+    {
+        private readonly object _gate = new();
+        private readonly List<ControlledProcessRunnerCall> _calls = [];
+
+        internal IReadOnlyList<ControlledProcessRunnerCall> Calls
+        {
+            get
+            {
+                lock (this._gate)
+                {
+                    return this._calls.ToArray();
+                }
+            }
+        }
+
+        public Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> args, string cwd, int timeoutSeconds, CancellationToken cancellationToken)
+        {
+            var call = new ControlledProcessRunnerCall(cancellationToken);
+            lock (this._gate)
+            {
+                this._calls.Add(call);
+            }
+
+            return call.Task;
+        }
+
+        internal async Task<ControlledProcessRunnerCall> WaitForCallAsync(int index)
+        {
+            await this.WaitForCallCountAsync(index + 1).ConfigureAwait(false);
+            lock (this._gate)
+            {
+                return this._calls[index];
+            }
+        }
+
+        internal async Task WaitForCallCountAsync(int count)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (this._gate)
+                {
+                    if (this._calls.Count >= count)
+                    {
+                        return;
+                    }
+                }
+
+                await Task.Delay(25, TestContext.Current.CancellationToken).ConfigureAwait(false);
+            }
+
+            Assert.Fail($"Expected {count} process calls before timeout.");
+        }
+    }
+
+    private sealed class ControlledProcessRunnerCall
+    {
+        private readonly TaskCompletionSource<ProcessResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal ControlledProcessRunnerCall(CancellationToken cancellationToken)
+        {
+            this.CancellationToken = cancellationToken;
+        }
+
+        internal CancellationToken CancellationToken { get; }
+
+        internal Task<ProcessResult> Task => this._completion.Task;
+
+        internal void Complete(ProcessResult result)
+        {
+            this._completion.TrySetResult(result);
+        }
+    }
     private sealed class BlockingProcessRunner : IProcessRunner
     {
         private readonly ProcessResult _result;

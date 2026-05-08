@@ -207,8 +207,14 @@ internal sealed class AiDetectionService : IDisposable
 
     public void Dispose()
     {
-        foreach (var state in this._states.Values)
+        foreach (var pair in this._states)
         {
+            var state = pair.Value;
+            if (state.Status == DetectionStatus.Running)
+            {
+                Program.Logger.LogInformation("AI detection shutdown cancel session_id={SessionId} outcome=cancelled", pair.Key);
+            }
+
             state.Cts?.Cancel();
         }
     }
@@ -387,12 +393,13 @@ internal sealed class AiDetectionService : IDisposable
         finally
         {
             stopwatch.Stop();
-            LogDetectionEnd(outcome, candidateCount, topConfidence, applied, stopwatch.ElapsedMilliseconds, failureClass, failureReason, failureExitCode);
+            LogDetectionEnd(sessionId, outcome, candidateCount, topConfidence, applied, stopwatch.ElapsedMilliseconds, failureClass, failureReason, failureExitCode);
             this.TransitionToIdle(sessionId, state, cts);
         }
     }
 
     private static void LogDetectionEnd(
+        string sessionId,
         string outcome,
         int candidateCount,
         double? topConfidence,
@@ -405,7 +412,8 @@ internal sealed class AiDetectionService : IDisposable
         if (failureClass == null)
         {
             Program.Logger.LogInformation(
-                "AI detection end outcome={Outcome} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                "AI detection end session_id={SessionId} outcome={Outcome} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                sessionId,
                 outcome,
                 candidateCount,
                 topConfidence,
@@ -417,7 +425,8 @@ internal sealed class AiDetectionService : IDisposable
         if (failureClass is AiFailureClass.Timeout or AiFailureClass.NoCandidates)
         {
             Program.Logger.LogWarning(
-                "AI detection end outcome={Outcome} failure_class={FailureClass} reason={Reason} exit_code={ExitCode} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                "AI detection end session_id={SessionId} outcome={Outcome} failure_class={FailureClass} reason={Reason} exit_code={ExitCode} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                sessionId,
                 outcome,
                 failureClass,
                 failureReason,
@@ -430,7 +439,8 @@ internal sealed class AiDetectionService : IDisposable
         }
 
         Program.Logger.LogError(
-            "AI detection end outcome={Outcome} failure_class={FailureClass} reason={Reason} exit_code={ExitCode} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+            "AI detection end session_id={SessionId} outcome={Outcome} failure_class={FailureClass} reason={Reason} exit_code={ExitCode} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+            sessionId,
             outcome,
             failureClass,
             failureReason,
