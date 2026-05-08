@@ -17,8 +17,6 @@ internal class LauncherSettings
 
     private static readonly JsonSerializerOptions s_writeOptions = new() { WriteIndented = true };
 
-    private AiDetectionSettings _aiDetection = new();
-
     /// <summary>
     /// Gets or sets the list of tools the launcher is allowed to use.
     /// </summary>
@@ -230,9 +228,9 @@ internal class LauncherSettings
     [JsonPropertyName("aiDetection")]
     public AiDetectionSettings AiDetection
     {
-        get => this._aiDetection;
-        set => this._aiDetection = value ?? new AiDetectionSettings();
-    }
+        get;
+        set => field = value ?? new AiDetectionSettings();
+    } = new();
 
     /// <summary>
     /// Gets or sets whether the welcome popup (star request) has been dismissed by the user.
@@ -259,7 +257,9 @@ internal class LauncherSettings
             if (File.Exists(settingsFile))
             {
                 var json = File.ReadAllText(settingsFile);
-                return JsonSerializer.Deserialize<LauncherSettings>(json) ?? CreateDefault();
+                var loadedSettings = JsonSerializer.Deserialize<LauncherSettings>(json) ?? CreateDefault();
+                loadedSettings.AiDetection ??= new AiDetectionSettings();
+                return loadedSettings;
             }
         }
         catch (Exception ex) { Program.Logger.LogWarning("Failed to load settings: {Error}", ex.Message); }

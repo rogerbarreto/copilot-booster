@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Tests.Services;
 
@@ -11,6 +12,29 @@ public sealed class AiDetectionServiceTests : IDisposable
     {
         DeleteDirectory(this._sessionRoot);
         DeleteDirectory(SessionStateService.GetSessionDir(this._sessionId));
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_SettingsDisabled_DoesNotInvokeRunnerAndLeavesIdleAsync()
+    {
+        var originalLogger = Program.Logger;
+        var logger = new CapturingLogger();
+        Program.Logger = logger;
+        try
+        {
+            var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+            using var service = new AiDetectionService(CreateFakeApi(), runner, _ => null, _ => { }, null, this._sessionRoot, settingsGetter: () => new AiDetectionSettings { Enabled = false });
+
+            await service.StartDetectionAsync(this._sessionId).ConfigureAwait(false);
+
+            Assert.Empty(runner.Calls);
+            Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+            Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("disabled", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Program.Logger = originalLogger;
+        }
     }
 
     [Fact]
@@ -92,6 +116,7 @@ public sealed class AiDetectionServiceTests : IDisposable
             {
                 transitions.Add((oldState, newState));
             }
+
         };
 
         var detectionTask = service.StartDetectionAsync(this._sessionId);
@@ -103,6 +128,157 @@ public sealed class AiDetectionServiceTests : IDisposable
 
         Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
         Assert.Equal([(DetectionStatus.Idle, DetectionStatus.Running), (DetectionStatus.Running, DetectionStatus.Idle)], transitions);
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_TimeoutSeconds_PassesConfiguredValueAsync()
+    {
+        var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        var service = await this.RunDetectionWithSettingsAsync(new AiDetectionSettings { TimeoutSeconds = 60 }, runner).ConfigureAwait(false);
+        using (service)
+        {
+            var call = Assert.Single(runner.Calls);
+            Assert.Equal(60, call.TimeoutSeconds);
+        }
+    }
+
+    [Theory]
+    [InlineData(5000, 1800)]
+    [InlineData(10, 30)]
+    public async Task StartDetectionAsync_TimeoutSecondsOutOfRange_ClampsAndLogsWarningAsync(int configuredTimeout, int expectedTimeout)
+    {
+        var originalLogger = Program.Logger;
+        var logger = new CapturingLogger();
+        Program.Logger = logger;
+        try
+        {
+            var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+            var service = await this.RunDetectionWithSettingsAsync(new AiDetectionSettings { TimeoutSeconds = configuredTimeout }, runner).ConfigureAwait(false);
+            using (service)
+            {
+                var call = Assert.Single(runner.Calls);
+                Assert.Equal(expectedTimeout, call.TimeoutSeconds);
+                Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("clamped", StringComparison.OrdinalIgnoreCase));
+            }
+        }
+        finally
+        {
+            Program.Logger = originalLogger;
+        }
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_ConfidenceThreshold_FiltersAutoApplyAsync()
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[{\"type\":\"pr\",\"number\":42,\"confidence\":0.7,\"reasoning\":\"maybe\"}]}", "", false));
+        using var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot, settingsGetter: () => new AiDetectionSettings { ConfidenceThreshold = 0.8m });
+
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+        Assert.Empty(GitHubTrackingService.Load(this._sessionId)!.Items);
+
+        runner.Result = new ProcessResult(0, "{\"candidates\":[{\"type\":\"pr\",\"number\":42,\"confidence\":0.85,\"reasoning\":\"strong\"}]}", "", false);
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        var item = Assert.Single(GitHubTrackingService.Load(this._sessionId)!.Items);
+        Assert.Equal(42, item.Number);
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_CopilotPathConfigured_PassesPathAsFileNameAsync()
+    {
+        var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        var service = await this.RunDetectionWithSettingsAsync(new AiDetectionSettings { CopilotPath = @"C:\custom\copilot.exe" }, runner).ConfigureAwait(false);
+        using (service)
+        {
+            var call = Assert.Single(runner.Calls);
+            Assert.Equal(@"C:\custom\copilot.exe", call.FileName);
+        }
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_CopilotPathEmpty_UsesDefaultBinaryAsync()
+    {
+        var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        var service = await this.RunDetectionWithSettingsAsync(new AiDetectionSettings { CopilotPath = "" }, runner).ConfigureAwait(false);
+        using (service)
+        {
+            var call = Assert.Single(runner.Calls);
+            Assert.Equal("copilot", call.FileName);
+        }
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_ModelConfigured_AppendsModelFlagAsync()
+    {
+        var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        var service = await this.RunDetectionWithSettingsAsync(new AiDetectionSettings { Model = "gpt-5.2" }, runner).ConfigureAwait(false);
+        using (service)
+        {
+            var call = Assert.Single(runner.Calls);
+            var modelIndex = Array.IndexOf(call.Args, "--model");
+            Assert.True(modelIndex >= 0);
+            Assert.Equal("gpt-5.2", call.Args[modelIndex + 1]);
+        }
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_ModelEmpty_OmitsModelFlagAsync()
+    {
+        var runner = new RecordingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        var service = await this.RunDetectionWithSettingsAsync(new AiDetectionSettings { Model = "" }, runner).ConfigureAwait(false);
+        using (service)
+        {
+            var call = Assert.Single(runner.Calls);
+            Assert.DoesNotContain("--model", call.Args);
+        }
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_SettingsChangedInFlight_UsesInvocationSnapshotAsync()
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(this._sessionId, repoRoot).ConfigureAwait(false);
+        var secondSessionId = Guid.NewGuid().ToString();
+        await this.WriteSessionAsync(secondSessionId, repoRoot).ConfigureAwait(false);
+        var settings = new AiDetectionSettings { TimeoutSeconds = 300 };
+        var runner = new ControlledProcessRunner();
+        using var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot, settingsGetter: () => settings);
+
+        var firstTask = service.StartDetectionAsync(this._sessionId);
+        var firstCall = await runner.WaitForCallAsync(0).ConfigureAwait(false);
+        settings = new AiDetectionSettings { TimeoutSeconds = 60 };
+
+        Assert.Equal(300, firstCall.TimeoutSeconds);
+        firstCall.Complete(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        await firstTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        var secondTask = service.StartDetectionAsync(secondSessionId);
+        var secondCall = await runner.WaitForCallAsync(1).ConfigureAwait(false);
+        Assert.Equal(60, secondCall.TimeoutSeconds);
+        secondCall.Complete(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        await secondTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    [Fact]
+    public void EvaluateMenuState_SettingsDisabled_ReturnsFeatureDisabled()
+    {
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => null, _ => { }, null, this._sessionRoot, settingsGetter: () => new AiDetectionSettings { Enabled = false });
+
+        var result = service.EvaluateMenuState(this._sessionId, null);
+
+        Assert.Equal(AiMenuState.FeatureDisabled, result);
+    }
+
+    [Fact]
+    public void EvaluateMenuState_ProbeUnavailable_ReturnsCopilotUnavailable()
+    {
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => null, _ => { }, null, this._sessionRoot, settingsGetter: () => new AiDetectionSettings { Enabled = true }, copilotProbe: new FakeCopilotProbe(false));
+
+        var result = service.EvaluateMenuState(this._sessionId, null);
+
+        Assert.Equal(AiMenuState.CopilotUnavailable, result);
     }
 
     [Theory]
@@ -229,6 +405,15 @@ public sealed class AiDetectionServiceTests : IDisposable
         return service;
     }
 
+    private async Task<AiDetectionService> RunDetectionWithSettingsAsync(AiDetectionSettings settings, IProcessRunner runner)
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot, settingsGetter: () => settings);
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+        return service;
+    }
+
     private Task WriteSessionAsync(string repoRoot)
     {
         return this.WriteSessionAsync(this._sessionId, repoRoot);
@@ -324,6 +509,26 @@ public sealed class AiDetectionServiceTests : IDisposable
         }
     }
 
+    private sealed class RecordingProcessRunner : IProcessRunner
+    {
+        internal RecordingProcessRunner(ProcessResult result)
+        {
+            this.Result = result;
+        }
+
+        internal ProcessResult Result { get; set; }
+
+        internal List<RecordedProcessCall> Calls { get; } = [];
+
+        public Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> args, string cwd, int timeoutSeconds, CancellationToken cancellationToken)
+        {
+            this.Calls.Add(new RecordedProcessCall(fileName, args.ToArray(), cwd, timeoutSeconds, cancellationToken));
+            return Task.FromResult(this.Result);
+        }
+    }
+
+    private sealed record RecordedProcessCall(string FileName, string[] Args, string Cwd, int TimeoutSeconds, CancellationToken CancellationToken);
+
     private sealed class ThrowingProcessRunner : IProcessRunner
     {
         private readonly Exception _exception;
@@ -357,7 +562,7 @@ public sealed class AiDetectionServiceTests : IDisposable
 
         public Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> args, string cwd, int timeoutSeconds, CancellationToken cancellationToken)
         {
-            var call = new ControlledProcessRunnerCall(cancellationToken);
+            var call = new ControlledProcessRunnerCall(fileName, args.ToArray(), cwd, timeoutSeconds, cancellationToken);
             lock (this._gate)
             {
                 this._calls.Add(call);
@@ -399,10 +604,22 @@ public sealed class AiDetectionServiceTests : IDisposable
     {
         private readonly TaskCompletionSource<ProcessResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal ControlledProcessRunnerCall(CancellationToken cancellationToken)
+        internal ControlledProcessRunnerCall(string fileName, string[] args, string cwd, int timeoutSeconds, CancellationToken cancellationToken)
         {
+            this.FileName = fileName;
+            this.Args = args;
+            this.Cwd = cwd;
+            this.TimeoutSeconds = timeoutSeconds;
             this.CancellationToken = cancellationToken;
         }
+
+        internal string FileName { get; }
+
+        internal string[] Args { get; }
+
+        internal string Cwd { get; }
+
+        internal int TimeoutSeconds { get; }
 
         internal CancellationToken CancellationToken { get; }
 
@@ -413,6 +630,46 @@ public sealed class AiDetectionServiceTests : IDisposable
             this._completion.TrySetResult(result);
         }
     }
+
+    private sealed class FakeCopilotProbe : ICopilotProbe
+    {
+        private readonly bool _available;
+
+        internal FakeCopilotProbe(bool available)
+        {
+            this._available = available;
+        }
+
+        public bool IsCopilotAvailable() => this._available;
+
+        public void InvalidateCache()
+        {
+        }
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        internal List<CapturedLogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            this.Entries.Add(new CapturedLogEntry(logLevel, formatter(state, exception)));
+        }
+    }
+
+    private sealed record CapturedLogEntry(LogLevel Level, string Message);
+
     private sealed class BlockingProcessRunner : IProcessRunner
     {
         private readonly ProcessResult _result;

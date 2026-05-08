@@ -73,3 +73,18 @@
 - New Branch and Existing Branch error paths now restore button state (`btnCreate.Enabled = true; btnCreate.Text = "Create"`) — previously they had no restore on error.
 - All awaits use `.ConfigureAwait(true)` per WinForms UI thread convention.
 - Main project builds clean. Pre-existing Playwright integration test error remains unrelated.
+
+### 2026-05-08 Issue #21 Settings AI tab
+
+* Settings UI keeps the existing left TreeView plus right category panel pattern. Added top-level `AI` category instead of a WinForms `TabControl`.
+* AI fields bind through `LauncherSettings.AiDetection`: enabled check box, timeout seconds `NumericUpDown`, confidence threshold `NumericUpDown` with two decimals, Copilot CLI path picker, optional model textbox.
+* Copilot path validation runs on focus loss and save. Non-empty missing files show the inline red `File not found` label, red wrapper border, and tooltip. Save is blocked until valid.
+* Probe cache invalidation hook lives in `SettingsForm` save path. `MainForm` passes `CopilotProbe` into the dialog. Changed `CopilotPath` calls `InvalidateCache()` after settings save and before close.
+* Tank seams: `GetCurrentAiDetectionFormState()` reads controls into a fresh `AiDetectionSettings`; `LoadAiDetectionFromSettings(AiDetectionSettings s)` marshals to UI thread and loads/clamps control values.
+
+### 2026-05-08 Issue #21 ICopilotProbe and Func<AiDetectionSettings> injection
+
+* Trinity implemented `ICopilotProbe` at `src/Services/ICopilotProbe.cs` with lazy `--version` probe and in-memory cache. Cache is invalidated when CopilotPath changes.
+* AiDetectionService constructor now accepts `Func<AiDetectionSettings> getSettings` instead of holding settings. This enables per-detection-run configuration without settings-changed-mid-detection races.
+* Func is called at detection start to capture point-in-time snapshot. If user changes settings while detection runs, next detection sees new values; in-flight detections unaffected.
+* SettingsForm passes `copilotProbe.InvalidateCache()` hook to `OnCopilotPathChanged` event path, ensuring cache is fresh when settings are saved.

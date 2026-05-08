@@ -5,23 +5,23 @@ using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
 
-internal interface ICopilotProbe
-{
-    bool IsCopilotAvailable();
-
-    void InvalidateCache();
-}
-
 internal sealed class CopilotProbe : ICopilotProbe
 {
     private readonly Func<string> _pathGetter;
+    private readonly Func<string, bool> _probeVersion;
     private readonly object _lock = new();
     private bool? _cachedResult;
     private string? _cachedForPath;
 
     internal CopilotProbe(Func<string> pathGetter)
+        : this(pathGetter, ProbeVersion)
+    {
+    }
+
+    internal CopilotProbe(Func<string> pathGetter, Func<string, bool> probeVersion)
     {
         this._pathGetter = pathGetter;
+        this._probeVersion = probeVersion;
     }
 
     public bool IsCopilotAvailable()
@@ -34,7 +34,7 @@ internal sealed class CopilotProbe : ICopilotProbe
                 return this._cachedResult.Value;
             }
 
-            var result = ProbeVersion(resolvedPath);
+            var result = this._probeVersion(resolvedPath);
             this._cachedForPath = resolvedPath;
             this._cachedResult = result;
             Program.Logger.LogInformation("Copilot probe ran path={CopilotPath} available={Available}", resolvedPath, result);

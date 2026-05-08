@@ -106,6 +106,8 @@ internal partial class MainForm : Form
 
     internal AiDetectionService AiDetectionService { get; }
 
+    internal ICopilotProbe CopilotProbe { get; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MainForm"/> class.
     /// </summary>
@@ -123,6 +125,7 @@ internal partial class MainForm : Form
         this._githubPoller = new GitHubPollingService(this._githubApi,
             () => this._cachedSessions.Select(s => s.Id).ToList());
         this._confirmDialog = new MessageBoxConfirmDialog(this);
+        this.CopilotProbe = new CopilotProbe(() => Program._settings.AiDetection.CopilotPath);
         this.AiDetectionService = new AiDetectionService(
             this._githubApi,
             new ProcessRunner(),
@@ -137,7 +140,10 @@ internal partial class MainForm : Form
                 {
                     this._toast.Show(msg);
                 }
-            });
+            },
+            this._githubPoller,
+            settingsGetter: () => Program._settings.AiDetection,
+            copilotProbe: this.CopilotProbe);
         this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
         this._activeTracker.EventsJournal.StartWatching();
@@ -1008,7 +1014,7 @@ internal partial class MainForm : Form
 
     private void BuildAndShowSettingsDialog()
     {
-        using var settingsForm = new SettingsForm(this._cachedSessions, this._latestUpdate);
+        using var settingsForm = new SettingsForm(this._cachedSessions, this._latestUpdate, this.CopilotProbe);
         settingsForm.Font = this.Font;
         settingsForm.Icon = this.Icon;
         if (settingsForm.ShowDialog(this) == DialogResult.OK)

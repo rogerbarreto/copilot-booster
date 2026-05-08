@@ -30,6 +30,22 @@ internal enum AiMenuState
     Unavailable
 }
 
+internal enum UndecidedReason
+{
+    LowConfidence,
+    AllAlreadyLinked
+}
+
+internal enum OutcomeKind
+{
+    None,
+    Success,
+    Cancelled,
+    UndecidedLowConfidence,
+    NoCandidatesVariant,
+    Failure
+}
+
 internal static class AiDetectionTooltips
 {
     internal const string FeatureDisabled = "AI auto-detect is disabled in Settings.";
@@ -37,6 +53,14 @@ internal static class AiDetectionTooltips
     internal const string NoRepo = "No GitHub repository detected for this session.";
     internal const string NonGitHubRemote = "Non-GitHub providers are currently not supported.";
     internal const string DetectionInFlight = "Detection in progress...";
+    internal const string UndecidedLowConfidence = "AI couldn't decide with confidence. Top candidates: ...";
+    internal const string UndecidedAllAlreadyLinked = "All matches were already linked to this session.";
+    internal const string ErrorTimeout = "Detection timed out after {0} seconds.";
+    internal const string ErrorMalformedJson = "Copilot returned an invalid response. See app log for details.";
+    internal const string ErrorSchemaViolation = "Copilot returned an invalid response. See app log for details.";
+    internal const string ErrorNoCandidates = "No matching GitHub issue or PR was found.";
+    internal const string ErrorProcessSpawn = "Detection failed: could not start Copilot. See app log for details.";
+    internal const string ErrorProcessFailure = "Detection failed: Copilot exited with error. See app log for details.";
 
     internal static string For(AiMenuState state)
     {
@@ -50,6 +74,38 @@ internal static class AiDetectionTooltips
             AiMenuState.Unavailable => "AI auto-detect unavailable",
             _ => string.Empty
         };
+    }
+
+    internal static string ForFailure(AiFailureClass failureClass, int? timeoutSeconds = null)
+    {
+        return failureClass switch
+        {
+            AiFailureClass.Timeout => string.Format(ErrorTimeout, timeoutSeconds ?? 0),
+            AiFailureClass.MalformedJson => ErrorMalformedJson,
+            AiFailureClass.SchemaViolation => ErrorSchemaViolation,
+            AiFailureClass.NoCandidates => ErrorNoCandidates,
+            AiFailureClass.ProcessSpawn => ErrorProcessSpawn,
+            AiFailureClass.ProcessFailure => ErrorProcessFailure,
+            _ => string.Empty
+        };
+    }
+
+    internal static string ForUndecided(UndecidedReason reason, IReadOnlyList<AiCandidate>? candidates)
+    {
+        if (reason == UndecidedReason.AllAlreadyLinked)
+        {
+            return UndecidedAllAlreadyLinked;
+        }
+
+        var candidateText = candidates == null || candidates.Count == 0
+            ? "none"
+            : string.Join(" + ", candidates.Take(3).Select(candidate => $"{FormatType(candidate.Type)} #{candidate.Number} ({candidate.Confidence:0.00})"));
+        return UndecidedLowConfidence.Replace("...", candidateText, StringComparison.Ordinal);
+    }
+
+    private static string FormatType(string type)
+    {
+        return type.Equals("pr", StringComparison.OrdinalIgnoreCase) ? "PR" : "Issue";
     }
 }
 
@@ -65,14 +121,19 @@ internal sealed class DetectionState
 
     internal AiFailureClass? FailureClass { get; set; }
 
+    internal UndecidedReason? UndecidedReason { get; set; }
+
+    internal OutcomeKind OutcomeKind { get; set; }
+
     internal static DetectionState Idle => new();
 }
 
 internal sealed class AiDetectionService : IDisposable
 {
-    private const int TimeoutSeconds = 300;
-    private const double ConfidenceThreshold = 0.5;
-    private const string CopilotBinary = "copilot";
+    private const int MinTimeoutSeconds = 30;
+    private const int MaxTimeoutSeconds = 1800;
+    private const decimal MinConfidenceThreshold = 0.0m;
+    private const decimal MaxConfidenceThreshold = 1.0m;
 
     private readonly ConcurrentDictionary<string, DetectionState> _states = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
@@ -83,6 +144,8 @@ internal sealed class AiDetectionService : IDisposable
     private readonly GitHubPollingService? _githubPoller;
     private readonly string _sessionStateRoot;
     private readonly string _appLogRoot;
+    private readonly Func<AiDetectionSettings?> _settingsGetter;
+    private readonly ICopilotProbe _copilotProbe;
 
     internal event Action<string, DetectionStatus, DetectionStatus>? DetectionStateChanged;
 
@@ -93,7 +156,9 @@ internal sealed class AiDetectionService : IDisposable
         Action<string> toastSink,
         GitHubPollingService? githubPoller = null,
         string? sessionStateRoot = null,
-        string? appLogRoot = null)
+        string? appLogRoot = null,
+        Func<AiDetectionSettings>? settingsGetter = null,
+        ICopilotProbe? copilotProbe = null)
     {
         this._githubApi = githubApi;
         this._processRunner = processRunner;
@@ -102,6 +167,8 @@ internal sealed class AiDetectionService : IDisposable
         this._githubPoller = githubPoller;
         this._sessionStateRoot = sessionStateRoot ?? Program.SessionStateDir;
         this._appLogRoot = appLogRoot ?? Program.AppDataDir;
+        this._settingsGetter = settingsGetter ?? (() => new AiDetectionSettings());
+        this._copilotProbe = copilotProbe ?? AlwaysAvailableCopilotProbe.Instance;
     }
 
     internal AiDetectionService(
@@ -110,13 +177,22 @@ internal sealed class AiDetectionService : IDisposable
         GitHubPollingService? githubPoller,
         Action<string> toastSink,
         string? sessionStateRoot = null,
-        string? appLogRoot = null)
-        : this(githubApi, processRunner, sid => ReadSessionCwdFromWorkspace(sessionStateRoot ?? Program.SessionStateDir, sid), toastSink, githubPoller, sessionStateRoot, appLogRoot)
+        string? appLogRoot = null,
+        Func<AiDetectionSettings>? settingsGetter = null,
+        ICopilotProbe? copilotProbe = null)
+        : this(githubApi, processRunner, sid => ReadSessionCwdFromWorkspace(sessionStateRoot ?? Program.SessionStateDir, sid), toastSink, githubPoller, sessionStateRoot, appLogRoot, settingsGetter, copilotProbe)
     {
     }
 
     internal Task StartDetectionAsync(string sessionId)
     {
+        var invocationSettings = this.ResolveInvocationSettings();
+        if (!invocationSettings.Enabled)
+        {
+            Program.Logger.LogWarning("AI detection skipped session_id={SessionId} reason=disabled_in_settings", sessionId);
+            return Task.CompletedTask;
+        }
+
         DetectionState state;
         DetectionStatus oldStatus;
         Task task;
@@ -136,8 +212,10 @@ internal sealed class AiDetectionService : IDisposable
             state.Cts = cts;
             state.TopCandidates = null;
             state.FailureClass = null;
+            state.UndecidedReason = null;
+            state.OutcomeKind = OutcomeKind.None;
             state.Status = DetectionStatus.Running;
-            task = Task.Run(() => this.RunDetectionAsync(sessionId, state, cts), CancellationToken.None);
+            task = Task.Run(() => this.RunDetectionAsync(sessionId, state, cts, invocationSettings), CancellationToken.None);
             state.Task = task;
         }
 
@@ -153,6 +231,26 @@ internal sealed class AiDetectionService : IDisposable
         }
     }
 
+    internal void Reset(string sessionId)
+    {
+        DetectionStatus oldStatus;
+        DetectionState? removedState;
+        lock (this._gate)
+        {
+            if (!this._states.TryGetValue(sessionId, out var state)
+                || state.Status is not (DetectionStatus.Undecided or DetectionStatus.Error))
+            {
+                return;
+            }
+
+            oldStatus = state.Status;
+            this._states.TryRemove(sessionId, out removedState);
+        }
+
+        removedState?.Cts?.Dispose();
+        this.DetectionStateChanged?.Invoke(sessionId, oldStatus, DetectionStatus.Idle);
+    }
+
     internal DetectionState TryGetState(string sessionId)
     {
         return this._states.TryGetValue(sessionId, out var state) ? state : DetectionState.Idle;
@@ -165,16 +263,12 @@ internal sealed class AiDetectionService : IDisposable
 
     internal AiMenuState EvaluateMenuState(string sessionId, string? sessionCwd)
     {
-        // TODO: read from LauncherSettings.AiDetection.Enabled in slice #21.
-        var killSwitch = true;
-        if (!killSwitch)
+        if (!this.GetSettings().Enabled)
         {
             return AiMenuState.FeatureDisabled;
         }
 
-        // TODO: read from probe in slice #21.
-        var copilotAvailable = true;
-        if (!copilotAvailable)
+        if (!this._copilotProbe.IsCopilotAvailable())
         {
             return AiMenuState.CopilotUnavailable;
         }
@@ -219,7 +313,7 @@ internal sealed class AiDetectionService : IDisposable
         }
     }
 
-    private async Task RunDetectionAsync(string sessionId, DetectionState state, CancellationTokenSource cts)
+    private async Task RunDetectionAsync(string sessionId, DetectionState state, CancellationTokenSource cts, AiDetectionInvocationSettings invocationSettings)
     {
         var stopwatch = Stopwatch.StartNew();
         var outcome = "error";
@@ -229,6 +323,7 @@ internal sealed class AiDetectionService : IDisposable
         AiFailureClass? failureClass = null;
         string? failureReason = null;
         int? failureExitCode = null;
+        var terminalStatus = DetectionStatus.Idle;
 
         try
         {
@@ -256,7 +351,7 @@ internal sealed class AiDetectionService : IDisposable
                 return;
             }
 
-            Program.Logger.LogInformation("AI detection start session_id={SessionId} resolved_owner_repo={Owner}/{Repo} configured_timeout_seconds={TimeoutSeconds}", sessionId, repo.Value.owner, repo.Value.repo, TimeoutSeconds);
+            Program.Logger.LogInformation("AI detection start session_id={SessionId} resolved_owner_repo={Owner}/{Repo} configured_timeout_seconds={TimeoutSeconds}", sessionId, repo.Value.owner, repo.Value.repo, invocationSettings.TimeoutSeconds);
 
             var prompt = AiPromptBuilder.Build(repo.Value.owner, repo.Value.repo, sessionStateFolder);
             var logDir = this.CreateInvocationLogDir(sessionId);
@@ -272,13 +367,18 @@ internal sealed class AiDetectionService : IDisposable
                 "-C", cwd,
                 "--log-dir", logDir
             };
+            if (!string.IsNullOrWhiteSpace(invocationSettings.Model))
+            {
+                args.Add("--model");
+                args.Add(invocationSettings.Model);
+            }
 
             Program.Logger.LogDebug("AI detection debug session_id={SessionId} exact_prompt_sent={ExactPromptSent}", sessionId, prompt);
 
             ProcessResult processResult;
             try
             {
-                processResult = await this._processRunner.RunAsync(CopilotBinary, args, cwd, TimeoutSeconds, cts.Token).ConfigureAwait(false);
+                processResult = await this._processRunner.RunAsync(invocationSettings.CopilotPath, args, cwd, invocationSettings.TimeoutSeconds, cts.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -286,6 +386,8 @@ internal sealed class AiDetectionService : IDisposable
                 failureReason = ex.Message;
                 outcome = ToOutcome(failureClass.Value);
                 state.FailureClass = failureClass;
+                state.OutcomeKind = OutcomeKind.Failure;
+                terminalStatus = DetectionStatus.Error;
                 Program.Logger.LogDebug(ex, "AI detection process spawn exception session_id={SessionId}", sessionId);
                 return;
             }
@@ -305,6 +407,8 @@ internal sealed class AiDetectionService : IDisposable
                 failureReason = "process was killed after configured timeout";
                 outcome = ToOutcome(failureClass.Value);
                 state.FailureClass = failureClass;
+                state.OutcomeKind = OutcomeKind.Failure;
+                terminalStatus = DetectionStatus.Error;
                 return;
             }
 
@@ -315,6 +419,8 @@ internal sealed class AiDetectionService : IDisposable
                 failureExitCode = processResult.ExitCode;
                 outcome = ToOutcome(failureClass.Value);
                 state.FailureClass = failureClass;
+                state.OutcomeKind = OutcomeKind.Failure;
+                terminalStatus = DetectionStatus.Error;
                 return;
             }
 
@@ -325,13 +431,15 @@ internal sealed class AiDetectionService : IDisposable
                 failureReason = parseFailure.Reason;
                 outcome = ToOutcome(failureClass.Value);
                 state.FailureClass = failureClass;
+                state.OutcomeKind = OutcomeKind.Failure;
+                terminalStatus = DetectionStatus.Error;
                 return;
             }
 
             var candidates = ((AiParseResult.Success)parseResult).Candidates;
             candidateCount = candidates.Count;
             topConfidence = candidates.Count > 0 ? candidates.Max(c => c.Confidence) : null;
-            state.TopCandidates = candidates;
+            state.TopCandidates = candidates.OrderByDescending(c => c.Confidence).Take(3).ToList();
 
             if (candidates.Count == 0)
             {
@@ -339,19 +447,44 @@ internal sealed class AiDetectionService : IDisposable
                 failureReason = "response contained no candidates";
                 outcome = ToOutcome(failureClass.Value);
                 state.FailureClass = failureClass;
+                state.OutcomeKind = OutcomeKind.Failure;
+                terminalStatus = DetectionStatus.Error;
                 return;
             }
 
-            foreach (var candidate in candidates.Where(c => c.Confidence >= ConfidenceThreshold))
+            var aboveThresholdCandidates = candidates
+                .Where(c => c.Confidence >= (double)invocationSettings.ConfidenceThreshold)
+                .ToList();
+            if (aboveThresholdCandidates.Count == 0)
+            {
+                outcome = "undecided";
+                state.UndecidedReason = UndecidedReason.LowConfidence;
+                state.OutcomeKind = OutcomeKind.UndecidedLowConfidence;
+                terminalStatus = DetectionStatus.Undecided;
+                return;
+            }
+
+            var current = GitHubTrackingService.Load(sessionId);
+            var duplicateCandidates = aboveThresholdCandidates
+                .Where(candidate => IsAlreadyLinked(current, candidate))
+                .ToList();
+            var candidatesToApply = aboveThresholdCandidates
+                .Where(candidate => !IsAlreadyLinked(current, candidate))
+                .ToList();
+
+            if (duplicateCandidates.Count == aboveThresholdCandidates.Count)
+            {
+                outcome = "no_candidates_variant";
+                state.UndecidedReason = UndecidedReason.AllAlreadyLinked;
+                state.OutcomeKind = OutcomeKind.NoCandidatesVariant;
+                terminalStatus = DetectionStatus.Undecided;
+                return;
+            }
+
+            foreach (var candidate in candidatesToApply)
             {
                 var normalizedType = NormalizeType(candidate.Type);
                 if (normalizedType == null)
-                {
-                    continue;
-                }
-
-                var current = GitHubTrackingService.Load(sessionId);
-                if (current?.Items.Any(i => i.Type.Equals(normalizedType, StringComparison.OrdinalIgnoreCase) && i.Number == candidate.Number) == true)
                 {
                     continue;
                 }
@@ -369,8 +502,9 @@ internal sealed class AiDetectionService : IDisposable
 
             if (applied.Count > 0)
             {
-                this._toastSink(FormatSuccessToast(applied));
+                this._toastSink(FormatSuccessToast(applied, duplicateCandidates));
                 outcome = "success";
+                state.OutcomeKind = OutcomeKind.Success;
             }
             else
             {
@@ -378,11 +512,14 @@ internal sealed class AiDetectionService : IDisposable
                 failureReason = "no candidates met threshold or survived filtering";
                 outcome = ToOutcome(failureClass.Value);
                 state.FailureClass = failureClass;
+                state.OutcomeKind = OutcomeKind.Failure;
+                terminalStatus = DetectionStatus.Error;
             }
         }
         catch (OperationCanceledException)
         {
             outcome = "cancelled";
+            state.OutcomeKind = OutcomeKind.Cancelled;
         }
         catch (Exception ex)
         {
@@ -394,7 +531,7 @@ internal sealed class AiDetectionService : IDisposable
         {
             stopwatch.Stop();
             LogDetectionEnd(sessionId, outcome, candidateCount, topConfidence, applied, stopwatch.ElapsedMilliseconds, failureClass, failureReason, failureExitCode);
-            this.TransitionToIdle(sessionId, state, cts);
+            this.TransitionToStatus(sessionId, state, cts, terminalStatus);
         }
     }
 
@@ -474,6 +611,35 @@ internal sealed class AiDetectionService : IDisposable
         }
 
         return GitService.TryResolveGitHubRepo(cwd);
+    }
+
+    private AiDetectionInvocationSettings ResolveInvocationSettings()
+    {
+        var settings = this.GetSettings();
+        var timeoutSeconds = Math.Clamp(settings.TimeoutSeconds, MinTimeoutSeconds, MaxTimeoutSeconds);
+        var confidenceThreshold = Math.Min(MaxConfidenceThreshold, Math.Max(MinConfidenceThreshold, settings.ConfidenceThreshold));
+        if (timeoutSeconds != settings.TimeoutSeconds || confidenceThreshold != settings.ConfidenceThreshold)
+        {
+            Program.Logger.LogWarning(
+                "AI detection settings clamped configured_timeout_seconds={ConfiguredTimeoutSeconds} resolved_timeout_seconds={ResolvedTimeoutSeconds} configured_confidence_threshold={ConfiguredConfidenceThreshold} resolved_confidence_threshold={ResolvedConfidenceThreshold}",
+                settings.TimeoutSeconds,
+                timeoutSeconds,
+                settings.ConfidenceThreshold,
+                confidenceThreshold);
+        }
+
+        var copilotPath = string.IsNullOrWhiteSpace(settings.CopilotPath) ? "copilot" : settings.CopilotPath.Trim();
+        return new AiDetectionInvocationSettings(
+            settings.Enabled,
+            timeoutSeconds,
+            confidenceThreshold,
+            copilotPath,
+            settings.Model?.Trim() ?? "");
+    }
+
+    private AiDetectionSettings GetSettings()
+    {
+        return this._settingsGetter() ?? new AiDetectionSettings();
     }
 
     private async Task<GitHubTrackedItem?> EnrichCandidateAsync(string type, int number, string owner, string repo)
@@ -625,5 +791,23 @@ internal sealed class AiDetectionService : IDisposable
         }
 
         return null;
+    }
+
+    private sealed record AiDetectionInvocationSettings(
+        bool Enabled,
+        int TimeoutSeconds,
+        decimal ConfidenceThreshold,
+        string CopilotPath,
+        string Model);
+
+    private sealed class AlwaysAvailableCopilotProbe : ICopilotProbe
+    {
+        internal static readonly AlwaysAvailableCopilotProbe Instance = new();
+
+        public bool IsCopilotAvailable() => true;
+
+        public void InvalidateCache()
+        {
+        }
     }
 }

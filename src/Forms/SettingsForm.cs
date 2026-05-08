@@ -18,12 +18,23 @@ internal sealed class SettingsForm : Form
 {
     private readonly IReadOnlyList<NamedSession> _cachedSessions;
     private readonly UpdateInfo? _latestUpdate;
+    private readonly ICopilotProbe? _copilotProbe;
+    private readonly ToolTip _validationToolTip = new();
+    private CheckBox _aiEnabledCheck = null!;
+    private NumericUpDown _aiTimeoutSecondsBox = null!;
+    private NumericUpDown _aiConfidenceThresholdBox = null!;
+    private TextBox _aiCopilotPathBox = null!;
+    private Panel _aiCopilotPathBorder = null!;
+    private Label _aiCopilotPathError = null!;
+    private TextBox _aiModelBox = null!;
     private bool _suppressThemeChange;
+    private string _initialCopilotPath = "";
 
-    internal SettingsForm(IReadOnlyList<NamedSession> cachedSessions, UpdateInfo? latestUpdate)
+    internal SettingsForm(IReadOnlyList<NamedSession> cachedSessions, UpdateInfo? latestUpdate, ICopilotProbe? copilotProbe = null)
     {
         this._cachedSessions = cachedSessions;
         this._latestUpdate = latestUpdate;
+        this._copilotProbe = copilotProbe;
 
         this.Text = "Settings";
         this.Size = new Size(880, 620);
@@ -71,7 +82,7 @@ internal sealed class SettingsForm : Form
             Indent = 16
         };
 
-        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "GitHub" };
+        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "GitHub", "AI" };
         foreach (var name in categoryNames)
         {
             tree.Nodes.Add(name);
@@ -701,6 +712,115 @@ internal sealed class SettingsForm : Form
         var (githubPanel, githubBody) = this.CreateCategoryPanel("GitHub", "GitHub integration settings for PR/Issue tracking.", autoScroll: true, padding: new Padding(8));
 
         // =====================================================================
+        // AI
+        // =====================================================================
+        var (aiPanel, aiBody) = this.CreateCategoryPanel("AI", "AI auto-detect settings for GitHub issue and PR detection.", autoScroll: true, padding: new Padding(8));
+        var aiSettings = Program._settings.AiDetection ?? new AiDetectionSettings();
+        this._initialCopilotPath = aiSettings.CopilotPath ?? "";
+
+        this._aiEnabledCheck = new CheckBox
+        {
+            Text = "Enable AI auto-detect",
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(4, 4, 0, 4)
+        };
+
+        var aiTimeoutRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
+        var aiTimeoutLabel = new Label { Text = "Per-detection timeout (seconds):", AutoSize = true, Location = new Point(4, 12) };
+        this._aiTimeoutSecondsBox = new NumericUpDown
+        {
+            Minimum = 30,
+            Maximum = 1800,
+            Increment = 10,
+            Location = new Point(220, 9),
+            Width = 90,
+            TextAlign = HorizontalAlignment.Right
+        };
+        aiTimeoutRow.Controls.AddRange([aiTimeoutLabel, this._aiTimeoutSecondsBox]);
+
+        var aiConfidenceRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
+        var aiConfidenceLabel = new Label { Text = "Auto-apply confidence threshold:", AutoSize = true, Location = new Point(4, 12) };
+        this._aiConfidenceThresholdBox = new NumericUpDown
+        {
+            Minimum = 0.00M,
+            Maximum = 1.00M,
+            Increment = 0.05M,
+            DecimalPlaces = 2,
+            Location = new Point(220, 9),
+            Width = 90,
+            TextAlign = HorizontalAlignment.Right
+        };
+        aiConfidenceRow.Controls.AddRange([aiConfidenceLabel, this._aiConfidenceThresholdBox]);
+
+        var aiCopilotPathRow = new Panel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(4, 8, 0, 4) };
+        var aiCopilotPathLabel = new Label { Text = "Copilot CLI path:", AutoSize = true, Location = new Point(4, 12) };
+        this._aiCopilotPathBox = new TextBox
+        {
+            PlaceholderText = "Empty = use PATH",
+            Location = new Point(220, 9),
+            Width = 300,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+        };
+        this._aiCopilotPathBorder = SettingsVisuals.WrapWithBorder(this._aiCopilotPathBox);
+        var aiCopilotPathBrowse = new Button
+        {
+            Text = "Browse...",
+            Width = 90,
+            Location = new Point(530, 8),
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        aiCopilotPathBrowse.Click += (s, e) =>
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Filter = "Executable files (*.exe)|*.exe|All files (*.*)|*.*",
+                CheckFileExists = true,
+                FileName = this._aiCopilotPathBox.Text
+            };
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                this._aiCopilotPathBox.Text = dialog.FileName;
+                this.ValidateCopilotPath(showTooltip: false);
+            }
+        };
+        this._aiCopilotPathBox.Leave += (s, e) => this.ValidateCopilotPath(showTooltip: false);
+        this._aiCopilotPathBox.TextChanged += (s, e) =>
+        {
+            if (this._aiCopilotPathError.Visible)
+            {
+                this.ValidateCopilotPath(showTooltip: false);
+            }
+        };
+        this._aiCopilotPathError = new Label
+        {
+            Text = "File not found",
+            AutoSize = true,
+            Location = new Point(220, 42),
+            ForeColor = Color.Red,
+            Visible = false
+        };
+        aiCopilotPathRow.Controls.AddRange([aiCopilotPathLabel, this._aiCopilotPathBorder, aiCopilotPathBrowse, this._aiCopilotPathError]);
+
+        var aiModelRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
+        var aiModelLabel = new Label { Text = "Model (optional):", AutoSize = true, Location = new Point(4, 12) };
+        this._aiModelBox = new TextBox
+        {
+            PlaceholderText = "Empty = let Copilot pick",
+            Location = new Point(220, 9),
+            Width = 300,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+        };
+        aiModelRow.Controls.AddRange([aiModelLabel, SettingsVisuals.WrapWithBorder(this._aiModelBox)]);
+
+        this.LoadAiDetectionFromSettings(aiSettings);
+        aiBody.Controls.Add(aiModelRow);
+        aiBody.Controls.Add(aiCopilotPathRow);
+        aiBody.Controls.Add(aiConfidenceRow);
+        aiBody.Controls.Add(aiTimeoutRow);
+        aiBody.Controls.Add(this._aiEnabledCheck);
+
+        // =====================================================================
         // PANEL MAP & TREE WIRING
         // =====================================================================
         var panelMap = new Dictionary<string, Panel>
@@ -714,7 +834,8 @@ internal sealed class SettingsForm : Form
             ["Git && GitHub"] = gitPanel,
             ["Session Tabs"] = sessionTabsPanel,
             ["Spotlight"] = toastPanel,
-            ["GitHub"] = githubPanel
+            ["GitHub"] = githubPanel,
+            ["AI"] = aiPanel
         };
 
         foreach (var p in panelMap.Values)
@@ -761,6 +882,13 @@ internal sealed class SettingsForm : Form
         var btnSave = new Button { Text = "Save", Width = 90 };
         btnSave.Click += (s, e) =>
         {
+            if (!this.ValidateCopilotPath(showTooltip: true))
+            {
+                tree.SelectedNode = tree.Nodes.Cast<TreeNode>().FirstOrDefault(n => string.Equals(n.Text, "AI", StringComparison.Ordinal));
+                this._aiCopilotPathBox.Focus();
+                return;
+            }
+
             // General
             Program._settings.AlwaysOnTop = alwaysOnTopCheck.Checked;
             Program._settings.MaxActiveSessions = (int)maxSessionsBox.Value;
@@ -831,8 +959,19 @@ internal sealed class SettingsForm : Form
             // GitHub
             Program._settings.TrackActiveSession = trackActiveCheck.Checked;
 
+            // AI
+            Program._settings.AiDetection = this.GetCurrentAiDetectionFormState();
+            var copilotPathChanged = !string.Equals(
+                this._initialCopilotPath,
+                Program._settings.AiDetection.CopilotPath,
+                StringComparison.OrdinalIgnoreCase);
+
             // Persist
             Program._settings.Save();
+            if (copilotPathChanged)
+            {
+                this._copilotProbe?.InvalidateCache();
+            }
 
             this.DialogResult = DialogResult.OK;
             this.Close();
@@ -853,6 +992,68 @@ internal sealed class SettingsForm : Form
 
         // SplitterDistance must be set after the control is parented and sized
         split.SplitterDistance = 200;
+    }
+
+    internal AiDetectionSettings GetCurrentAiDetectionFormState()
+    {
+        return new AiDetectionSettings
+        {
+            Enabled = this._aiEnabledCheck.Checked,
+            TimeoutSeconds = (int)this._aiTimeoutSecondsBox.Value,
+            ConfidenceThreshold = this._aiConfidenceThresholdBox.Value,
+            CopilotPath = this._aiCopilotPathBox.Text.Trim(),
+            Model = this._aiModelBox.Text.Trim()
+        };
+    }
+
+    internal void LoadAiDetectionFromSettings(AiDetectionSettings s)
+    {
+        if (this.InvokeRequired)
+        {
+            this.Invoke(() => this.LoadAiDetectionFromSettings(s));
+            return;
+        }
+
+        this._aiEnabledCheck.Checked = s.Enabled;
+        this._aiTimeoutSecondsBox.Value = Math.Clamp(s.TimeoutSeconds, 30, 1800);
+        this._aiConfidenceThresholdBox.Value = Math.Clamp(s.ConfidenceThreshold, 0.00M, 1.00M);
+        this._aiCopilotPathBox.Text = s.CopilotPath ?? "";
+        this._initialCopilotPath = this._aiCopilotPathBox.Text;
+        this._aiModelBox.Text = s.Model ?? "";
+        this.ValidateCopilotPath(showTooltip: false);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            this._validationToolTip.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private bool ValidateCopilotPath(bool showTooltip)
+    {
+        if (this.InvokeRequired)
+        {
+            return this.Invoke(() => this.ValidateCopilotPath(showTooltip));
+        }
+
+        var value = this._aiCopilotPathBox.Text.Trim();
+        var invalid = value.Length > 0 && !File.Exists(value);
+        this._aiCopilotPathError.Visible = invalid;
+        this._aiCopilotPathBorder.BackColor = invalid
+            ? Color.Red
+            : Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark;
+        this._validationToolTip.SetToolTip(this._aiCopilotPathBox, invalid ? "File not found" : "");
+        this._validationToolTip.SetToolTip(this._aiCopilotPathBorder, invalid ? "File not found" : "");
+        if (invalid && showTooltip)
+        {
+            this._validationToolTip.Show("File not found", this._aiCopilotPathBorder, 0, this._aiCopilotPathBorder.Height, 3000);
+        }
+
+        return !invalid;
     }
 
     private (Panel Outer, Panel Body) CreateCategoryPanel(string title, string? description = null, bool autoScroll = false, Padding? padding = null)

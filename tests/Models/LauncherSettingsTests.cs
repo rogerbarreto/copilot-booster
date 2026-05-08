@@ -122,6 +122,75 @@ public sealed class LauncherSettingsTests : IDisposable
     }
 
     [Fact]
+    public void CreateDefault_AiDetection_HasExpectedDefaults()
+    {
+        var settings = LauncherSettings.CreateDefault();
+
+        AssertAiDetectionDefaults(settings.AiDetection);
+    }
+
+    [Fact]
+    public void AiDetectionSettings_RoundTrip_PreservesAllFields()
+    {
+        var settings = new AiDetectionSettings
+        {
+            Enabled = false,
+            TimeoutSeconds = 600,
+            ConfidenceThreshold = 0.75m,
+            CopilotPath = @"C:\custom\copilot.exe",
+            Model = "gpt-5.2"
+        };
+
+        var json = JsonSerializer.Serialize(settings);
+        var loaded = JsonSerializer.Deserialize<AiDetectionSettings>(json);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(settings.Enabled, loaded!.Enabled);
+        Assert.Equal(settings.TimeoutSeconds, loaded.TimeoutSeconds);
+        Assert.Equal(settings.ConfidenceThreshold, loaded.ConfidenceThreshold);
+        Assert.Equal(settings.CopilotPath, loaded.CopilotPath);
+        Assert.Equal(settings.Model, loaded.Model);
+    }
+
+    [Fact]
+    public void Load_WithoutAiDetectionKey_DefaultsAiDetection()
+    {
+        var file = Path.Combine(this._tempDir, "old-settings.json");
+        File.WriteAllText(file, """{"allowedTools":["git"],"defaultWorkDir":"C:\\work"}""");
+
+        var settings = LauncherSettings.Load(file);
+
+        Assert.NotNull(settings.AiDetection);
+        AssertAiDetectionDefaults(settings.AiDetection);
+    }
+
+    [Fact]
+    public void AiDetection_CustomValues_RoundTripThroughLauncherSettings()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings
+        {
+            AiDetection = new AiDetectionSettings
+            {
+                Enabled = false,
+                TimeoutSeconds = 600,
+                ConfidenceThreshold = 0.75m,
+                CopilotPath = @"C:\custom\copilot.exe",
+                Model = "gpt-5.2"
+            }
+        };
+
+        settings.Save(file);
+        var loaded = LauncherSettings.Load(file);
+
+        Assert.False(loaded.AiDetection.Enabled);
+        Assert.Equal(600, loaded.AiDetection.TimeoutSeconds);
+        Assert.Equal(0.75m, loaded.AiDetection.ConfidenceThreshold);
+        Assert.Equal(@"C:\custom\copilot.exe", loaded.AiDetection.CopilotPath);
+        Assert.Equal("gpt-5.2", loaded.AiDetection.Model);
+    }
+
+    [Fact]
     public void BuildCopilotArgs_NoToolsNoDirs_ReturnsExtraArgsOnly()
     {
         var settings = new LauncherSettings();
@@ -477,5 +546,14 @@ public sealed class LauncherSettingsTests : IDisposable
         var result = LauncherSettings.FormatBranchName(pattern, number, alias);
 
         Assert.Equal(expected, result);
+    }
+
+    private static void AssertAiDetectionDefaults(AiDetectionSettings settings)
+    {
+        Assert.True(settings.Enabled);
+        Assert.Equal(300, settings.TimeoutSeconds);
+        Assert.Equal(0.5m, settings.ConfidenceThreshold);
+        Assert.Equal("", settings.CopilotPath);
+        Assert.Equal("", settings.Model);
     }
 }
