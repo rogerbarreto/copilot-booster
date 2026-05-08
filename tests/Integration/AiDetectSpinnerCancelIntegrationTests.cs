@@ -28,10 +28,10 @@ public sealed class AiDetectSpinnerCancelIntegrationTests : IDisposable
 
         harness.CompleteProcess(new ProcessResult(0, "{\"candidates\":[]}", "", false));
         await detectionTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(true);
-        Assert.Equal(DetectionStatus.Idle, harness.Service.TryGetState(this._sessionId).Status);
+        Assert.Equal(DetectionStatus.Error, harness.Service.TryGetState(this._sessionId).Status);
         await harness.WaitForSpinnerTimerDisabledAsync().ConfigureAwait(true);
 
-        Assert.Equal(DetectionStatus.Idle, harness.Service.TryGetState(this._sessionId).Status);
+        Assert.Equal(DetectionStatus.Error, harness.Service.TryGetState(this._sessionId).Status);
         Assert.False(harness.Visuals.IsSpinnerVisibleForSession(this._sessionId));
         Assert.False(harness.IsSpinnerTimerEnabled());
     }
@@ -216,7 +216,7 @@ public sealed class AiDetectSpinnerCancelIntegrationTests : IDisposable
             while (DateTime.UtcNow < deadline)
             {
                 Application.DoEvents();
-                if (this.Service.TryGetState(this._sessionId).Status == DetectionStatus.Idle && this.IsSpinnerTimerEnabled())
+                if (this.Service.TryGetState(this._sessionId).Status != DetectionStatus.Running && this.IsSpinnerTimerEnabled())
                 {
                     this.InvokeSpinnerTick();
                 }

@@ -97,10 +97,13 @@ internal static class AiDetectionTooltips
             return UndecidedAllAlreadyLinked;
         }
 
-        var candidateText = candidates == null || candidates.Count == 0
-            ? "none"
-            : string.Join(" + ", candidates.Take(3).Select(candidate => $"{FormatType(candidate.Type)} #{candidate.Number} ({candidate.Confidence:0.00})"));
-        return UndecidedLowConfidence.Replace("...", candidateText, StringComparison.Ordinal);
+        var lines = new List<string> { "AI couldn't decide with confidence. Top candidates:" };
+        foreach (var candidate in (candidates ?? []).Take(3))
+        {
+            lines.Add($"{FormatType(candidate.Type)} #{candidate.Number} (confidence: {candidate.Confidence:0.00}) - {candidate.Reasoning}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string FormatType(string type)
@@ -400,6 +403,7 @@ internal sealed class AiDetectionService : IDisposable
                 if (cts.IsCancellationRequested)
                 {
                     outcome = "cancelled";
+                    state.OutcomeKind = OutcomeKind.Cancelled;
                     return;
                 }
 
@@ -548,6 +552,19 @@ internal sealed class AiDetectionService : IDisposable
     {
         if (failureClass == null)
         {
+            if (outcome is "undecided" or "no_candidates_variant")
+            {
+                Program.Logger.LogWarning(
+                    "AI detection end session_id={SessionId} outcome={Outcome} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
+                    sessionId,
+                    outcome,
+                    candidateCount,
+                    topConfidence,
+                    FormatAppliedItems(applied),
+                    durationMs);
+                return;
+            }
+
             Program.Logger.LogInformation(
                 "AI detection end session_id={SessionId} outcome={Outcome} candidate_count={CandidateCount} top_confidence={TopConfidence} applied_items={AppliedItems} duration_ms={DurationMs}",
                 sessionId,
@@ -708,7 +725,7 @@ internal sealed class AiDetectionService : IDisposable
         }
     }
 
-    private void TransitionToIdle(string sessionId, DetectionState state, CancellationTokenSource cts)
+    private void TransitionToStatus(string sessionId, DetectionState state, CancellationTokenSource cts, DetectionStatus newStatus)
     {
         DetectionStatus oldStatus;
         lock (this._gate)
@@ -720,13 +737,13 @@ internal sealed class AiDetectionService : IDisposable
                 state.Task = Task.CompletedTask;
             }
 
-            state.Status = DetectionStatus.Idle;
+            state.Status = newStatus;
         }
 
         cts.Dispose();
-        if (oldStatus != DetectionStatus.Idle)
+        if (oldStatus != newStatus)
         {
-            this.DetectionStateChanged?.Invoke(sessionId, oldStatus, DetectionStatus.Idle);
+            this.DetectionStateChanged?.Invoke(sessionId, oldStatus, newStatus);
         }
     }
 
@@ -754,8 +771,20 @@ internal sealed class AiDetectionService : IDisposable
         return null;
     }
 
-    private static string FormatSuccessToast(IReadOnlyList<GitHubTrackedItem> applied)
+    private static bool IsAlreadyLinked(GitHubTrackingData? current, AiCandidate candidate)
     {
+        var normalizedType = NormalizeType(candidate.Type);
+        return normalizedType != null
+            && current?.Items.Any(i => i.Type.Equals(normalizedType, StringComparison.OrdinalIgnoreCase) && i.Number == candidate.Number) == true;
+    }
+
+    private static string FormatSuccessToast(IReadOnlyList<GitHubTrackedItem> applied, List<AiCandidate> duplicates)
+    {
+        if (duplicates.Count > 0)
+        {
+            return $"✅ AI added {FormatAppliedItems(applied)} (already linked: {FormatCandidateItems(duplicates)})";
+        }
+
         return $"✅ AI added {FormatAppliedItems(applied)} to session";
     }
 
@@ -772,6 +801,16 @@ internal sealed class AiDetectionService : IDisposable
     private static string FormatType(string type)
     {
         return type.Equals("pr", StringComparison.OrdinalIgnoreCase) ? "PR" : "Issue";
+    }
+
+    private static string FormatCandidateItems(List<AiCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            return "none";
+        }
+
+        return string.Join(" + ", candidates.Select(candidate => $"{FormatType(candidate.Type)} #{candidate.Number}"));
     }
 
     private static string? ReadSessionCwdFromWorkspace(string sessionStateRoot, string sessionId)

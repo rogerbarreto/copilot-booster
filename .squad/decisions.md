@@ -458,6 +458,140 @@ enum AiMenuState
 
 ---
 
+## Issue #22: Undecided + Error Icons + Dedup Variant + Partial-Dedup Toast
+
+**Date:** 2026-05-08  
+**Status:** Delivered  
+**Contributors:** Trinity (Services Dev), Morpheus (UI Dev), Tank (Tester)
+
+### Undecided Outcome and UndecidedReason Enum — Trinity
+
+**Decision:** Extend `AiDetectionService` state machine with `DetectionStatus.Undecided` outcome and `UndecidedReason` enum.
+
+```csharp
+enum UndecidedReason
+{
+    LowConfidence,      // Candidates exist but below configured threshold
+    AllAlreadyLinked    // All candidates already linked (dedup variant)
+}
+```
+
+**Rationale:**
+- LowConfidence occurs when parser returns valid candidates but none exceed the confidence threshold.
+- AllAlreadyLinked is the partial-dedup variant: candidates exist and pass threshold, but all are already linked.
+- Undecided is NOT a failure — it's an outcome requiring no action (no apply, no error icon fallback).
+- Contrasts with Success (apply all new + dedup) and Failure (error icon, logs).
+
+**Surface:**
+- `DetectionState.UndecidedReason` property (nullable when status is not Undecided)
+- `AiDetectionService.Reset(string sessionId)` clears detection state for manual add/issue workflows
+- `AiDetectionTooltips.ForUndecided(UndecidedReason reason)` routes reason-specific tooltip text
+
+### TopCandidates Projection — Trinity
+
+**Decision:** Parser returns all valid candidates in input order; service projects only top-3 for UI display.
+
+**Rationale:**
+- Partial-dedup tests require full candidate list to classify all duplicates.
+- UI only needs top-3 for low-confidence reason display.
+- Apply logic evaluates all above-threshold candidates, not just top-3.
+
+**Contract:**
+- `AiResponseParser` preserves every valid candidate sorted by confidence descending.
+- `DetectionState.TopCandidates` returns up to 3 candidates for grid icon tooltip.
+- Service dedup logic and apply logic use full candidate list internally.
+
+### Error Icon and Fallback Tracking — Trinity + Morpheus
+
+**Decision:** When detection encounters any `AiFailureClass`, track error state for icon fallback rendering.
+
+**Rationale:**
+- Error state distinct from Running (no spinner) and Undecided (no error icon).
+- Morpheus renders `!` (error) icon in corner when status is Error.
+- Icon region reuses Issue #20 corner placement and click dispatch.
+
+**Surface:**
+- `DetectionState.Status == Error` when any failure class occurs
+- `AiDetectionService.TryGetState(sid)` reports error status
+- Morpheus queries status to render appropriate icon
+
+### IMessageBox Seam for Dismiss Flow — Morpheus + Tank
+
+**Decision:** New `IMessageBox` interface for click-to-dismiss confirmation dialog (sibling to Issue #20 `IConfirmDialog`).
+
+**Shape:**
+```csharp
+internal interface IMessageBox
+{
+    bool Show(string title, string message, string okLabel, string cancelLabel);
+}
+```
+
+**Production implementation:** `MessageBoxWrapper` wraps `MessageBox.Show(OKCancel)`.
+
+**Rationale:**
+- Tank can fake the dialog for integration tests without blocking on WinForms message boxes.
+- Parallel to `IConfirmDialog` pattern (cancel confirmation).
+- Allows testing click-to-dismiss flow in grid rendering tests.
+
+**Outcome:**
+- Corner click on Undecided/Error state shows confirmation: "Dismiss and stop detecting?"
+- User confirms dismiss → `AiDetectionService.Reset(sessionId)` → grid refreshes
+- User cancels → state unchanged, detection continues
+
+### Partial-Dedup Toast Pattern — Trinity + Morpheus
+
+**Decision:** On AllAlreadyLinked outcome, create one toast listing all duplicate issue links.
+
+**Toast Format:** `"X issue link(s) already exist: #123, #456, ..."`
+
+**Rationale:**
+- User sees all duplicates in one notification (better UX than silent no-op).
+- Toast sink already wired in Issue #17; no new interface needed.
+- Service creates toast, MainForm displays it per existing pattern.
+
+**When Toast Appears:**
+- Detection completes with Undecided{AllAlreadyLinked}
+- All candidates resolved and found linked
+- Toast lists every duplicate by issue number
+- No toast when Undecided{LowConfidence} (no linking action taken)
+
+### Grid Cell Rendering and Click Dispatch — Morpheus + Tank
+
+**Decision:** Grid renders state-dependent icons in corner region (reuses Issue #20 spinner corner).
+
+**Icon Set:**
+- Running: 8-frame spinner (Issue #20)
+- Undecided: `?` icon (new, cached in `GitHubIconRenderer`)
+- Error: `!` icon (new, cached in `GitHubIconRenderer`)
+- Idle/Success: no corner icon
+
+**Click Routing:**
+- Corner click on Undecided/Error: trigger dismiss dialog via `IMessageBox`
+- Corner click on other states: no-op (not clickable when not Undecided/Error)
+- Non-corner GitHub cell click: fall through to PR/issue strip handler (unchanged)
+
+**Tooltip Routing:**
+- Corner icon region: "Detecting... click to dismiss" (Undecided) or "Detection error" (Error)
+- PR/issue strip: existing PR/issue tooltip
+- Both sourced from `AiDetectionTooltips` helpers
+
+### Parser Candidate Retention — Tank inbox (decision in first commit)
+
+**Decision:** `AiResponseParser` preserves every valid candidate in input order instead of truncating to 3.
+
+**Rationale:** Partial-dedup tests require full candidate list to apply multiple links while also reporting duplicates.
+
+**Outcome:** `DetectionState.TopCandidates` projects top-3 for UI; full list available for service dedup/apply logic.
+
+### OutcomeKind.NoCandidatesVariant — Trinity inbox (decision in first commit)
+
+**Decision:** Use `DetectionState.OutcomeKind.NoCandidatesVariant` for all-already-linked dedup variant instead of adding a seventh `AiFailureClass`.
+
+**Rationale:** All-already-linked is not an error; it uses undecided visual path and has `UndecidedReason.AllAlreadyLinked`, preserving six failure classes from Issue #18.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

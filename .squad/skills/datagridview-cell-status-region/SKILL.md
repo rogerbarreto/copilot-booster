@@ -29,3 +29,5 @@ internal static Rectangle GetStatusIconRegion(Rectangle cellBounds)
 * Use one shared `System.Windows.Forms.Timer` for all animated cells.
 * Timer ticks occur on the UI thread. Invalidate only affected cells with `DataGridView.InvalidateCell(columnIndex, rowIndex)`.
 * Stop the timer when no visible row still needs animation.
+* Static status icons do not need timer ticks, but state change events must still invalidate the cell.
+* Click-to-dismiss status details should use injectable UI seams, then reset backing state so the same event path clears the icon.

@@ -177,7 +177,7 @@ public sealed class AiDetectFailureIntegrationTests
             _ = this._tracker;
             _ = this._visuals;
             await this.Service.StartDetectionAsync(this.SessionId).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-            Assert.Equal(DetectionStatus.Idle, this.Service.TryGetState(this.SessionId).Status);
+            Assert.Equal(DetectionStatus.Error, this.Service.TryGetState(this.SessionId).Status);
             Assert.Equal(this._repoRoot, Assert.Single(this.ProcessRunner.Calls).Cwd);
         }
 

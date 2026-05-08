@@ -65,3 +65,17 @@ Use when testing context-menu preconditions.
 3. Set `ExistingSessionsVisuals.AiDetectionService` to the real service and `GetSessionPaths` to the fixture cwd map.
 4. Assert `ToolStripMenuItem.Enabled` and `ToolTipText` exactly.
 5. For prior-tracking precedence, save `GitHubTrackingData.Owner/Repo`, start detection, and assert `FakeProcessRunner` prompt uses that owner/repo instead of the cwd remote.
+
+## Undecided and error icon dismiss pattern
+
+Use when testing the Issue #22 status corner flow.
+
+1. Put the test class in `[Collection(WindowEventHookCollection.Name)]` if it touches `SessionGridVisuals` status corner or WinForms timer behavior.
+2. Inject `SessionGridVisuals.MessageBox = new RecordingMessageBox()` where the fake implements `IMessageBox` and records `Title` plus `Body`.
+3. Trigger detection with `FakeProcessRunner`:
+   - low confidence candidate -> `DetectionStatus.Undecided`, `GetCornerIconForSession(sid)` non-null
+   - all candidates already linked -> `UndecidedReason.AllAlreadyLinked`
+   - nonzero exit -> `DetectionStatus.Error`, `FailureClass == ProcessFailure`
+4. Click the corner via `HandleGitHubCellClick(rowIndex, pointInsideStatusRegion, cellBounds)`.
+5. Assert recorded message body, `AiDetectionService.TryGetState(sid).Status == Idle`, and `GetCornerIconForSession(sid) == null`.
+6. Click outside `GetStatusIconRegion(cellBounds)` to assert `OnGitHubColumnClick` fallthrough remains intact for undecided and error states.

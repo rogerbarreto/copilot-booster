@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -92,6 +93,8 @@ internal class SessionGridVisuals
     }
 
     internal IConfirmDialog ConfirmDialog { get; set; } = new MessageBoxConfirmDialog();
+
+    internal IMessageBox MessageBox { get; set; } = new MessageBoxAdapter();
 
     /// <summary>
     /// When true, the grid cursor is locked to <see cref="Cursors.Cross"/> (pin mode).
@@ -808,8 +811,12 @@ internal class SessionGridVisuals
                     }
                     return;
                 case DetectionStatus.Undecided:
+                    this.MessageBox.Show("AI auto-detect", this.BuildUndecidedMessage(sessionId));
+                    this.AiDetectionService?.Reset(sessionId);
+                    return;
                 case DetectionStatus.Error:
-                    // TODO: slice #22
+                    this.MessageBox.Show("AI auto-detect", this.BuildErrorMessage(sessionId));
+                    this.AiDetectionService?.Reset(sessionId);
                     return;
                 default:
                     return;
@@ -822,6 +829,11 @@ internal class SessionGridVisuals
     internal bool IsSpinnerVisibleForSession(string sessionId)
     {
         return this.GetDetectionStatus(sessionId) == DetectionStatus.Running;
+    }
+
+    internal Bitmap? GetCornerIconForSession(string sessionId)
+    {
+        return this.GetCornerIconForStatus(this.GetDetectionStatus(sessionId));
     }
 
     /// <summary>
@@ -1020,13 +1032,7 @@ internal class SessionGridVisuals
             return;
         }
 
-        Bitmap? icon = status switch
-        {
-            DetectionStatus.Running => GitHubIconRenderer.GetSpinnerIcon(this._githubSpinnerFrameIndex, GitHubStatusIconSize),
-            DetectionStatus.Undecided => null, // TODO: slice #22
-            DetectionStatus.Error => null, // TODO: slice #22
-            _ => null
-        };
+        var icon = this.GetCornerIconForStatus(status);
 
         if (icon == null)
         {
@@ -1046,14 +1052,17 @@ internal class SessionGridVisuals
     {
         var cell = this._grid.Rows[rowIndex].Cells[colIndex];
         var cellBounds = this._grid.GetCellDisplayRectangle(colIndex, rowIndex, false);
-        var status = this.GetDetectionStatus(sessionId);
+        var state = this.GetDetectionState(sessionId);
+        var status = state.Status;
         if (status != DetectionStatus.Idle && GetStatusIconRegion(cellBounds).Contains(mousePos))
         {
             cell.ToolTipText = status switch
             {
                 DetectionStatus.Running => GitHubRunningTooltip,
-                DetectionStatus.Undecided => string.Empty, // TODO: slice #22
-                DetectionStatus.Error => string.Empty, // TODO: slice #22
+                DetectionStatus.Undecided => AiDetectionTooltips.ForUndecided(state.UndecidedReason ?? UndecidedReason.LowConfidence, state.TopCandidates),
+                DetectionStatus.Error => state.FailureClass.HasValue
+                    ? AiDetectionTooltips.ForFailure(state.FailureClass.Value, this.GetConfiguredTimeoutSeconds())
+                    : string.Empty,
                 _ => string.Empty
             };
             return;
@@ -1363,7 +1372,7 @@ internal class SessionGridVisuals
         var status = this.GetDetectionStatus(sessionId);
         if (GetStatusIconRegion(cellBounds).Contains(mousePos))
         {
-            return status == DetectionStatus.Running;
+            return status != DetectionStatus.Idle;
         }
 
         return !string.IsNullOrEmpty(this._grid.Rows[rowIndex].Cells[columnIndex].Value as string);
@@ -1390,6 +1399,55 @@ internal class SessionGridVisuals
     private DetectionStatus GetDetectionStatus(string sessionId)
     {
         return this.AiDetectionService?.TryGetState(sessionId).Status ?? DetectionStatus.Idle;
+    }
+
+    private DetectionState GetDetectionState(string sessionId)
+    {
+        return this.AiDetectionService?.TryGetState(sessionId) ?? DetectionState.Idle;
+    }
+
+    private Bitmap? GetCornerIconForStatus(DetectionStatus status)
+    {
+        return status switch
+        {
+            DetectionStatus.Running => GitHubIconRenderer.GetSpinnerIcon(this._githubSpinnerFrameIndex, GitHubStatusIconSize),
+            DetectionStatus.Undecided => GitHubIconRenderer.GetQuestionIcon(GitHubStatusIconSize),
+            DetectionStatus.Error => GitHubIconRenderer.GetWarningIcon(GitHubStatusIconSize),
+            _ => null
+        };
+    }
+
+    private string BuildUndecidedMessage(string sessionId)
+    {
+        var state = this.GetDetectionState(sessionId);
+        if (state.UndecidedReason == UndecidedReason.AllAlreadyLinked)
+        {
+            return AiDetectionTooltips.UndecidedAllAlreadyLinked;
+        }
+
+        var candidates = state.TopCandidates?.Take(3).ToArray() ?? [];
+        return candidates.Length == 0
+            ? AiDetectionTooltips.ForUndecided(UndecidedReason.LowConfidence, state.TopCandidates)
+            : string.Join(Environment.NewLine, candidates.Select(FormatCandidateLine));
+    }
+
+    private string BuildErrorMessage(string sessionId)
+    {
+        var state = this.GetDetectionState(sessionId);
+        return state.FailureClass.HasValue
+            ? AiDetectionTooltips.ForFailure(state.FailureClass.Value, this.GetConfiguredTimeoutSeconds())
+            : "Detection failed. See app log for details.";
+    }
+
+    private int GetConfiguredTimeoutSeconds()
+    {
+        return Math.Clamp(this._settings.AiDetection.TimeoutSeconds, 30, 1800);
+    }
+
+    private static string FormatCandidateLine(AiCandidate candidate)
+    {
+        var type = candidate.Type.Equals("pr", StringComparison.OrdinalIgnoreCase) ? "PR" : "Issue";
+        return $"{type} #{candidate.Number} (confidence: {candidate.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}) — {candidate.Reasoning}";
     }
 
     [ExcludeFromCodeCoverage]

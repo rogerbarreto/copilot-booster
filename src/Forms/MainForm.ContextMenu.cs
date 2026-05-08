@@ -265,6 +265,7 @@ internal partial class MainForm
             {
                 GitHubTrackingService.AddItem(sid, owner, repo, item);
                 this._githubPoller?.PollSessionNow(sid);
+                this.AiDetectionService.Reset(sid);
                 this.RequestRefresh(sessionId: sid, trackingChanged: true);
                 this._toast.Show($"✅ PR #{item.Number} added to session");
             }
@@ -278,6 +279,7 @@ internal partial class MainForm
             {
                 GitHubTrackingService.AddItem(sid, owner, repo, item);
                 this._githubPoller?.PollSessionNow(sid);
+                this.AiDetectionService.Reset(sid);
                 this.RequestRefresh(sessionId: sid, trackingChanged: true);
                 this._toast.Show($"✅ Issue #{item.Number} added to session");
             }

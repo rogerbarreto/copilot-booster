@@ -82,10 +82,7 @@ internal static class AiResponseParser
             }
 
             // Empty candidates is valid JSON. AiDetectionService classifies it as NoCandidates.
-            var candidatesResult = result.Count > 3
-                ? result.OrderByDescending(item => item.Candidate.Confidence).ThenBy(item => item.Index).Take(3).Select(item => item.Candidate).ToList()
-                : result.Select(item => item.Candidate).ToList();
-            return new AiParseResult.Success(candidatesResult);
+            return new AiParseResult.Success(result.Select(item => item.Candidate).ToList());
         }
     }
 

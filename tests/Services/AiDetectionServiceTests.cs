@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Tests.Services;
@@ -292,7 +293,7 @@ public sealed class AiDetectionServiceTests : IDisposable
         var service = await this.RunDetectionAsync(new ImmediateProcessRunner(processResult)).ConfigureAwait(false);
         using (service)
         {
-            Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+            Assert.Equal(DetectionStatus.Error, service.TryGetState(this._sessionId).Status);
             Assert.Equal(failureClass, service.TryGetState(this._sessionId).FailureClass);
         }
     }
@@ -387,6 +388,192 @@ public sealed class AiDetectionServiceTests : IDisposable
         Assert.All(sessionIds, sessionId => Assert.Null(service.TryGetState(sessionId).FailureClass));
     }
 
+    [Fact]
+    public async Task StartDetectionAsync_BelowThresholdCandidate_TransitionsToUndecidedLowConfidenceAsync()
+    {
+        var toasts = new List<string>();
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = await this.RunDetectionAsync(new ProcessResult(0, CandidatesJson(("pr", 42, 0.3, "weak match")), "", false), toasts, transitions).ConfigureAwait(false);
+
+        var state = service.TryGetState(this._sessionId);
+        Assert.Equal(DetectionStatus.Undecided, state.Status);
+        Assert.Equal(UndecidedReason.LowConfidence, state.UndecidedReason);
+        var candidate = Assert.Single(state.TopCandidates!);
+        Assert.Equal(42, candidate.Number);
+        Assert.Empty(GitHubTrackingService.Load(this._sessionId)!.Items);
+        Assert.Empty(toasts);
+        Assert.Equal([(DetectionStatus.Idle, DetectionStatus.Running), (DetectionStatus.Running, DetectionStatus.Undecided)], transitions);
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_MultipleBelowThresholdCandidates_RetainsTopThreeByConfidenceAsync()
+    {
+        using var service = await this.RunDetectionAsync(new ProcessResult(0, CandidatesJson(
+            ("pr", 1, 0.1, "one"),
+            ("pr", 2, 0.4, "two"),
+            ("pr", 3, 0.3, "three"),
+            ("pr", 4, 0.2, "four"),
+            ("pr", 5, 0.45, "five")), "", false)).ConfigureAwait(false);
+
+        var state = service.TryGetState(this._sessionId);
+        Assert.Equal(DetectionStatus.Undecided, state.Status);
+        Assert.Equal(UndecidedReason.LowConfidence, state.UndecidedReason);
+        Assert.Equal([0.45, 0.4, 0.3], state.TopCandidates!.Select(c => c.Confidence));
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_AllAboveThresholdCandidatesAlreadyLinked_TransitionsToUndecidedAllAlreadyLinkedAsync()
+    {
+        var toasts = new List<string>();
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        GitHubTrackingService.Save(this._sessionId, new GitHubTrackingData { Owner = "rogerbarreto", Repo = "copilot-booster", Items = [Tracked("pr", 42)] });
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, CandidatesJson(("pr", 42, 0.9, "already linked")), "", false)), _ => repoRoot, toasts.Add, null, this._sessionRoot);
+
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        var state = service.TryGetState(this._sessionId);
+        Assert.Equal(DetectionStatus.Undecided, state.Status);
+        Assert.Equal(UndecidedReason.AllAlreadyLinked, state.UndecidedReason);
+        Assert.Single(state.TopCandidates!);
+        Assert.Single(GitHubTrackingService.Load(this._sessionId)!.Items);
+        Assert.Empty(toasts);
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_MixedNewAndDuplicateCandidates_AddsNewAndShowsPartialDedupToastAsync()
+    {
+        var toasts = new List<string>();
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        GitHubTrackingService.Save(this._sessionId, new GitHubTrackingData { Owner = "rogerbarreto", Repo = "copilot-booster", Items = [Tracked("issue", 99)] });
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, CandidatesJson(("pr", 123, 0.9, "new"), ("issue", 99, 0.85, "duplicate")), "", false)), _ => repoRoot, toasts.Add, null, this._sessionRoot);
+
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        var items = GitHubTrackingService.Load(this._sessionId)!.Items;
+        Assert.Contains(items, item => item.Type == "pr" && item.Number == 123);
+        Assert.Single(items, item => item.Type == "issue" && item.Number == 99);
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+        Assert.Equal("✅ AI added PR #123 (already linked: Issue #99)", Assert.Single(toasts));
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_MultipleNewAndDuplicateCandidates_AddsNewAndShowsPartialDedupToastAsync()
+    {
+        var toasts = new List<string>();
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        GitHubTrackingService.Save(this._sessionId, new GitHubTrackingData { Owner = "rogerbarreto", Repo = "copilot-booster", Items = [Tracked("pr", 42), Tracked("issue", 99)] });
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, CandidatesJson(("pr", 123, 0.9, "new pr"), ("pr", 42, 0.85, "dup pr"), ("issue", 456, 0.8, "new issue"), ("issue", 99, 0.75, "dup issue")), "", false)), _ => repoRoot, toasts.Add, null, this._sessionRoot);
+
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        var items = GitHubTrackingService.Load(this._sessionId)!.Items;
+        Assert.Contains(items, item => item.Type == "pr" && item.Number == 123);
+        Assert.Contains(items, item => item.Type == "issue" && item.Number == 456);
+        Assert.Single(items, item => item.Type == "pr" && item.Number == 42);
+        Assert.Single(items, item => item.Type == "issue" && item.Number == 99);
+        Assert.Equal("✅ AI added PR #123 + Issue #456 (already linked: PR #42 + Issue #99)", Assert.Single(toasts));
+    }
+
+    [Fact]
+    public async Task StartDetectionAsync_AllCandidatesNew_KeepsExistingSuccessToastAsync()
+    {
+        var toasts = new List<string>();
+        using var service = await this.RunDetectionAsync(new ProcessResult(0, CandidatesJson(("pr", 1, 0.9, "new pr"), ("issue", 2, 0.85, "new issue")), "", false), toasts).ConfigureAwait(false);
+
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+        Assert.Equal("✅ AI added PR #1 + Issue #2 to session", Assert.Single(toasts));
+    }
+
+    [Theory]
+    [MemberData(nameof(FailureClassificationRows))]
+    public async Task StartDetectionAsync_FailureClass_TransitionsToErrorAsync(int exitCode, string stdout, string stderr, bool wasKilled, object expectedFailureClass)
+    {
+        var failureClass = expectedFailureClass is string failureClassName
+            ? Enum.Parse<AiFailureClass>(failureClassName)
+            : Assert.IsType<AiFailureClass>(expectedFailureClass);
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = await this.RunDetectionAsync(new ProcessResult(exitCode, stdout, stderr, wasKilled), null, transitions).ConfigureAwait(false);
+
+        Assert.Equal(DetectionStatus.Error, service.TryGetState(this._sessionId).Status);
+        Assert.Equal(failureClass, service.TryGetState(this._sessionId).FailureClass);
+        Assert.Equal([(DetectionStatus.Idle, DetectionStatus.Running), (DetectionStatus.Running, DetectionStatus.Error)], transitions);
+    }
+
+    [Fact]
+    public async Task Reset_UndecidedState_ClearsToIdleAndRaisesEventAsync()
+    {
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = await this.RunDetectionAsync(new ProcessResult(0, CandidatesJson(("pr", 42, 0.3, "weak")), "", false), null, transitions).ConfigureAwait(false);
+        transitions.Clear();
+
+        service.Reset(this._sessionId);
+
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+        Assert.Equal([(DetectionStatus.Undecided, DetectionStatus.Idle)], transitions);
+    }
+
+    [Fact]
+    public async Task Reset_ErrorState_ClearsToIdleAndRaisesEventAsync()
+    {
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = await this.RunDetectionAsync(new ProcessResult(1, "", "failed", false), null, transitions).ConfigureAwait(false);
+        transitions.Clear();
+
+        service.Reset(this._sessionId);
+
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+        Assert.Equal([(DetectionStatus.Error, DetectionStatus.Idle)], transitions);
+    }
+
+    [Fact]
+    public void Reset_IdleState_DoesNotRaiseEvent()
+    {
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => null, _ => { }, null, this._sessionRoot);
+        service.DetectionStateChanged += (_, oldStatus, newStatus) => transitions.Add((oldStatus, newStatus));
+
+        service.Reset(this._sessionId);
+
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+        Assert.Empty(transitions);
+    }
+
+    [Fact]
+    public async Task Reset_RunningState_DoesNotCancelOrRaiseResetEventAsync()
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        var runner = new ControlledProcessRunner();
+        var transitions = new List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>();
+        using var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot);
+        service.DetectionStateChanged += (_, oldStatus, newStatus) => transitions.Add((oldStatus, newStatus));
+
+        var detectionTask = service.StartDetectionAsync(this._sessionId);
+        var call = await runner.WaitForCallAsync(0).ConfigureAwait(false);
+        service.Reset(this._sessionId);
+
+        Assert.Equal(DetectionStatus.Running, service.TryGetState(this._sessionId).Status);
+        Assert.False(call.CancellationToken.IsCancellationRequested);
+        Assert.Equal([(DetectionStatus.Idle, DetectionStatus.Running)], transitions);
+        service.CancelDetection(this._sessionId);
+        call.Complete(new ProcessResult(-1, "", "", true));
+        await detectionTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    [Fact]
+    public async Task ManualAddPrSimulation_ResetsUndecidedStateForSessionAsync()
+    {
+        using var service = await this.RunDetectionAsync(new ProcessResult(0, CandidatesJson(("pr", 42, 0.3, "weak")), "", false)).ConfigureAwait(false);
+        Assert.Equal(DetectionStatus.Undecided, service.TryGetState(this._sessionId).Status);
+
+        GitHubTrackingService.AddItem(this._sessionId, "rogerbarreto", "copilot-booster", Tracked("pr", 42));
+        service.Reset(this._sessionId);
+
+        Assert.Equal(DetectionStatus.Idle, service.TryGetState(this._sessionId).Status);
+    }
     public static IEnumerable<object[]> FailureClassificationRows()
     {
         yield return [-1, "", "", true, AiFailureClass.Timeout.ToString()];
@@ -414,6 +601,41 @@ public sealed class AiDetectionServiceTests : IDisposable
         return service;
     }
 
+    private Task<AiDetectionService> RunDetectionAsync(ProcessResult result, List<string>? toasts = null, List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>? transitions = null)
+    {
+        return this.RunDetectionAsync(new ImmediateProcessRunner(result), toasts, transitions);
+    }
+
+    private async Task<AiDetectionService> RunDetectionAsync(IProcessRunner runner, List<string>? toasts, List<(DetectionStatus OldStatus, DetectionStatus NewStatus)>? transitions)
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        Action<string> toastSink = toasts == null ? _ => { } : toasts.Add;
+        var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, toastSink, null, this._sessionRoot);
+        if (transitions != null)
+        {
+            service.DetectionStateChanged += (sid, oldStatus, newStatus) =>
+            {
+                if (sid == this._sessionId)
+                {
+                    transitions.Add((oldStatus, newStatus));
+                }
+            };
+        }
+
+        await service.StartDetectionAsync(this._sessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+        return service;
+    }
+
+    private static GitHubTrackedItem Tracked(string type, int number)
+    {
+        return new GitHubTrackedItem { Type = type, Number = number, State = "open", Title = $"{type} {number}" };
+    }
+
+    private static string CandidatesJson(params (string Type, int Number, double Confidence, string Reasoning)[] candidates)
+    {
+        return "{\"candidates\":[" + string.Join(",", candidates.Select(candidate => $"{{\"type\":\"{candidate.Type}\",\"number\":{candidate.Number},\"confidence\":{candidate.Confidence.ToString(CultureInfo.InvariantCulture)},\"reasoning\":\"{candidate.Reasoning}\"}}")) + "]}";
+    }
     private Task WriteSessionAsync(string repoRoot)
     {
         return this.WriteSessionAsync(this._sessionId, repoRoot);
@@ -458,9 +680,18 @@ public sealed class AiDetectionServiceTests : IDisposable
     {
         return new GitHubApiService(processRunner: (command, args) =>
         {
-            if (command == "gh" && args == "api repos/rogerbarreto/copilot-booster/pulls/42")
+            const string PullPrefix = "api repos/rogerbarreto/copilot-booster/pulls/";
+            const string IssuePrefix = "api repos/rogerbarreto/copilot-booster/issues/";
+            if (command == "gh" && args != null && args.StartsWith(PullPrefix, StringComparison.Ordinal))
             {
-                return Task.FromResult((0, "{\"number\":42,\"title\":\"Test PR\",\"state\":\"open\",\"draft\":false,\"merged\":false,\"user\":{\"login\":\"tester\"},\"head\":{\"ref\":\"feature/test\"},\"updated_at\":\"2026-05-08T00:00:00Z\"}", ""));
+                var number = int.Parse(args[PullPrefix.Length..], CultureInfo.InvariantCulture);
+                return Task.FromResult((0, $"{{\"number\":{number},\"title\":\"Test PR {number}\",\"state\":\"open\",\"draft\":false,\"merged\":false,\"user\":{{\"login\":\"tester\"}},\"head\":{{\"ref\":\"feature/test\"}},\"updated_at\":\"2026-05-08T00:00:00Z\"}}", ""));
+            }
+
+            if (command == "gh" && args != null && args.StartsWith(IssuePrefix, StringComparison.Ordinal))
+            {
+                var number = int.Parse(args[IssuePrefix.Length..], CultureInfo.InvariantCulture);
+                return Task.FromResult((0, $"{{\"number\":{number},\"title\":\"Test Issue {number}\",\"state\":\"open\",\"state_reason\":null,\"user\":{{\"login\":\"tester\"}},\"labels\":[],\"updated_at\":\"2026-05-08T00:00:00Z\"}}", ""));
             }
 
             return Task.FromResult((1, "", $"Unexpected command: {command} {args}"));

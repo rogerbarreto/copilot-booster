@@ -88,3 +88,10 @@
 * AiDetectionService constructor now accepts `Func<AiDetectionSettings> getSettings` instead of holding settings. This enables per-detection-run configuration without settings-changed-mid-detection races.
 * Func is called at detection start to capture point-in-time snapshot. If user changes settings while detection runs, next detection sees new values; in-flight detections unaffected.
 * SettingsForm passes `copilotProbe.InvalidateCache()` hook to `OnCopilotPathChanged` event path, ensuring cache is fresh when settings are saved.
+### 2026-05-08 Issue #22 AI detection cell undecided and error UI
+
+* Added cached `GitHubIconRenderer.GetQuestionIcon()` and `GetWarningIcon()` for the `16x16` GitHub cell corner status region. `?` uses `PendingYellow`; warning triangle uses `ClosedRed`.
+* Added `IMessageBox` plus production `MessageBoxAdapter` in `src/Services/IMessageBox.cs`. `MainForm` owns the production instance and passes it to `SessionGridVisuals` beside `IConfirmDialog`.
+* `SessionGridVisuals.GetCornerIconForSession(sid)` returns the current rendered corner bitmap for Tank without pixel comparing cells.
+* Corner click routing now keeps Running cancel behavior, shows undecided or error details through `IMessageBox`, then calls `_aiDetection.Reset(sid)` so `DetectionStateChanged` clears the icon.
+* Tooltip routing now calls `AiDetectionTooltips.ForUndecided(...)` and `ForFailure(...)`; only Running rows keep the shared animation timer active.

@@ -46,6 +46,7 @@ internal partial class MainForm : Form
     private readonly GitHubApiService _githubApi;
     private readonly GitHubPollingService _githubPoller;
     private readonly IConfirmDialog _confirmDialog;
+    private readonly IMessageBox _messageBox;
 
     // Window pin mode state
     private bool _pinMode;
@@ -125,6 +126,7 @@ internal partial class MainForm : Form
         this._githubPoller = new GitHubPollingService(this._githubApi,
             () => this._cachedSessions.Select(s => s.Id).ToList());
         this._confirmDialog = new MessageBoxConfirmDialog(this);
+        this._messageBox = new MessageBoxAdapter(this);
         this.CopilotProbe = new CopilotProbe(() => Program._settings.AiDetection.CopilotPath);
         this.AiDetectionService = new AiDetectionService(
             this._githubApi,
@@ -216,6 +218,7 @@ internal partial class MainForm : Form
         };
         this._sessionsVisuals.GridVisuals.AiDetectionService = this.AiDetectionService;
         this._sessionsVisuals.GridVisuals.ConfirmDialog = this._confirmDialog;
+        this._sessionsVisuals.GridVisuals.MessageBox = this._messageBox;
         this._toast = ToastPanel.AttachTo(this._sessionsPanel);
         this.WireGitHubPollingEvents();
         this.WireAiDetectionEvents();
