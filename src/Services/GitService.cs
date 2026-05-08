@@ -17,56 +17,13 @@ internal enum GitHubRepoResolution
     NonGitHubRemote
 }
 
-internal readonly record struct GitHubRepoResult(GitHubRepoResolution Status, string? Owner, string? Repo);
+internal readonly record struct GitHubRepoResult(GitHubRepoResolution Status, string? Owner = null, string? Repo = null);
 
 /// <summary>
 /// Provides Git-related operations such as branch listing, worktree creation, and repository detection.
 /// </summary>
 internal static partial class GitService
 {
-    internal static GitHubRepoResult ResolveGitHubRepo(string cwd)
-    {
-        if (string.IsNullOrWhiteSpace(cwd) || !Directory.Exists(cwd))
-        {
-            return new GitHubRepoResult(GitHubRepoResolution.NotAGitRepo);
-        }
-
-        var (insideExitCode, insideStdout, _) = RunGit(cwd, "rev-parse --is-inside-work-tree");
-        if (insideExitCode != 0 || !insideStdout.Trim().Equals("true", StringComparison.OrdinalIgnoreCase))
-        {
-            return new GitHubRepoResult(GitHubRepoResolution.NotAGitRepo);
-        }
-
-        var sawRemote = false;
-        foreach (var remoteName in new[] { "upstream", "origin" })
-        {
-            var remoteUrl = GetRemoteUrl(cwd, remoteName);
-            if (string.IsNullOrWhiteSpace(remoteUrl))
-            {
-                continue;
-            }
-
-            sawRemote = true;
-            var parsed = ParseGitHubOwnerRepo(remoteUrl);
-            if (parsed != null)
-            {
-                return new GitHubRepoResult(GitHubRepoResolution.Resolved, parsed.Value.owner, parsed.Value.repo);
-            }
-        }
-
-        return sawRemote
-            ? new GitHubRepoResult(GitHubRepoResolution.NonGitHubRemote)
-            : new GitHubRepoResult(GitHubRepoResolution.NoRemote);
-    }
-
-    internal static (string owner, string repo)? TryResolveGitHubRepo(string cwd)
-    {
-        var result = ResolveGitHubRepo(cwd);
-        return result.Status == GitHubRepoResolution.Resolved
-            ? (result.Owner!, result.Repo!)
-            : null;
-    }
-
     /// <summary>
     /// Returns <c>true</c> if the given path is inside a Git repository.
     /// </summary>
@@ -599,38 +556,165 @@ internal static partial class GitService
     /// <returns>A tuple of (owner, repo), or <c>null</c> if parsing fails.</returns>
     internal static (string owner, string repo)? ParseGitHubOwnerRepo(string remoteUrl)
     {
+        return TryParseGitHubRemote(remoteUrl) is { } repo ? (repo.Owner, repo.Repo) : null;
+    }
+
+    private static GitHubRepoResult? TryResolveRemote(string cwd, string remoteName)
+    {
+        var (exitCode, stdout, _) = RunGitAtCwd(cwd, ["remote", "get-url", remoteName]);
+        if (exitCode != 0)
+        {
+            return null;
+        }
+
+        var remoteUrl = stdout.Trim();
+        if (TryParseGitHubRemote(remoteUrl) is not { } repo)
+        {
+            return new GitHubRepoResult(GitHubRepoResolution.NonGitHubRemote, null, null);
+        }
+
+        var parent = TryResolveForkParent(repo.Owner, repo.Repo);
+        return new GitHubRepoResult(GitHubRepoResolution.Resolved, parent.Owner, parent.Repo);
+    }
+
+    private static (string Owner, string Repo)? TryParseGitHubRemote(string remoteUrl)
+    {
         var url = remoteUrl.Trim().TrimEnd('/');
         if (url.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
         {
             url = url[..^4];
         }
 
-        if (url.Contains("github.com", StringComparison.OrdinalIgnoreCase))
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
-            var httpsIdx = url.IndexOf("github.com/", StringComparison.OrdinalIgnoreCase);
-            if (httpsIdx >= 0)
+            if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
             {
-                var path = url[(httpsIdx + "github.com/".Length)..];
-                var parts = path.Split('/');
-                if (parts.Length >= 2)
-                {
-                    return (parts[0], parts[1]);
-                }
+                return null;
             }
 
-            var sshIdx = url.IndexOf("github.com:", StringComparison.OrdinalIgnoreCase);
-            if (sshIdx >= 0)
-            {
-                var path = url[(sshIdx + "github.com:".Length)..];
-                var parts = path.Split('/');
-                if (parts.Length >= 2)
-                {
-                    return (parts[0], parts[1]);
-                }
-            }
+            return uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) || uri.Scheme.Equals("ssh", StringComparison.OrdinalIgnoreCase)
+                ? ParseOwnerRepoPath(uri.AbsolutePath.Trim('/'))
+                : null;
         }
 
-        return null;
+        var match = ScpGitHubRemoteRegex().Match(url);
+        if (!match.Success || !match.Groups["host"].Value.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return (match.Groups["owner"].Value, StripGitSuffix(match.Groups["repo"].Value));
+    }
+
+    private static (string Owner, string Repo)? ParseOwnerRepoPath(string path)
+    {
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            return null;
+        }
+
+        return (parts[0], StripGitSuffix(parts[1]));
+    }
+
+    private static string StripGitSuffix(string repo)
+    {
+        return repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? repo[..^4] : repo;
+    }
+
+    private static (string Owner, string Repo) TryResolveForkParent(string owner, string repo)
+    {
+        try
+        {
+            var ghPath = Environment.GetEnvironmentVariable("GH_PATH");
+            if (string.IsNullOrWhiteSpace(ghPath))
+            {
+                ghPath = "gh";
+            }
+
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = ghPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            process.StartInfo.ArgumentList.Add("repo");
+            process.StartInfo.ArgumentList.Add("view");
+            process.StartInfo.ArgumentList.Add($"{owner}/{repo}");
+            process.StartInfo.ArgumentList.Add("--json");
+            process.StartInfo.ArgumentList.Add("parent");
+            process.StartInfo.ArgumentList.Add("--jq");
+            process.StartInfo.ArgumentList.Add(".parent.nameWithOwner");
+
+            process.Start();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(5_000))
+            {
+                try { process.Kill(true); } catch (Exception ex) { Program.Logger.LogDebug("Failed to kill gh process: {Error}", ex.Message); }
+                return (owner, repo);
+            }
+
+            var parent = stdoutTask.GetAwaiter().GetResult().Trim();
+            _ = stderrTask.GetAwaiter().GetResult();
+            if (process.ExitCode != 0 || string.IsNullOrWhiteSpace(parent) || parent.Equals("null", StringComparison.OrdinalIgnoreCase))
+            {
+                return (owner, repo);
+            }
+
+            var parts = parent.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length == 2 ? (parts[0], parts[1]) : (owner, repo);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to resolve GitHub fork parent for {Owner}/{Repo}: {Error}", owner, repo, ex.Message);
+            return (owner, repo);
+        }
+    }
+
+    private static (int exitCode, string stdout, string stderr) RunGitAtCwd(string cwd, IReadOnlyList<string> args, int timeoutMs = 10_000)
+    {
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            process.StartInfo.ArgumentList.Add("-C");
+            process.StartInfo.ArgumentList.Add(cwd);
+            foreach (var arg in args)
+            {
+                process.StartInfo.ArgumentList.Add(arg);
+            }
+
+            process.Start();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit(timeoutMs))
+            {
+                try { process.Kill(true); } catch (Exception ex) { Program.Logger.LogDebug("Failed to kill git process: {Error}", ex.Message); }
+                return (-1, "", "Git command timed out.");
+            }
+
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
+
+            return (process.ExitCode, stdout, stderr);
+        }
+        catch (Exception ex)
+        {
+            return (-1, "", ex.Message);
+        }
     }
 
     /// <summary>
@@ -744,4 +828,7 @@ internal static partial class GitService
 
     [GeneratedRegex(@"-{2,}")]
     private static partial Regex ConsecutiveHyphensRegex();
+
+    [GeneratedRegex("^git@(?<host>[^:]+):(?<owner>[^/]+)/(?<repo>[^/]+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex ScpGitHubRemoteRegex();
 }

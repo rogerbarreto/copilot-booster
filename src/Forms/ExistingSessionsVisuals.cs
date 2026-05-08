@@ -210,6 +210,8 @@ internal class ExistingSessionsVisuals
     /// </summary>
     internal Func<string, (string? cwd, string? gitRoot)>? GetSessionPaths;
 
+    internal AiDetectionService? AiDetectionService { get; set; }
+
     internal ExistingSessionsVisuals(Control parentControl, ActiveStatusTracker activeTracker, LauncherSettings? settings = null)
     {
         this._settings = settings ?? Program._settings;
@@ -995,7 +997,7 @@ internal class ExistingSessionsVisuals
         // Start loading Teams icon asynchronously
         _ = this.LoadTeamsIconAsync();
 
-        var gridContextMenu = new ContextMenuStrip();
+        var gridContextMenu = new ContextMenuStrip { ShowItemToolTips = true };
         var shell32 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shell32.dll");
         var imageres = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "imageres.dll");
 
@@ -1496,16 +1498,36 @@ internal class ExistingSessionsVisuals
     internal ToolStripMenuItem BuildGitHubAiMenuItem(string sid)
     {
         var menuAi = new ToolStripMenuItem("AI");
-        var autoDetect = new ToolStripMenuItem("Auto Detect GitHub Issue and PR")
-        {
-            Enabled = true
-        };
-
-        // TODO: gating per slice #19 / #21
-        autoDetect.Click += (_, _) => this.OnAiAutoDetect?.Invoke(sid);
-        menuAi.DropDownItems.Add(autoDetect);
+        var cwd = this.GetSessionPaths?.Invoke(sid).cwd;
+        menuAi.DropDown.ShowItemToolTips = true;
+        menuAi.DropDownItems.Add(this.GetEvaluatedAiMenuItem(sid, cwd));
 
         return menuAi;
+    }
+
+    internal ToolStripMenuItem GetEvaluatedAiMenuItem(string sid, string? cwd)
+    {
+        var state = this.EvaluateAiMenuState(sid, cwd);
+        var autoDetect = new ToolStripMenuItem("Auto Detect GitHub Issue and PR")
+        {
+            Enabled = state == AiMenuState.Enabled,
+            ToolTipText = AiDetectionTooltips.For(state)
+        };
+
+        autoDetect.Click += (_, _) => this.OnAiAutoDetect?.Invoke(sid);
+        return autoDetect;
+    }
+
+    private AiMenuState EvaluateAiMenuState(string sid, string? cwd)
+    {
+        try
+        {
+            return this.AiDetectionService?.EvaluateMenuState(sid, cwd ?? "") ?? AiMenuState.Enabled;
+        }
+        catch
+        {
+            return AiMenuState.Unavailable;
+        }
     }
 
     /// <summary>

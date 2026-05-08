@@ -14,6 +14,69 @@ public sealed class AiDetectionServiceTests : IDisposable
     }
 
     [Fact]
+    public void EvaluateMenuState_PriorTrackingDataExists_ReturnsEnabled()
+    {
+        GitHubTrackingService.Save(this._sessionId, new GitHubTrackingData { Owner = "A", Repo = "B" });
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => null, _ => { }, null, this._sessionRoot);
+
+        var result = service.EvaluateMenuState(this._sessionId, Path.Combine(this._sessionRoot, "missing"));
+
+        Assert.Equal(AiMenuState.Enabled, result);
+    }
+
+    [Fact]
+    public void EvaluateMenuState_NoPriorTrackingAndGitHubOrigin_ReturnsEnabled()
+    {
+        var repoPath = this.CreateGitRepo("origin", "https://github.com/foo/bar.git");
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => repoPath, _ => { }, null, this._sessionRoot);
+
+        var result = service.EvaluateMenuState(this._sessionId, repoPath);
+
+        Assert.Equal(AiMenuState.Enabled, result);
+    }
+
+    [Fact]
+    public void EvaluateMenuState_NoPriorTrackingAndNoGitRepo_ReturnsNoRepo()
+    {
+        var folder = Path.Combine(this._sessionRoot, "plain");
+        Directory.CreateDirectory(folder);
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => folder, _ => { }, null, this._sessionRoot);
+
+        var result = service.EvaluateMenuState(this._sessionId, folder);
+
+        Assert.Equal(AiMenuState.NoRepo, result);
+    }
+
+    [Fact]
+    public void EvaluateMenuState_NoPriorTrackingAndGitLabOrigin_ReturnsNonGitHubRemote()
+    {
+        var repoPath = this.CreateGitRepo("origin", "https://gitlab.com/foo/bar.git");
+        using var service = new AiDetectionService(CreateFakeApi(), new ImmediateProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false)), _ => repoPath, _ => { }, null, this._sessionRoot);
+
+        var result = service.EvaluateMenuState(this._sessionId, repoPath);
+
+        Assert.Equal(AiMenuState.NonGitHubRemote, result);
+    }
+
+    [Fact]
+    public async Task EvaluateMenuState_DetectionRunning_ReturnsDetectionInFlightAsync()
+    {
+        var repoRoot = FindRepoRoot();
+        await this.WriteSessionAsync(repoRoot).ConfigureAwait(false);
+        var runner = new BlockingProcessRunner(new ProcessResult(0, "{\"candidates\":[]}", "", false));
+        using var service = new AiDetectionService(CreateFakeApi(), runner, _ => repoRoot, _ => { }, null, this._sessionRoot);
+
+        var detectionTask = service.StartDetectionAsync(this._sessionId);
+        await runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+        var result = service.EvaluateMenuState(this._sessionId, Path.Combine(this._sessionRoot, "missing"));
+        service.CancelDetection(this._sessionId);
+        runner.Release();
+        await detectionTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.Equal(AiMenuState.DetectionInFlight, result);
+    }
+
+    [Fact]
     public async Task StartDetectionAsync_SuccessfulRun_TransitionsIdleRunningIdleAsync()
     {
         var repoRoot = FindRepoRoot();
@@ -113,6 +176,33 @@ public sealed class AiDetectionServiceTests : IDisposable
         Directory.CreateDirectory(sessionDir);
         await File.WriteAllTextAsync(Path.Combine(sessionDir, "workspace.yaml"), $"id: {this._sessionId}\ncwd: {repoRoot}\nsummary: test\n", TestContext.Current.CancellationToken).ConfigureAwait(false);
         GitHubTrackingService.Save(this._sessionId, new GitHubTrackingData { Owner = "rogerbarreto", Repo = "copilot-booster" });
+    }
+
+    private string CreateGitRepo(string remoteName, string remoteUrl)
+    {
+        var repoPath = Path.Combine(this._sessionRoot, Path.GetRandomFileName());
+        Directory.CreateDirectory(repoPath);
+
+        RunGitCmd(repoPath, "init -q");
+        RunGitCmd(repoPath, $"remote add {remoteName} {remoteUrl}");
+
+        return repoPath;
+    }
+
+    private static void RunGitCmd(string workDir, string args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = System.Diagnostics.Process.Start(psi)!;
+        proc.WaitForExit(10_000);
     }
 
     private static GitHubApiService CreateFakeApi()

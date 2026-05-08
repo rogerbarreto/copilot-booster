@@ -2,6 +2,7 @@
 
 namespace CopilotBooster.IntegrationTests;
 
+[Collection(WindowEventHookCollection.Name)]
 public class TerminalTitleDetectionIntegrationTests(ITestOutputHelper output)
 {
     [StaFact]

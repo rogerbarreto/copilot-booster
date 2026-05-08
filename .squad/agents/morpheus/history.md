@@ -10,6 +10,14 @@
 
 <!-- Append learnings below -->
 
+### 2026-05-08 Issue #19 AI context menu gating
+
+* Wired `ExistingSessionsVisuals.BuildGitHubAiMenuItem` to render the AI leaf through `GetEvaluatedAiMenuItem(sid, cwd)` so the item calls `AiDetectionService.EvaluateMenuState(sid, cwd)` each time the row context menu is rebuilt.
+* Added `GetEvaluatedAiMenuItem(string sid, string? cwd)` as Tank's internal test seam. It returns the configured leaf item with `Enabled` and `ToolTipText` already applied.
+* Kept the existing `ContextMenuStrip.Opening` build pattern rather than adding `DropDownOpening`, because the GitHub submenu is rebuilt on each right click.
+* Enabled `ShowItemToolTips` on the row context menu and AI submenu dropdown. The enabled state maps to an empty tooltip through `AiDetectionTooltips.For(state)`.
+* Wrapped menu state evaluation defensively. Unexpected exceptions render the leaf disabled with `AI auto-detect unavailable`.
+
 ### 2026-05-08 Issue #17 AI context menu wiring
 
 * `ExistingSessionsVisuals.BuildGridContextMenu()` owns the session row context menu. The GitHub group parent is the local `ToolStripMenuItem menuGitHub`, populated inside `gridContextMenu.Opening`.

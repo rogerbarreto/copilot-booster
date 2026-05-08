@@ -55,3 +55,13 @@ Use when testing strict AI detection failures without UI surfacing.
 5. Assert tracking items stay empty, toast list stays empty, `TryGetState(sid).FailureClass` matches, and a captured log entry contains the enum name at the expected level.
 
 Expected levels: `Timeout` and `NoCandidates` are `Warning`; `MalformedJson`, `SchemaViolation`, `ProcessSpawn`, and `ProcessFailure` are `Error`.
+
+## Menu gating E2E pattern
+
+Use when testing context-menu preconditions.
+
+1. Create fixture cwd values as temp git repos or plain folders.
+2. Use `ExistingSessionsVisuals.GetEvaluatedAiMenuItem(sid, cwd)` for the AI leaf item.
+3. Set `ExistingSessionsVisuals.AiDetectionService` to the real service and `GetSessionPaths` to the fixture cwd map.
+4. Assert `ToolStripMenuItem.Enabled` and `ToolTipText` exactly.
+5. For prior-tracking precedence, save `GitHubTrackingData.Owner/Repo`, start detection, and assert `FakeProcessRunner` prompt uses that owner/repo instead of the cwd remote.

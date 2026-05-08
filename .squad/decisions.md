@@ -318,6 +318,71 @@ NoCandidates
 
 ---
 
+## Issue #19: Repo Resolution + AI Menu Preconditions Gating
+
+**Date:** 2026-05-08  
+**Status:** Complete  
+**Contributors:** Trinity (Services Dev), Morpheus (UI Dev), Tank (Tester), Coordinator (test stabilization)  
+
+### Fork Parent Resolver via GH_PATH Environment — Trinity
+
+**Decision:** Use `GH_PATH` environment variable override for fork parent lookup instead of adding an `IForkResolver` interface.
+
+**Rationale:** Issue #19 needs fork parent detection via `gh repo view owner/repo --json parent --jq .parent.nameWithOwner`. The lookup must be best-effort, bounded to 5 seconds, and must not throw from repo resolution.
+
+**Contract:**
+- Production uses `gh` from PATH
+- Tests can set `GH_PATH` to a fake executable
+- If `gh` fails, times out, or returns no parent, resolution falls back to the remote repo
+- No new dependency or service interface is needed
+
+**Outcome:** GitService.TryResolveGitHubRepo implements full HTTPS/SSH/fork-parent chain with timeout protection.
+
+### Window Event Hook Collection Serialization — Tank
+
+**Decision:** Any integration test that starts `WindowEventHookService` belongs in `WindowEventHookCollection`.
+
+**Why:** WinEvent hooks and real window title changes race when multiple classes run in parallel. The all-green integration directive needs these tests serialized, not retried.
+
+**Applied To:**
+- `TerminalTitleDetectionIntegrationTests`
+- `WindowEventHookIntegrationTests`
+- `TimerRefreshAfterFormCloseTests`
+
+**Side Effect Discovered:** Collection-grouping changes shifted parallel test scheduling and exposed latent race in `IdeTrackingIntegrationTests.E2E_IdeWithFolderPath_ProcessKilled_NoDestroyEvent_GridMustClear`. Coordinator added collection attribute to serialize IDE tests alongside window-hook tests, resolving the race.
+
+**Outcome:** All 118 integration tests green (10 LocalOnly skipped per policy). No races or flakes.
+
+### AiMenuState Enum and Preconditions Gating — Trinity
+
+**Decision:** `AiMenuState` enum gates menu enable/disable + tooltip messaging for AI auto-detect menu item.
+
+```csharp
+enum AiMenuState
+{
+    Unavailable,        // Service error or not initialized
+    NoSession,          // No active session
+    RepoNotFound,       // Repo resolution failed
+    TelemetryBlocked,   // AI telemetry disabled in settings
+    Ready               // All preconditions met, menu enabled
+}
+```
+
+**Preconditions:**
+1. Service initialized and healthy
+2. Active session exists with valid CWD
+3. GitService.TryResolveGitHubRepo succeeds
+4. AI telemetry enabled (prior-tracking-data trust chain)
+
+**UI Contract:**
+- `ExistingSessionsVisuals.GetEvaluatedAiMenuItem()` returns internal accessor for Tank tests
+- Menu DropDownOpening event triggers `AiDetectionService.EvaluateMenuState(sessionId)`
+- Tooltip messaging via `AiDetectionTooltips` constants per state
+
+**Outcome:** All menu states tested and integrated. UI wiring complete.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

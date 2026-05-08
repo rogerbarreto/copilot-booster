@@ -19,6 +19,40 @@ internal enum DetectionStatus
     Error
 }
 
+internal enum AiMenuState
+{
+    Enabled,
+    FeatureDisabled,
+    CopilotUnavailable,
+    NoRepo,
+    NonGitHubRemote,
+    DetectionInFlight,
+    Unavailable
+}
+
+internal static class AiDetectionTooltips
+{
+    internal const string FeatureDisabled = "AI auto-detect is disabled in Settings.";
+    internal const string CopilotUnavailable = "Copilot CLI not found. Configure the path in Settings.";
+    internal const string NoRepo = "No GitHub repository detected for this session.";
+    internal const string NonGitHubRemote = "Non-GitHub providers are currently not supported.";
+    internal const string DetectionInFlight = "Detection in progress...";
+
+    internal static string For(AiMenuState state)
+    {
+        return state switch
+        {
+            AiMenuState.FeatureDisabled => FeatureDisabled,
+            AiMenuState.CopilotUnavailable => CopilotUnavailable,
+            AiMenuState.NoRepo => NoRepo,
+            AiMenuState.NonGitHubRemote => NonGitHubRemote,
+            AiMenuState.DetectionInFlight => DetectionInFlight,
+            AiMenuState.Unavailable => "AI auto-detect unavailable",
+            _ => string.Empty
+        };
+    }
+}
+
 internal sealed class DetectionState
 {
     internal DetectionStatus Status { get; set; } = DetectionStatus.Idle;
@@ -127,6 +161,48 @@ internal sealed class AiDetectionService : IDisposable
     internal bool TryGetState(string sessionId, out DetectionState? state)
     {
         return this._states.TryGetValue(sessionId, out state);
+    }
+
+    internal AiMenuState EvaluateMenuState(string sessionId, string? sessionCwd)
+    {
+        // TODO: read from LauncherSettings.AiDetection.Enabled in slice #21.
+        var killSwitch = true;
+        if (!killSwitch)
+        {
+            return AiMenuState.FeatureDisabled;
+        }
+
+        // TODO: read from probe in slice #21.
+        var copilotAvailable = true;
+        if (!copilotAvailable)
+        {
+            return AiMenuState.CopilotUnavailable;
+        }
+
+        var tracking = GitHubTrackingService.Load(sessionId);
+        var hasPriorTrackingRepo = !string.IsNullOrWhiteSpace(tracking?.Owner) && !string.IsNullOrWhiteSpace(tracking.Repo);
+        if (!hasPriorTrackingRepo)
+        {
+            var repo = GitService.ResolveGitHubRepo(sessionCwd ?? string.Empty);
+            var repoState = repo.Status switch
+            {
+                GitHubRepoResolution.Resolved => AiMenuState.Enabled,
+                GitHubRepoResolution.NonGitHubRemote => AiMenuState.NonGitHubRemote,
+                _ => AiMenuState.NoRepo
+            };
+
+            if (repoState != AiMenuState.Enabled)
+            {
+                return repoState;
+            }
+        }
+
+        if (this.TryGetState(sessionId).Status == DetectionStatus.Running)
+        {
+            return AiMenuState.DetectionInFlight;
+        }
+
+        return AiMenuState.Enabled;
     }
 
     public void Dispose()
@@ -387,15 +463,7 @@ internal sealed class AiDetectionService : IDisposable
             return (tracking.Owner, tracking.Repo);
         }
 
-        var gitRoot = SessionService.FindGitRoot(cwd);
-        if (gitRoot == null)
-        {
-            return null;
-        }
-
-        // TODO(slice #19): replace this origin-only fallback with GitService.TryResolveGitHubRepo.
-        var originUrl = GitService.GetRemoteUrl(gitRoot, "origin");
-        return originUrl == null ? null : GitService.ParseGitHubOwnerRepo(originUrl);
+        return GitService.TryResolveGitHubRepo(cwd);
     }
 
     private async Task<GitHubTrackedItem?> EnrichCandidateAsync(string type, int number, string owner, string repo)

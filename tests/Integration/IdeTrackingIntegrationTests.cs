@@ -8,6 +8,7 @@ namespace CopilotBooster.IntegrationTests.Integration;
 /// so WINEVENT_SKIPOWNPROCESS doesn't filter its events.
 /// Tests the full scenario matrix: open, detect, close, reopen across multiple sessions.
 /// </summary>
+[Collection(WindowEventHookCollection.Name)]
 public sealed class IdeTrackingIntegrationTests : IDisposable
 {
     private readonly List<Process> _startedProcesses = [];

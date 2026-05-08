@@ -202,7 +202,10 @@ internal partial class MainForm : Form
 
         this._sessionsPanel = new Panel { Dock = DockStyle.Fill };
 
-        this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsPanel, this._activeTracker);
+        this._sessionsVisuals = new ExistingSessionsVisuals(this._sessionsPanel, this._activeTracker)
+        {
+            AiDetectionService = this.AiDetectionService
+        };
         this._toast = ToastPanel.AttachTo(this._sessionsPanel);
         this.WireGitHubPollingEvents();
         this.WireAiDetectionEvents();

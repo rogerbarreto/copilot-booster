@@ -48,6 +48,7 @@
 
 ## Team Updates from Other Sessions
 
+- **2026-05-08 — Collection grouping + parallel scheduling drift:** Adding tests to `WindowEventHookCollection` to serialize window-hook and IDE-tracking tests can shift parallel xUnit scheduling. This shift may expose latent races in NON-collection tests that were passing by accident under different scheduling. Monitor for this pattern in future slices: if test stability improves after adding collection attributes, check whether other tests are now racing. A fix may require adding those other tests to the same collection, not backing out the stabilization.
 ### From Trinity (2026-05-08 Issue #17)
 
 - Trinity implemented `AiDetectionService` with full state machine (Idle → Pending → Running → Complete/Failed). Public contract: `StartDetectionAsync(sid)`, `CancelDetection(sid)`, `TryGetState(sid)` overloads, `DetectionStateChanged(sid, oldStatus, newStatus)` event. Process runner abstracted via `IProcessRunner` interface (paired with `FakeProcessRunner` for tests). Prompt builder and response parser are internal service classes. All 667 unit tests pass.
@@ -56,3 +57,4 @@
 
 - Morpheus wired menu nesting (GitHub > AI > Auto Detect) and context menu integration. `OnAiAutoDetect` handler starts detection service and listens for state changes. Grid refresh triggered by `DetectionStateChanged` event. `BuildGitHubAiMenuItem(string sid)` exposed `internal` for Tank's E2E verification via `InternalsVisibleTo`. Menu structure enables future GitHub feature growth without pollution.
 
+- **2026-05-08 — Issue #19 repo resolution and menu gating tests:** Added resolver matrix coverage in `tests/Services/GitServiceTests.cs`, menu-state gating coverage in `tests/Services/AiDetectionServiceTests.cs`, and five-row E2E menu gating in `tests/Integration/AiDetectMenuGatingIntegrationTests.cs`. `CreateGitRepo(string remoteName, string remoteUrl)` helpers live in both unit test files plus the E2E fixture; all create temp repos and clean through fixture disposal. Fork-parent resolution is unit-covered with Trinity's `GH_PATH` seam by pointing to a fake `gh` script that returns `upstream/repo`; no LocalOnly network test was needed. Real WinEvent integration tests that use `WindowEventHookService` now share `WindowEventHookCollection` to preserve the all-green integration bar under parallel runs.
