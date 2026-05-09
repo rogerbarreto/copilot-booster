@@ -10,6 +10,12 @@
 
 <!-- Append learnings below -->
 
+### 2026-05-09 Settings AI model dropdown
+
+* Settings AI model selection uses a strict `ComboBoxStyle.DropDownList`, initially seeded with `"(default — let Copilot decide)"` so the form remains usable before async model discovery completes.
+* Unknown saved model ids are preserved by appending a display-only `" (custom)"` suffix; saving strips the suffix and maps the default sentinel back to `""`.
+* WinForms async fetches should keep a form-owned `CancellationTokenSource`, marshal UI updates with `BeginInvoke`, and cancel/dispose the CTS from `Dispose(bool)`.
+
 ### 2026-05-08 Issue #20 GitHub cell spinner and cancel region
 
 * GitHub cell reserves a cell-relative top-right `16x16` status region through `SessionGridVisuals.GetStatusIconRegion(Rectangle cellBounds)`. The region consumes clicks even when idle, so the PR and issue strip does not receive corner clicks.
@@ -42,6 +48,12 @@
 ### From Tank (2026-05-08 Issue #17)
 
 - Tank verified menu wiring via E2E grid test. `BuildGitHubAiMenuItem(string sid)` is `internal` and accessible to Tank's integration tests via `InternalsVisibleTo`. Grid GitHub cell updates on `DetectionStateChanged` event and UI refresh. All 99/104 integration tests pass.
+
+### From Cross-Agent Session (2026-05-09 Issue #15 Refinement)
+
+- **Trinity's path removal:** Removed `AiDetectionSettings.CopilotPath` field entirely. `AiDetectionService` now resolves copilot exe dynamically via `CopilotLocator.FindCopilotExe()` at detection start time. SettingsForm path-row UI can now be removed by Morpheus (path is auto-discovered, no longer user-configurable).
+- **Trinity's models service:** `CopilotModelsService` with cache-first + stale-fallback design. Auth: `gh auth token` directly into `Authorization: <token>`. API: `GET https://api.githubcopilot.com/models`. Cache: `%LOCALAPPDATA%\CopilotBooster\models-cache.json` with 24h TTL. Fallback: fresh cache → API → stale cache → hardcoded. Cancellation: `OperationCanceledException` rethrown (not converted to fallback). All service tests passing (11/11).
+- **Tank's dropdown UI testing:** Form-owned `CancellationTokenSource` for async fetch. Marshal combo rebuilds via `BeginInvoke` on completion. Cancel and dispose CTS from `Form.Dispose(bool)` to prevent orphaned tasks. Test pattern: construct form in `using`, reflect `_modelFetchCts` and cancel immediately before assertions. All 5 tests passing.
 
 - **2026-05-03 — All-green integration test directive (UI impact):** User grilling exposed that accepting environmental baseline failures (13 reds in current IT suite) violated standing release policy. New directive: all tests green at all times. Tests must either self-bootstrap environment or skip explicitly. This affects Phase 5+ UI integration tests that depend on Playwright or local-only environments — fixtures must auto-install or skip-traits must be honored by runner. No more ceremonial baseline-comparison workflows.
 

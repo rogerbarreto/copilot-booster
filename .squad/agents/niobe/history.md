@@ -10,7 +10,13 @@
 
 ## Learnings
 
+- **2026-05-09 — Documentation for 0.22.0 refinements:** Updated CHANGELOG.md (added two bullets under Changed section) and README.md (removed Copilot CLI path field, enhanced Model dropdown documentation with API cache details). No version bumps as per directive.
+
+- **2026-05-09 — GitHub Copilot models API (auth flow correction):** The endpoint `https://api.githubcopilot.com/models` works with standard GitHub PAT (via `gh auth token`), not a special `copilot_internal/v2/token` endpoint. The internal endpoint returns 404 and does not exist. API returns 35 models; Copilot CLI help lists 17. Use API as primary source with 24h cache, hardcoded fallback.
+
 - **2026-05-03 — All-green integration test directive (validation impact):** User grilling established binary all-green policy: no tolerance for environmental baseline failures. Tests must self-bootstrap (e.g., Playwright auto-install in collection fixture) or skip explicitly with traits. This is a standing release policy enforcement — validates that team release quality is not compromised by accepting noise baseline.
+
+- **2026-05-09 — Issue #15 refinement — Documentation (CHANGELOG + README) for 0.22.0 in-flight refinements:** Updated CHANGELOG.md under 0.22.0 § Changed with 3 bullets: (1) auto-resolved Copilot CLI path, (2) dynamic model dropdown fetched from GitHub Copilot models API, (3) cache-first + stale-fallback resilience. Updated README.md: removed CopilotPath row from Settings table, enhanced model description to reflect "auto-discovered from GitHub Copilot". No version bump (per user constraint: refinements only, 0.22.0 locked).
 
 ### Issue #12 Validation (2026-03-15)
 

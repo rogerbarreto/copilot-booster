@@ -1,3 +1,184 @@
+## 2026-05-09: Issue #15 (refinement) — Auto-resolve Copilot CLI path + Dynamic model dropdown
+
+**Date:** 2026-05-09  
+**Status:** Delivered  
+**Contributors:** Niobe (API validation), Trinity (path removal + models service), Tank (tests + flake fix), Morpheus (Settings UI), Niobe (changelog/README)
+
+### Niobe: Copilot Models API Authentication Flow
+
+**Decision:** Use gh auth token (standard GitHub PAT) directly as Authorization: <token> header to call GET https://api.githubcopilot.com/models.
+
+**Rationale:**
+- The initial plan assumed gh api /copilot_internal/v2/token would return a special Copilot token (it returns 404; endpoint does not exist)
+- Niobe verified in live session: gh auth token returns a standard GitHub PAT in gho_* format
+- Both Authorization:  and Authorization: Bearer  work; neither prefix is technically required but Bearer is conventional
+
+**Response Shape:**
+`json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "vendor": "OpenAI",
+      "model_picker_enabled": true,
+      ...
+    }
+  ]
+}
+`
+
+**Design consequences:**
+- CopilotModelsService calls gh auth token to fetch bearer token, then GET https://api.githubcopilot.com/models
+- Parses data[].id, filters out 	ext-embedding-* models (embedding-only, not usable with copilot CLI)
+- Cache path: %LOCALAPPDATA%\CopilotBooster\models-cache.json with 24h TTL
+- Fallback ordering: Fresh cache → Fetch API → Stale cache → Hardcoded list (from copilot help config)
+
+**Confidence:** HIGH (✅ live tested, ✅ 35 models returned, ✅ consistent schema, ✅ verified against community Copilot plugins)
+
+### Trinity: Copilot Path Removal
+
+**Decision:** Remove CopilotPath property from AiDetectionSettings and MainForm. Use parameterless CopilotProbe constructor as production default, delegating to CopilotLocator.FindCopilotExe() at service boundary.
+
+**Rationale:**
+- Settings no longer carry path (path is auto-resolved at detection time)
+- MainForm no longer owns path configuration
+- Tests retain existing Func<string> constructor for deterministic probes
+- AiDetectionService resolves the executable dynamically through CopilotLocator
+
+**Consequence:**
+- UI path row removed entirely
+- Services are path-agnostic
+- Detection always uses current auto-resolved copilot exe location
+- Backward compatibility: existing settings.json transparently migrated
+
+### Trinity: CopilotModelsService Implementation
+
+**Design:**
+`csharp
+internal sealed class CopilotModelsService
+{
+    internal Task<IReadOnlyList<string>> GetModelsAsync(CancellationToken cancellationToken = default);
+}
+`
+
+**Cache schema:**
+`json
+{
+  "fetchedAt": "2026-05-09T10:12:39.5480000Z",
+  "models": ["claude-sonnet-4.6", "gpt-5.5"]
+}
+`
+
+**Fallback ordering:**
+1. Fresh cache (< 24h): return immediately
+2. Stale cache (≥ 24h): fetch from API, cache new, return fresh
+3. API failure + stale cache exists: return stale (graceful degradation)
+4. No usable cache: return hardcoded list
+
+**Non-obvious choices:**
+- Auth header: Authorization: <token> without Bearer prefix (verified working form)
+- Editor-Version header: copilot-booster/<assemblyVersion> for identification
+- Parse failures treated like fetch failures (Morpheus can call safely without error surface)
+- Stale-cache-over-hardcoded rule preserves user's recently working model list across transient outages
+
+**Thread-safe:** ConcurrentDictionary with Task.FromResult isolation; no explicit locking needed
+
+**Cancellation:** OperationCanceledException rethrown (not converted to fallback); allows UI form disposal to cancel pending fetch
+
+### Tank: CopilotModelsService Unit Tests
+
+**Pattern:** 11 comprehensive tests covering:
+- Cache hits, cache misses, stale fallback
+- Network errors, cancellation, TTL expiry
+- Concurrent fetch, null/empty models, fast-path reuse
+- Network recovery after transient failure
+
+**LocalAppData Isolation Skill:** Tests use isolated temp directories per run; cleaned up after each test. Pattern documented in .squad/skills/localappdata-test-isolation/SKILL.md for future use.
+
+**Result:** 11/11 tests passing. No flakes.
+
+### Tank: Copilot Path Test Pattern
+
+**Pattern:** For AiDetectionService path assertions after path removal, use RecordingProcessRunner.Calls and assert RecordedProcessCall.FileName equals CopilotLocator.FindCopilotExe().
+
+**Rationale:** Verifies service boundary receives auto-resolved executable path production uses, without adding new seams or reintroducing path settings.
+
+**Updated test files:** AiDetectionServiceTests, CopilotProbeTests, LauncherSettingsTests. All 786/786 unit tests passing.
+
+### Morpheus: Settings Model Dropdown
+
+**Decision:** Replace path row + free-text model box with strict ComboBox (DropDownStyle.DropDownList).
+
+**UI Shape:**
+- Removes CopilotPath row entirely
+- Model control: ComboBox, label at x=4, input at x=220, width 300
+- First item: sentinel "(default — let Copilot decide)"
+- Unknown saved ids appended as <id> (custom) to preserve user choice even if API doesn't return it
+
+**Save Mapping:**
+- Sentinel → persist ""
+- Plain model id → persist verbatim
+- <id> (custom) → strip suffix, persist <id>
+
+**Lifecycle:**
+- Form.Shown triggers CopilotModelsService.GetModelsAsync() with form-owned CancellationTokenSource
+- Completion checks IsDisposed/cancellation, marshals combo rebuild through BeginInvoke
+- Form.Dispose cancels CTS to avoid orphaned background tasks
+
+**Skill:** "WinForms async cancel on dispose" pattern documented in .squad/skills/winforms-async-cancel-on-dispose/SKILL.md
+
+### Tank: SettingsForm Async Dropdown Tests
+
+**Pattern:** 5 tests validating:
+- Combo population on form load
+- Selected model persistence
+- Fetch cancellation on form dispose
+- Empty/error model list handling
+- Dropdown selection workflow
+
+**Result:** 5/5 tests passing.
+
+### Tank: Format-Build-Test Gate + Flakes Fixed
+
+**Build Error:** CS0579 duplicate-attribute — obj/bin leaking AssemblyInfo into integration project's default **\*.cs glob. Fixed by cleaning all obj/bin directories in simulator test tools.
+
+**Test Flake:** AiDetectTreeKillIntegrationTests capturing unrelated ping.exe processes via by-name discovery during 10s window. Fixed by replacing with temp-file handshake protocol: parent writes $PID and child $p.Id to file; test tracks only those two PIDs. Verified 10/10 deterministic, avg 1s per run. Added $ErrorActionPreference='Stop' + $null guard to fail fast on Start-Process anomalies.
+
+**Final State:**
+- Format clean: dotnet format applied
+- Build clean: 0 errors
+- Unit tests: 786/786 passing
+- Integration tests: 134/134 passing (11 LocalOnly skipped)
+- No flakes or environmental reds
+
+### Niobe: CHANGELOG + README Updates
+
+**CHANGELOG.md (0.22.0 § Changed):**
+- Added 3 bullet points under 0.22.0 § Changed documenting:
+  - Auto-resolved Copilot CLI path (path no longer configurable in Settings)
+  - Dynamic model dropdown (fetched from GitHub Copilot models API; fallback to hardcoded list)
+  - Cache-first + stale-fallback resilience
+
+**README.md:**
+- Settings table updated: CopilotPath row removed, model now described as "auto-discovered from GitHub Copilot"
+- Feature description updated to reflect path auto-discovery
+- No version bump (per user constraint: refinements only, 0.22.0 locked)
+
+**Format:** Keep a Changelog convention; focused on user-facing changes
+
+### Integration + Test Results
+
+**Unit tests:** 786/786 passing (7 new tests for CopilotModelsService, 5 new tests for SettingsForm dropdown, existing tests updated for path removal)
+
+**Integration tests:** 134/134 passing, 11 LocalOnly skipped (per all-green directive)
+
+**Build:** 0 errors, 0 warnings, format clean
+
+**Status:** Delivered end-to-end. All agents completed. Coordinator applied final build/flake fixes. Ready for squad documentation merge.
+
+---
 # Squad Decisions
 
 ## 2026-05-09: Issue #23 — LocalOnly Real-Copilot Test + Concurrency E2E + Docs + Version Bump
@@ -665,3 +846,4 @@ internal interface IMessageBox
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
