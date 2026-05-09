@@ -69,7 +69,7 @@ public sealed class AiDetectIntegrationTests : IDisposable
         await detectionTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
 
         var call = Assert.Single(processRunner.Calls);
-        Assert.Equal("copilot", call.FileName);
+        Assert.Equal(CopilotLocator.FindCopilotExe(), call.FileName);
         Assert.Equal(repoRoot, call.Cwd);
         Assert.Equal(300, call.TimeoutSeconds);
         AssertArgumentValue(call.Args, "-p", prompt =>

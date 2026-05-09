@@ -4,9 +4,12 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Forms;
 
@@ -16,25 +19,23 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal sealed class SettingsForm : Form
 {
+    private const string ModelDefaultDisplay = "(default — let Copilot decide)";
+    private const string CustomSuffix = " (custom)";
+
     private readonly IReadOnlyList<NamedSession> _cachedSessions;
     private readonly UpdateInfo? _latestUpdate;
-    private readonly ICopilotProbe? _copilotProbe;
-    private readonly ToolTip _validationToolTip = new();
     private CheckBox _aiEnabledCheck = null!;
     private NumericUpDown _aiTimeoutSecondsBox = null!;
     private NumericUpDown _aiConfidenceThresholdBox = null!;
-    private TextBox _aiCopilotPathBox = null!;
-    private Panel _aiCopilotPathBorder = null!;
-    private Label _aiCopilotPathError = null!;
-    private TextBox _aiModelBox = null!;
+    private ComboBox _aiModelCombo = null!;
+    private CancellationTokenSource? _modelFetchCts;
+    private string _savedModelValue = "";
     private bool _suppressThemeChange;
-    private string _initialCopilotPath = "";
 
     internal SettingsForm(IReadOnlyList<NamedSession> cachedSessions, UpdateInfo? latestUpdate, ICopilotProbe? copilotProbe = null)
     {
         this._cachedSessions = cachedSessions;
         this._latestUpdate = latestUpdate;
-        this._copilotProbe = copilotProbe;
 
         this.Text = "Settings";
         this.Size = new Size(880, 620);
@@ -716,8 +717,6 @@ internal sealed class SettingsForm : Form
         // =====================================================================
         var (aiPanel, aiBody) = this.CreateCategoryPanel("AI", "AI auto-detect settings for GitHub issue and PR detection.", autoScroll: true, padding: new Padding(8));
         var aiSettings = Program._settings.AiDetection ?? new AiDetectionSettings();
-        this._initialCopilotPath = aiSettings.CopilotPath ?? "";
-
         this._aiEnabledCheck = new CheckBox
         {
             Text = "Enable AI auto-detect",
@@ -753,72 +752,26 @@ internal sealed class SettingsForm : Form
         };
         aiConfidenceRow.Controls.AddRange([aiConfidenceLabel, this._aiConfidenceThresholdBox]);
 
-        var aiCopilotPathRow = new Panel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(4, 8, 0, 4) };
-        var aiCopilotPathLabel = new Label { Text = "Copilot CLI path:", AutoSize = true, Location = new Point(4, 12) };
-        this._aiCopilotPathBox = new TextBox
-        {
-            PlaceholderText = "Empty = use PATH",
-            Location = new Point(220, 9),
-            Width = 300,
-            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
-        };
-        this._aiCopilotPathBorder = SettingsVisuals.WrapWithBorder(this._aiCopilotPathBox);
-        var aiCopilotPathBrowse = new Button
-        {
-            Text = "Browse...",
-            Width = 90,
-            Location = new Point(530, 8),
-            Anchor = AnchorStyles.Top | AnchorStyles.Right
-        };
-        aiCopilotPathBrowse.Click += (s, e) =>
-        {
-            using var dialog = new OpenFileDialog
-            {
-                Filter = "Executable files (*.exe)|*.exe|All files (*.*)|*.*",
-                CheckFileExists = true,
-                FileName = this._aiCopilotPathBox.Text
-            };
-            if (dialog.ShowDialog(this) == DialogResult.OK)
-            {
-                this._aiCopilotPathBox.Text = dialog.FileName;
-                this.ValidateCopilotPath(showTooltip: false);
-            }
-        };
-        this._aiCopilotPathBox.Leave += (s, e) => this.ValidateCopilotPath(showTooltip: false);
-        this._aiCopilotPathBox.TextChanged += (s, e) =>
-        {
-            if (this._aiCopilotPathError.Visible)
-            {
-                this.ValidateCopilotPath(showTooltip: false);
-            }
-        };
-        this._aiCopilotPathError = new Label
-        {
-            Text = "File not found",
-            AutoSize = true,
-            Location = new Point(220, 42),
-            ForeColor = Color.Red,
-            Visible = false
-        };
-        aiCopilotPathRow.Controls.AddRange([aiCopilotPathLabel, this._aiCopilotPathBorder, aiCopilotPathBrowse, this._aiCopilotPathError]);
-
         var aiModelRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
-        var aiModelLabel = new Label { Text = "Model (optional):", AutoSize = true, Location = new Point(4, 12) };
-        this._aiModelBox = new TextBox
+        var aiModelLabel = new Label { Text = "Model:", AutoSize = true, Location = new Point(4, 12) };
+        this._aiModelCombo = new ComboBox
         {
-            PlaceholderText = "Empty = let Copilot pick",
+            DropDownStyle = ComboBoxStyle.DropDownList,
             Location = new Point(220, 9),
             Width = 300,
             Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
         };
-        aiModelRow.Controls.AddRange([aiModelLabel, SettingsVisuals.WrapWithBorder(this._aiModelBox)]);
+        this._aiModelCombo.Items.Add(ModelDefaultDisplay);
+        this._aiModelCombo.SelectedIndex = 0;
+        aiModelRow.Controls.AddRange([aiModelLabel, SettingsVisuals.WrapWithBorder(this._aiModelCombo)]);
 
         this.LoadAiDetectionFromSettings(aiSettings);
         aiBody.Controls.Add(aiModelRow);
-        aiBody.Controls.Add(aiCopilotPathRow);
         aiBody.Controls.Add(aiConfidenceRow);
         aiBody.Controls.Add(aiTimeoutRow);
         aiBody.Controls.Add(this._aiEnabledCheck);
+        this._modelFetchCts = new CancellationTokenSource();
+        _ = this.PopulateModelComboAsync(this._modelFetchCts.Token);
 
         // =====================================================================
         // PANEL MAP & TREE WIRING
@@ -882,13 +835,6 @@ internal sealed class SettingsForm : Form
         var btnSave = new Button { Text = "Save", Width = 90 };
         btnSave.Click += (s, e) =>
         {
-            if (!this.ValidateCopilotPath(showTooltip: true))
-            {
-                tree.SelectedNode = tree.Nodes.Cast<TreeNode>().FirstOrDefault(n => string.Equals(n.Text, "AI", StringComparison.Ordinal));
-                this._aiCopilotPathBox.Focus();
-                return;
-            }
-
             // General
             Program._settings.AlwaysOnTop = alwaysOnTopCheck.Checked;
             Program._settings.MaxActiveSessions = (int)maxSessionsBox.Value;
@@ -961,17 +907,8 @@ internal sealed class SettingsForm : Form
 
             // AI
             Program._settings.AiDetection = this.GetCurrentAiDetectionFormState();
-            var copilotPathChanged = !string.Equals(
-                this._initialCopilotPath,
-                Program._settings.AiDetection.CopilotPath,
-                StringComparison.OrdinalIgnoreCase);
-
             // Persist
             Program._settings.Save();
-            if (copilotPathChanged)
-            {
-                this._copilotProbe?.InvalidateCache();
-            }
 
             this.DialogResult = DialogResult.OK;
             this.Close();
@@ -1001,8 +938,7 @@ internal sealed class SettingsForm : Form
             Enabled = this._aiEnabledCheck.Checked,
             TimeoutSeconds = (int)this._aiTimeoutSecondsBox.Value,
             ConfidenceThreshold = this._aiConfidenceThresholdBox.Value,
-            CopilotPath = this._aiCopilotPathBox.Text.Trim(),
-            Model = this._aiModelBox.Text.Trim()
+            Model = this.GetSelectedModelValue()
         };
     }
 
@@ -1017,43 +953,112 @@ internal sealed class SettingsForm : Form
         this._aiEnabledCheck.Checked = s.Enabled;
         this._aiTimeoutSecondsBox.Value = Math.Clamp(s.TimeoutSeconds, 30, 1800);
         this._aiConfidenceThresholdBox.Value = Math.Clamp(s.ConfidenceThreshold, 0.00M, 1.00M);
-        this._aiCopilotPathBox.Text = s.CopilotPath ?? "";
-        this._initialCopilotPath = this._aiCopilotPathBox.Text;
-        this._aiModelBox.Text = s.Model ?? "";
-        this.ValidateCopilotPath(showTooltip: false);
+        this.SelectModelValue(s.Model);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            this._validationToolTip.Dispose();
+            this._modelFetchCts?.Cancel();
+            this._modelFetchCts?.Dispose();
+            this._modelFetchCts = null;
         }
 
         base.Dispose(disposing);
     }
 
-    private bool ValidateCopilotPath(bool showTooltip)
+    private async Task PopulateModelComboAsync(CancellationToken ct)
     {
-        if (this.InvokeRequired)
+        try
         {
-            return this.Invoke(() => this.ValidateCopilotPath(showTooltip));
+            var service = new CopilotModelsService();
+            var models = await service.GetModelsAsync(ct).ConfigureAwait(true);
+            if (this.IsDisposed || ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            this.BeginInvoke(() => this.RebuildModelCombo(models));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug(ex, "Model combo fetch failed");
+        }
+    }
+
+    private void RebuildModelCombo(IReadOnlyList<string> models)
+    {
+        if (this.IsDisposed)
+        {
+            return;
         }
 
-        var value = this._aiCopilotPathBox.Text.Trim();
-        var invalid = value.Length > 0 && !File.Exists(value);
-        this._aiCopilotPathError.Visible = invalid;
-        this._aiCopilotPathBorder.BackColor = invalid
-            ? Color.Red
-            : Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark;
-        this._validationToolTip.SetToolTip(this._aiCopilotPathBox, invalid ? "File not found" : "");
-        this._validationToolTip.SetToolTip(this._aiCopilotPathBorder, invalid ? "File not found" : "");
-        if (invalid && showTooltip)
+        var selectedValue = this._aiModelCombo.SelectedIndex < 0
+            ? this._savedModelValue
+            : this.GetSelectedModelValue();
+
+        this._aiModelCombo.Items.Clear();
+        this._aiModelCombo.Items.Add(ModelDefaultDisplay);
+        foreach (var model in models)
         {
-            this._validationToolTip.Show("File not found", this._aiCopilotPathBorder, 0, this._aiCopilotPathBorder.Height, 3000);
+            this._aiModelCombo.Items.Add(model);
         }
 
-        return !invalid;
+        this.SelectModelValue(selectedValue);
+    }
+
+    private void SelectModelValue(string? model)
+    {
+        this._savedModelValue = model?.Trim() ?? "";
+        if (this._aiModelCombo.Items.Count == 0)
+        {
+            this._aiModelCombo.Items.Add(ModelDefaultDisplay);
+        }
+
+        if (this._savedModelValue.Length == 0)
+        {
+            this._aiModelCombo.SelectedItem = ModelDefaultDisplay;
+            return;
+        }
+
+        foreach (var item in this._aiModelCombo.Items.Cast<object>())
+        {
+            if (string.Equals(item.ToString(), this._savedModelValue, StringComparison.Ordinal))
+            {
+                this._aiModelCombo.SelectedItem = item;
+                return;
+            }
+        }
+
+        var customItem = this._savedModelValue + CustomSuffix;
+        foreach (var item in this._aiModelCombo.Items.Cast<object>())
+        {
+            if (string.Equals(item.ToString(), customItem, StringComparison.Ordinal))
+            {
+                this._aiModelCombo.SelectedItem = item;
+                return;
+            }
+        }
+
+        this._aiModelCombo.Items.Add(customItem);
+        this._aiModelCombo.SelectedItem = customItem;
+    }
+
+    private string GetSelectedModelValue()
+    {
+        var selected = this._aiModelCombo.SelectedItem?.ToString() ?? "";
+        if (selected.Length == 0 || string.Equals(selected, ModelDefaultDisplay, StringComparison.Ordinal))
+        {
+            return "";
+        }
+
+        return selected.EndsWith(CustomSuffix, StringComparison.Ordinal)
+            ? selected[..^CustomSuffix.Length]
+            : selected;
     }
 
     private (Panel Outer, Panel Body) CreateCategoryPanel(string title, string? description = null, bool autoScroll = false, Padding? padding = null)
@@ -1091,3 +1096,4 @@ internal sealed class SettingsForm : Form
         return (panel, body);
     }
 }
+

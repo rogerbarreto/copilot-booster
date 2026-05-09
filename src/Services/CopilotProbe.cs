@@ -1,6 +1,5 @@
 ﻿using System;
-using System.ComponentModel;
-using System.Diagnostics;
+using System.IO;
 using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Services;
@@ -12,6 +11,11 @@ internal sealed class CopilotProbe : ICopilotProbe
     private readonly object _lock = new();
     private bool? _cachedResult;
     private string? _cachedForPath;
+
+    internal CopilotProbe()
+        : this(() => CopilotLocator.FindCopilotExe())
+    {
+    }
 
     internal CopilotProbe(Func<string> pathGetter)
         : this(pathGetter, ProbeVersion)
@@ -53,44 +57,21 @@ internal sealed class CopilotProbe : ICopilotProbe
 
     private static bool ProbeVersion(string resolvedPath)
     {
-        try
-        {
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
-            {
-                FileName = resolvedPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            process.StartInfo.ArgumentList.Add("--version");
-
-            if (!process.Start())
-            {
-                return false;
-            }
-
-            if (!process.WaitForExit(5_000))
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (InvalidOperationException)
-                {
-                }
-
-                return false;
-            }
-
-            return process.ExitCode == 0;
-        }
-        catch (Win32Exception)
+        if (string.IsNullOrWhiteSpace(resolvedPath))
         {
             return false;
         }
-        catch (InvalidOperationException)
+
+        if (string.Equals(resolvedPath, "copilot.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            return File.Exists(resolvedPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return false;
         }

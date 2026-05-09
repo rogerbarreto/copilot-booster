@@ -1,4 +1,4 @@
-﻿# Trinity — History
+# Trinity — History
 
 ## Core Context
 
@@ -46,6 +46,8 @@
 - **Tank's test fixes:** Fixed CS0579 duplicate-attribute build error (obj/bin leaking AssemblyInfo into integration project). Fixed `AiDetectTreeKillIntegrationTests` flake via temp-file handshake PID protocol (10/10 deterministic runs). All 786 unit + 134 integration tests passing.
 - **Morpheus's UI shape:** Settings model dropdown uses strict `ComboBoxStyle.DropDownList`, async-fetches models on `Form.Shown`, cancels fetch on `Form.Disposed`. Form-owned CTS allows safe cancellation without orphaned tasks. Unknown saved ids appended as `<id> (custom)` for preservation.
 
+**2026-05-09: Active status regression fix (startup rescan):** Fixed shipped regression where pre-existing copilot.exe processes (launched before booster) never lit up as ACTIVE in the grid. Root cause: `ActiveStatusTracker._copilotHosts` was only populated via FileSystemWatcher events for NEW jsonl writes; existing sessions loaded via `SessionService.LoadNamedSessions` had no corresponding host binding. Added public `ActiveStatusTracker.RescanExistingSessions()` method that enumerates `~/.copilot/logs/process-*.log`, extracts session IDs and PIDs, verifies processes are alive, and calls `HandleExternalSessionDiscovered(sessionId, copilotPid)` for each live process. Rescan is idempotent (SetCopilotHost deduplicates by HWND/PID identity) and synchronous. Wired into `MainForm.LoadInitialDataAsync()` after `LoadSessions()` but before first `RefreshActiveStatus()` so active icons light up correctly on startup. Result: 795 unit tests + 138 integration tests passing (0 failures). Rescan logs `scanned {n} live copilot.exe process(es), bound {m} host(s)` at Information level when m > 0.
+
 ## Learnings Archive
 
 <!-- Detailed technical notes from prior phases -->
@@ -89,3 +91,28 @@ Added `AiDetectionService.Reset(sid)`. It clears only `Undecided` or `Error` sta
 Updated partial dedup success handling. Above-threshold candidates are pre-filtered against existing `GitHubTrackingData.Items`. New candidates are enriched and added, duplicates are omitted, and toasts use `✅ AI added <newly_added> (already linked: <duplicates>)` when both new and duplicate candidates exist. All-new success toasts keep the prior `✅ AI added <items> to session` form.
 
 Extended `AiDetectionTooltips` with undecided and failure constants plus `ForFailure(...)` and `ForUndecided(...)` helpers for Morpheus. Adjusted `AiResponseParser` to return all valid candidates sorted by confidence, so services can apply every above-threshold candidate while `DetectionState.TopCandidates` remains capped to 3 for UI details.
+
+
+### 2026-05-09 CopilotProbe stdout redirection trap + loose-ties consolidation
+
+**Root cause:** `CopilotProbe.ProbeVersion` executed `copilot.exe --version` with `RedirectStandardOutput = true` then `WaitForExit(5_000)`. On WinGet installs, the copilot process prints version output within 0.6s but spawns a background auto-update subprocess that inherits the stdout handle. The pipe stays open because the child hasn't exited. `WaitForExit` waits for the entire process tree and times out after 5s. Probe kills process, returns false, `AiDetectionService.ComputeMenuState` caches `CopilotUnavailable` for the session, menu permanently disabled despite working copilot.exe.
+
+**Solution:** Replaced `ProbeVersion` logic with file-existence check. If resolved path is absolute AND `File.Exists(resolvedPath)` → return true. If resolved path is bare `copilot.exe` (locator's fallback when nothing found) → return false. No process spawn, no 5s timeout, synchronous, deterministic, <1ms. `CopilotLocator.FindCopilotExe()` already validates WinGet paths and `where copilot` output with `File.Exists`, so re-checking in the probe is redundant but avoids the stdout trap entirely.
+
+**Canonical availability contract:** Inventory sweep found NO loose ties. All sites already use `CopilotLocator.FindCopilotExe()` for path resolution or `ICopilotProbe.IsCopilotAvailable()` for availability. Only non-conformance: stale tooltip referencing removed Settings path. Updated tooltip to `Copilot CLI not found. Install via WinGet or ensure 'copilot' is on PATH.`; unskipped Tank's file-existence test; updated integration test assertion. All 791 unit tests + 137 integration tests pass (14 LocalOnly skipped in CI).
+
+**Learnings:** The stdout redirection trap — when a parent process redirects stdout and the child spawns background subprocesses (auto-update, telemetry), those grandchildren inherit the stdout handle. The pipe stays open until all holders exit. `WaitForExit` waits for the entire tree. Never rely on `Process.Start + RedirectStandardOutput + WaitForExit(timeout)` for short-lived commands that may spawn background work. Use file-system checks or alternate detection strategies. For locally-installed CLI tools, file-existence is sufficient when the locator already validates paths. Tradeoff: doesn't verify auth or executability, but failures surface in `AiDetectionService.InvokeAsync` with proper `AiFailureClass`.
+
+### 2026-05-09 Empty session title bug fix (Roger's bugfix)
+
+**Root cause:** Newly-created sessions with no `summary:` field in `workspace.yaml` and no override sidecar entry rendered with empty string in the Session column. The `SessionService.LoadNamedSessions()` fallback chain (lines 341-358) previously returned `""` when a non-empty folder name was present, making the grid cell appear blank.
+
+**Two-layer fix implemented:**
+
+**Layer 1 — Service-layer fallback (PRIMARY):** Modified `SessionService.cs` line 357 to return a deterministic display name when all higher-priority sources (alias, workspace.yaml summary, override sidecar) are missing. New fallback format: `Session {first-8-chars-of-sessionId}`. Examples: `be6b9891-...` → `"Session be6b9891"`, `14cec216-...` → `"Session 14cec216"`. This guarantees the Summary field is never empty in the grid.
+
+**Layer 2 — Reliable placeholder seeding (SECONDARY, belt-and-braces):** Modified `EventsJournalService.TryResolveBoosterName()` line 451 to attempt resolution even when `currentOverride == null`. Previous logic early-returned when the override entry was missing entirely, meaning sessions discovered externally without host resolution never got their first user.message extracted. New logic: if `currentOverride` is null OR `currentOverride.ResolvedFromUserMessage == false`, attempt extraction. After successful extraction, `SessionNameOverrideService.Set` naturally creates the row with `resolvedFromUserMessage: true`.
+
+**Post-fix invariant:** A session with `events.jsonl` and a first `user.message` MUST end up with a resolved override regardless of host-resolution timing. The Layer 1 fallback ensures the UI never shows empty strings even during the race window before `TryResolveBoosterName` upgrades the placeholder.
+
+**Learnings:** Override-lifecycle gap exposed by Neo's triage. When host resolution is delayed or fails, no override is created by `ActiveStatusTracker.HandleExternalSessionDiscovered` (lines 237-242) because `info == null`. The fallback chain in `SessionService` was the only safety net, and it returned `""` for non-empty folder names. Layer 1 fix is the canonical safety net; Layer 2 fix ensures the upgrade path works even when timing races occur. Always provide a deterministic, non-empty fallback for user-visible identifiers.

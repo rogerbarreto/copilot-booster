@@ -10,6 +10,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - AI auto-detect GitHub issue / PR for sessions. Right-click → GitHub → AI → Auto Detect GitHub Issue and PR. Configurable in Settings → AI. (#17 #18 #19 #20 #21 #22 #23)
 
+### Changed
+
+- **AI auto-detect** — Copilot CLI path is now auto-resolved (WinGet locations + PATH lookup) and no longer requires manual configuration in Settings.
+- **AI auto-detect** — Settings model field is now a dropdown populated from the GitHub Copilot models API, with offline cache (24h TTL at `%LOCALAPPDATA%\CopilotBooster\models-cache.json`) and a `(default — let Copilot decide)` option.
+
 ## [0.21.0] - 2026-05-04
 
 ### Added

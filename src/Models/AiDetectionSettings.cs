@@ -13,9 +13,6 @@ internal sealed class AiDetectionSettings
     [JsonPropertyName("confidenceThreshold")]
     public decimal ConfidenceThreshold { get; set; } = 0.5m;
 
-    [JsonPropertyName("copilotPath")]
-    public string CopilotPath { get; set; } = "";
-
     [JsonPropertyName("model")]
     public string Model { get; set; } = "";
 }

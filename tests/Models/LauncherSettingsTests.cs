@@ -137,7 +137,6 @@ public sealed class LauncherSettingsTests : IDisposable
             Enabled = false,
             TimeoutSeconds = 600,
             ConfidenceThreshold = 0.75m,
-            CopilotPath = @"C:\custom\copilot.exe",
             Model = "gpt-5.2"
         };
 
@@ -148,7 +147,6 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.Equal(settings.Enabled, loaded!.Enabled);
         Assert.Equal(settings.TimeoutSeconds, loaded.TimeoutSeconds);
         Assert.Equal(settings.ConfidenceThreshold, loaded.ConfidenceThreshold);
-        Assert.Equal(settings.CopilotPath, loaded.CopilotPath);
         Assert.Equal(settings.Model, loaded.Model);
     }
 
@@ -175,7 +173,6 @@ public sealed class LauncherSettingsTests : IDisposable
                 Enabled = false,
                 TimeoutSeconds = 600,
                 ConfidenceThreshold = 0.75m,
-                CopilotPath = @"C:\custom\copilot.exe",
                 Model = "gpt-5.2"
             }
         };
@@ -186,7 +183,6 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.False(loaded.AiDetection.Enabled);
         Assert.Equal(600, loaded.AiDetection.TimeoutSeconds);
         Assert.Equal(0.75m, loaded.AiDetection.ConfidenceThreshold);
-        Assert.Equal(@"C:\custom\copilot.exe", loaded.AiDetection.CopilotPath);
         Assert.Equal("gpt-5.2", loaded.AiDetection.Model);
     }
 
@@ -553,7 +549,6 @@ public sealed class LauncherSettingsTests : IDisposable
         Assert.True(settings.Enabled);
         Assert.Equal(300, settings.TimeoutSeconds);
         Assert.Equal(0.5m, settings.ConfidenceThreshold);
-        Assert.Equal("", settings.CopilotPath);
         Assert.Equal("", settings.Model);
     }
 }

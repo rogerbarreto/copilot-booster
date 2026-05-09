@@ -45,7 +45,7 @@ public sealed class AiDetectSettingsIntegrationTests : IDisposable
         var item = harness.Visuals.GetEvaluatedAiMenuItem(harness.SessionId, harness.Cwd);
 
         Assert.False(item.Enabled);
-        Assert.Equal("Copilot CLI not found. Configure the path in Settings.", item.ToolTipText);
+        Assert.Equal("Copilot CLI not found. Install via WinGet or ensure 'copilot' is on PATH.", item.ToolTipText);
     }
 
     [StaFact]
@@ -56,15 +56,14 @@ public sealed class AiDetectSettingsIntegrationTests : IDisposable
         {
             Enabled = true,
             TimeoutSeconds = 30,
-            Model = "gpt-5.2",
-            CopilotPath = @"C:\custom\copilot.exe"
+            Model = "gpt-5.2"
         };
         using var harness = this.CreateHarness(settings, new FakeCopilotProbe(true));
 
         await harness.Service.StartDetectionAsync(harness.SessionId).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         var call = Assert.Single(harness.ProcessRunner.Calls);
-        Assert.Equal(@"C:\custom\copilot.exe", call.FileName);
+        Assert.Equal(CopilotLocator.FindCopilotExe(), call.FileName);
         Assert.Equal(30, call.TimeoutSeconds);
         var modelIndex = Array.IndexOf(call.Args, "--model");
         Assert.True(modelIndex >= 0);

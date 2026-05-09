@@ -52,7 +52,7 @@
 
         Assert.Equal(2, result.Count);
         Assert.Contains(result, s => s.Id == "s1" && s.Summary.Contains("Has summary"));
-        Assert.Contains(result, s => s.Id == "s2" && s.Summary == "" && s.Folder == "b");
+        Assert.Contains(result, s => s.Id == "s2" && s.Summary == "Session s2" && s.Folder == "b");
     }
 
     [Fact]
@@ -104,7 +104,7 @@
         var result = SessionService.LoadNamedSessions(this._tempDir);
 
         Assert.Single(result);
-        Assert.Equal("", result[0].Summary);
+        Assert.Equal("Session session-", result[0].Summary);
         Assert.Equal("myproject", result[0].Folder);
     }
 
@@ -119,7 +119,7 @@
         var result = SessionService.LoadNamedSessions(this._tempDir);
 
         Assert.Single(result);
-        Assert.Equal("", result[0].Summary);
+        Assert.Equal("Session session-", result[0].Summary);
         Assert.Equal("myproject", result[0].Folder);
     }
 }

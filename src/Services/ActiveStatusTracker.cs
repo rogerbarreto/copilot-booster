@@ -273,6 +273,93 @@ internal class ActiveStatusTracker
     }
 
     /// <summary>
+    /// T0 trigger: startup rescan for pre-existing copilot.exe processes.
+    /// Enumerates existing ~/.copilot/logs/process-*.log files, extracts session IDs and PIDs,
+    /// and calls <see cref="HandleExternalSessionDiscovered"/> for each live process.
+    /// Idempotent: safe to call multiple times (delegates deduplication to HandleExternalSessionDiscovered).
+    /// </summary>
+    public void RescanExistingSessions()
+    {
+        var logsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".copilot", "logs");
+
+        if (!Directory.Exists(logsDir))
+        {
+            return;
+        }
+
+        try
+        {
+            var logFiles = Directory.GetFiles(logsDir, "process-*.log");
+            int scannedCount = 0;
+            int boundCount = 0;
+
+            foreach (var logPath in logFiles)
+            {
+                var fileName = Path.GetFileName(logPath);
+                var pid = CopilotLogWatcherService.ExtractPidFromFilename(fileName);
+                if (pid == null)
+                {
+                    continue;
+                }
+
+                // Check if the process is still alive
+                if (!this._isProcessAlive(pid.Value))
+                {
+                    continue;
+                }
+
+                scannedCount++;
+
+                // Parse the log file to get the session ID
+                try
+                {
+                    string[] lines;
+                    using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var reader = new StreamReader(fs, System.Text.Encoding.UTF8))
+                    {
+                        lines = reader.ReadToEnd().Split('\n');
+                    }
+
+                    var (sessionId, _) = CopilotLogWatcherService.TryParseLogContent(lines);
+                    if (sessionId == null)
+                    {
+                        continue;
+                    }
+
+                    // If we already have a host for this session and it's still alive, skip
+                    var existing = this.GetCopilotHost(sessionId);
+                    if (existing != null && this.IsCopilotHostActive(existing))
+                    {
+                        continue;
+                    }
+
+                    // Bind this session to its host via the standard discovery path
+                    this.HandleExternalSessionDiscovered(sessionId, pid.Value);
+                    boundCount++;
+                }
+                catch (Exception ex)
+                {
+                    Program.Logger.LogDebug("RescanExistingSessions: failed to parse log file {Path}: {Error}", logPath, ex.Message);
+                }
+            }
+
+            if (boundCount > 0)
+            {
+                Program.Logger.LogInformation(
+                    "RescanExistingSessions: scanned {ScannedCount} live copilot.exe process(es), bound {BoundCount} host(s)",
+                    scannedCount,
+                    boundCount);
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogWarning("RescanExistingSessions failed: {Error}", ex.Message);
+        }
+    }
+
+    /// <summary>
     /// T5 trigger: handles window destruction. Evicts any host entry whose HWND matches.
     /// </summary>
     internal void HandleWindowDestroyed(IntPtr hwnd)

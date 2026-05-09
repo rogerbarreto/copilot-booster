@@ -49,7 +49,7 @@ internal enum OutcomeKind
 internal static class AiDetectionTooltips
 {
     internal const string FeatureDisabled = "AI auto-detect is disabled in Settings.";
-    internal const string CopilotUnavailable = "Copilot CLI not found. Configure the path in Settings.";
+    internal const string CopilotUnavailable = "Copilot CLI not found. Install via WinGet or ensure 'copilot' is on PATH.";
     internal const string NoRepo = "No GitHub repository detected for this session.";
     internal const string NonGitHubRemote = "Non-GitHub providers are currently not supported.";
     internal const string DetectionInFlight = "Detection in progress...";
@@ -381,7 +381,8 @@ internal sealed class AiDetectionService : IDisposable
             ProcessResult processResult;
             try
             {
-                processResult = await this._processRunner.RunAsync(invocationSettings.CopilotPath, args, cwd, invocationSettings.TimeoutSeconds, cts.Token).ConfigureAwait(false);
+                var copilotPath = CopilotLocator.FindCopilotExe();
+                processResult = await this._processRunner.RunAsync(copilotPath, args, cwd, invocationSettings.TimeoutSeconds, cts.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -645,12 +646,10 @@ internal sealed class AiDetectionService : IDisposable
                 confidenceThreshold);
         }
 
-        var copilotPath = string.IsNullOrWhiteSpace(settings.CopilotPath) ? "copilot" : settings.CopilotPath.Trim();
         return new AiDetectionInvocationSettings(
             settings.Enabled,
             timeoutSeconds,
             confidenceThreshold,
-            copilotPath,
             settings.Model?.Trim() ?? "");
     }
 
@@ -836,7 +835,6 @@ internal sealed class AiDetectionService : IDisposable
         bool Enabled,
         int TimeoutSeconds,
         decimal ConfidenceThreshold,
-        string CopilotPath,
         string Model);
 
     private sealed class AlwaysAvailableCopilotProbe : ICopilotProbe

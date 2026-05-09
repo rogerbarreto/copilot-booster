@@ -55,6 +55,8 @@
 
 - **2026-05-09 — Issue #15 refinement — Build/test gate + flake fixes:** (a) Diagnosed CS0579 duplicate-attribute build error: integration project's default `**\*.cs` glob was picking up generated AssemblyInfo from unclean obj/bin in simulator test-tools directories. Cleaned all obj/bin, error resolved. (b) Fixed `AiDetectTreeKillIntegrationTests` flake: by-name process discovery (`SnapshotProcessIds("PING")`) captured unrelated ping.exe processes during 10s test window. Replaced with temp-file handshake protocol: parent writes `$PID` and child `$p.Id` to file; test tracks only those two PIDs. Added `$ErrorActionPreference='Stop'` + `$null` guard to fail fast on Start-Process anomalies. Verified 10/10 deterministic, avg 1s per run. Final: format clean, build clean, 786/786 unit passing, 134/134 integration passing (11 LocalOnly skipped).
 
+- **2026-05-09 — Issue #15 AI detect startup regression test (RED):** Wrote `Startup_ExistingCopilotProcesses_ShowAsActiveAfterBoosterLaunchAsync` in `tests/Integration/WindowsTerminalMultiPaneE2ETests.cs` to reproduce Roger's shipped regression — copilot.exe sessions existing BEFORE booster starts never show ACTIVE. Test launches Windows Terminal + copilot --resume, waits for JSONL file on disk (deterministic polling with 10s total budget), THEN constructs `ActiveStatusTracker` + `LoadNamedSessions` using production startup path. NO manual `HandleExternalSessionDiscovered` call. Asserts `snapshot.ActiveTextBySessionId` contains "Copilot CLI". This assertion MUST FAIL on current HEAD (v0.22.0, commit f189115) because `CopilotLogWatcherService` only watches FileSystemWatcher events, never scans existing files. Pre-existing sessions never populate `_copilotHosts` dictionary. Trinity is implementing the rescan fix in parallel; this test will turn GREEN after the fix ships. LocalOnly test with `[Trait("Category", "LocalOnly")]` plus deterministic 30s copilot-detection budget and 10s JSONL-polling budget (no flaky `Thread.Sleep`). File: `tests/Integration/WindowsTerminalMultiPaneE2ETests.cs:93-230`.
+
 ## Team Updates from Other Sessions
 
 - **2026-05-08 — Collection grouping + parallel scheduling drift:** Adding tests to `WindowEventHookCollection` to serialize window-hook and IDE-tracking tests can shift parallel xUnit scheduling. This shift may expose latent races in NON-collection tests that were passing by accident under different scheduling. Monitor for this pattern in future slices: if test stability improves after adding collection attributes, check whether other tests are now racing. A fix may require adding those other tests to the same collection, not backing out the stabilization.
@@ -101,3 +103,162 @@
 - **2026-05-09 — Integration retry still blocked after coordinator clean:** Retried `dotnet run --project tests\CopilotBooster.IntegrationTests.csproj -c Release` after reported cleanup of `tests\obj`, `tests\bin`, `tests\obj-integration`, and `tests\bin-integration`. Build still fails before tests run with CS0579 duplicate generated attributes in `tests\obj-integration\Release`, so final build was not run.
 
 - **2026-05-09 — Final validation blocked by integration assertion:** After simulator obj/bin cleanup, integration tests built and ran, but `AiDetectIntegrationTests.Ai_auto_detect_happy_path_adds_pr_to_tracking_data_and_renders_in_cell_and_emits_toast` failed. It expected runner executable `"copilot"` but actual was the resolved WinGet Copilot path under `C:\Users\roger\AppData\Local\Microsoft\WinGet\Packages\...`; integration total was 134 with 1 failed and 11 LocalOnly skipped, so solution build was not run.
+
+## Learnings — 2026-05-09: Copilot Probe Timeout Bug (RED Tests)
+
+### Context
+Root-caused bug where CopilotProbe.IsCopilotAvailable() returns false even when copilot.exe is installed and working. The issue: ProbeVersion uses Process.Start with RedirectStandardOutput=true, then WaitForExit(5000). The process prints version text but doesn't exit within 5s — likely because an auto-update subprocess inherits the stdout handle and keeps the pipe open. Probe kills the process and caches false result.
+
+### Test Strategy (TDD RED First)
+Wrote three layers of tests that document the bug and expected fix:
+
+1. **Integration Tests (LocalOnly):**  
+   - IsCopilotAvailable_WithRealWingetCopilotExe_ReturnsTrue — may pass/fail due to timing, documents expected behavior  
+   - CopilotLocator_WithWingetInstall_FindsValidPath — confirms locator works, issue is in probe  
+   - ProbeVersion_DirectReproduction_DocumentsTimeout (SKIPPED) — explicit repro for manual verification
+
+2. **Unit Tests (Deterministic):**  
+   - IsCopilotAvailable_WhenProbeFunctionReturnsFalse_PreviouslyTrappedRealInstalls — documents OLD bug behavior  
+   - IsCopilotAvailable_WhenLocatorReturnsExistingPath_ReturnsTrue (SKIPPED) — awaits Trinity's fix, tests NEW behavior  
+   - IsCopilotAvailable_PathChangesFromNonExistentToExistent_InvalidatesAndReturnsTrue — ensures fix doesn't break cache
+
+3. **Menu State Regression:**  
+   - EvaluateMenuState_ProbeReturnsTrue_DoesNotReturnCopilotUnavailable — full pipeline test  
+   - EvaluateMenuState_ProbeReturnsFalse_ReturnsCopilotUnavailable — legitimate unavailable case
+
+### Key Learnings
+
+1. **Flaky bugs require creative test strategies:** When a bug doesn't reproduce 100% deterministically (due to timing variance), write tests that:
+   - Document the EXPECTED behavior (assert true when it SHOULD be true)  
+   - Skip the flaky repro test but keep it for manual verification  
+   - Use unit-level mocks to guarantee the failure path is exercised
+
+2. **Process stdout redirection pitfalls:** When spawning processes with RedirectStandardOutput=true and calling WaitForExit(timeout), be aware:
+   - If the process spawns a child that inherits the stdout handle, the parent may never "exit" from the redirector's perspective  
+   - The pipe stays open even after the parent writes its output and terminates  
+   - WinGet-installed CLI tools are particularly susceptible (auto-update subprocesses)  
+   - **Solution:** Either don't redirect stdout, or use async ReadLineAsync() with independent timeout, or don't execute the binary at all (file-existence check)
+
+3. **TDD with external dependencies:** For integration tests that rely on external binaries:
+   - Use [LocalOnlyFact] + [Trait("Category", "LocalOnly")] pattern  
+   - Gate with environment variable (COPILOT_BOOSTER_RUN_LOCALONLY=1)  
+   - Accept some level of flakiness in exchange for real-world coverage  
+   - Supplement with deterministic unit tests using mocks/fakes
+
+4. **Documenting RED tests for teammates:** When writing tests for someone else to fix:
+   - Create a decision doc (.squad/decisions/inbox/) with clear contract  
+   - Mark SKIPPED tests that await the fix with explanation  
+   - Include both "documents OLD behavior" and "tests NEW behavior" tests  
+   - Provide explicit repro script (PowerShell) for manual verification
+
+### Test Infrastructure Patterns
+
+- **TempDirectory helper:** Created CreateTempDirectory() + IDisposable pattern in CopilotProbeTests for managing temp files during tests  
+- **LocalOnly gate:** Used existing LocalOnlyTestGate + LocalOnlyFactAttribute for integration tests that need real copilot.exe  
+- **Deterministic unit tests:** Leveraged existing Func<string, bool> injection point in CopilotProbe constructor to mock probe outcomes
+
+### Reusable Skill Candidate?
+
+The "process-probe-stdout-trap" pattern (don't use RedirectStandardOutput + WaitForExit(timeout) for CLI tools that might spawn background processes) is reusable across projects. If this pattern recurs, extract to .squad/skills/process-probe-stdout-trap/SKILL.md.
+
+---
+**Next:** Trinity implements fix → unskip IsCopilotAvailable_WhenLocatorReturnsExistingPath_ReturnsTrue → verify all tests GREEN → verify on Roger's machine (menu no longer greyed out).
+
+## Learnings — 2026-05-09: Empty Session Title RED Tests
+
+### Context
+Bug reported by Roger: newly-created sessions show EMPTY "Session" column in the grid. Older sessions (May 4) render correctly, but today's sessions (May 9) show blank.
+
+### Root Cause
+Trinity diagnosed the bug in SessionService.cs line 357 (original code):
+```csharp
+displaySummary = string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "";
+```
+
+When a session has:
+- No `summary:` field in workspace.yaml
+- No entry in session-name-overrides.json
+- A valid `cwd` with a folder name (e.g., "C:\repo\example")
+
+The fallback chain landed on empty string `""` → blank display in grid.
+
+### Test Strategy (RED First)
+
+Wrote 4 tests in `tests/Services/SessionServiceTests.cs` to cover the fallback scenarios:
+
+1. **LoadNamedSessions_NoSummaryNoOverride_FallbackProducesNonEmptyDisplayName (RED → GREEN)**  
+   Core test that documents the bug. Creates a session with `cwd` but no summary/override. Asserts the Summary must be non-empty.  
+   - RED (original code): `session.Summary = ''` → test fails  
+   - GREEN (Trinity's fix): `session.Summary = 'Session 11111111'` → test passes
+
+2. **LoadNamedSessions_WorkspaceSummary_WinsOverOverride (GREEN → GREEN)**  
+   Regression guard: workspace.yaml summary must always win over override entries. Passes today and after fix.
+
+3. **LoadNamedSessions_NoSummary_UsesOverride (GREEN → GREEN)**  
+   Confirms the fallback chain uses override when no workspace summary exists. Passes today and after fix.
+
+4. **LoadNamedSessions_PlaceholderUpgrade_UsesResolvedMessage (GREEN → GREEN)**  
+   Tests the placeholder→resolved transition: session starts with `("cli placeholder", false)`, then receives first user message, override is upgraded to `(formatted_message, true)`. Exercises the full upgrade pipeline.
+
+### Trinity's Fix (Uncommitted)
+
+Trinity changed line 357-358 to:
+```csharp
+// Fallback: use first 8 chars of session ID as deterministic display name
+displaySummary = id.Length >= 8 ? $"Session {id.Substring(0, 8)}" : $"Session {id}";
+```
+
+This ensures sessions without summary/override always show a deterministic, non-empty display name based on the session ID prefix.
+
+### Key Learnings
+
+1. **Session name resolution chain architecture:**  
+   - Priority: alias > workspace.yaml summary > override sidecar > **fallback**  
+   - Tests now cover all four layers plus the placeholder upgrade flow  
+   - The fallback MUST produce a non-empty display name (contract for Trinity's implementation)
+
+2. **RED test verification process:**  
+   - Used `git stash` to temporarily revert Trinity's uncommitted fix  
+   - Ran test to confirm RED failure with exact empty-string assertion  
+   - Restored fix with `git stash pop`, confirmed GREEN  
+   - This proves the test correctly captures the bug and validates the fix
+
+3. **Fallback display name contract:**  
+   Test asserts `!string.IsNullOrWhiteSpace(session.Summary)` without prescribing the exact format.  
+   Trinity chose "Session <first-8-chars>" — test remains green for any non-empty deterministic format.
+
+4. **Test isolation with temp directories:**  
+   SessionServiceTests follows the existing pattern from LoadNamedSessionsTests:  
+   - Constructor creates temp dir: `Path.Combine(Path.GetTempPath(), Path.GetRandomFileName())`  
+   - Dispose cleans up: `try { Directory.Delete(_tempDir, true); } catch { }`  
+   - Each test creates its own session subdirectories with minimal workspace.yaml fixtures
+
+5. **Override model structure:**  
+   `SessionNameOverride` is a record: `record SessionNameOverride(string Name, bool ResolvedFromUserMessage)`  
+   - Used in placeholder upgrade test to simulate the CLI→resolved transition  
+   - Tests write/read JSON manually via SessionNameOverrideService.Save/Load
+
+### Test Contract for Trinity
+
+**What the test asserts (minimal contract):**
+- When `workspace.yaml` has no `summary:` field AND session-name-overrides.json has no entry for that session ID, the `LoadNamedSessions` return must have `!string.IsNullOrWhiteSpace(session.Summary)`
+
+**What the test does NOT prescribe:**
+- Exact wording ("Session <id>" vs "(unnamed)" vs "Untitled" — Trinity chooses)  
+- Format details (Trinity chose first-8-chars of ID for brevity)  
+- Whether fallback uses session ID, timestamp, folder name, or a constant
+
+**Implementation freedom:** As long as the Summary is non-empty and deterministic, the test passes.
+
+### Reusable Pattern
+
+**Fallback-chain coverage pattern:**  
+When testing priority-chain resolution (e.g., alias > summary > override > fallback):
+1. Write one test per chain layer (e.g., "workspace summary wins over override")
+2. Write one test for the default-fallback case (asserts non-empty but flexible on format)
+3. Write regression guards for each transition (e.g., placeholder upgrade)
+
+This pattern applies to any service with multi-source resolution: DNS, config files, environment variables, etc.
+
+---
+**Status:** All 4 tests written. Test 1 confirmed RED on original code (empty string), GREEN after Trinity's fix (Session 11111111). Tests ready for commit alongside Trinity's SessionService changes.

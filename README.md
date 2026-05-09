@@ -277,8 +277,11 @@ Settings live under Settings → AI:
 | Enable AI auto-detect | On | On or off |
 | Per-detection timeout | 300s | 30 to 1800 |
 | Auto-apply confidence threshold | 0.5 | 0.0 to 1.0 |
-| Copilot CLI path | Empty uses PATH | Any executable path |
-| Model | Empty | Optional Copilot model name |
+| Model | (default — let Copilot decide) | Copilot models from API dropdown with offline cache |
+
+**Path auto-resolution:** The Copilot CLI path is automatically resolved at runtime (no setting required). The resolver checks WinGet package locations first, then searches the system PATH, falling back to a bare `copilot.exe` lookup.
+
+**Model dropdown:** The Model field is now a dropdown populated from the GitHub Copilot models API (`GET https://api.githubcopilot.com/models`), using your `gh` token for authentication. Models are cached locally for 24 hours at `%LOCALAPPDATA%\CopilotBooster\models-cache.json` — if the API is unreachable, cached models are used as a fallback. Text-embedding models are filtered out. The `(default — let Copilot decide)` option (saves as empty string) appears by default; if your saved model is not in the current list, it displays with a `(custom)` suffix.
 
 Visual feedback appears in the GitHub column corner. A spinner means detection is running, and clicking it cancels after confirmation. A `?` icon means low confidence, and clicking it shows candidate details. A `!` icon means detection failed, and clicking it shows failure details.
 

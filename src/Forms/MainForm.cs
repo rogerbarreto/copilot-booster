@@ -127,7 +127,7 @@ internal partial class MainForm : Form
             () => this._cachedSessions.Select(s => s.Id).ToList());
         this._confirmDialog = new MessageBoxConfirmDialog(this);
         this._messageBox = new MessageBoxAdapter(this);
-        this.CopilotProbe = new CopilotProbe(() => Program._settings.AiDetection.CopilotPath);
+        this.CopilotProbe = new CopilotProbe();
         this.AiDetectionService = new AiDetectionService(
             this._githubApi,
             new ProcessRunner(),
@@ -1840,6 +1840,10 @@ internal partial class MainForm : Form
         var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
         this._cachedSessions = sessions;
         this.ApplySessionStates(this._cachedSessions);
+
+        // Startup rescan: bind pre-existing copilot.exe processes to their hosts
+        // This must run BEFORE the first RefreshActiveStatus so active icons light up
+        await Task.Run(() => this._activeTracker.RescanExistingSessions()).ConfigureAwait(true);
 
         // Prime events.jsonl cache for all sessions (initial disk read)
         await Task.Run(() => this._activeTracker.EventsJournal.PrimeCache(

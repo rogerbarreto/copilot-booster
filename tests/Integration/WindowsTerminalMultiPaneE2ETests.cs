@@ -87,6 +87,19 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         this.CleanupCreatedSessionDirs();
     }
 
+    /// <summary>
+    /// Regression test for issue where copilot.exe processes that existed BEFORE booster
+    /// started would never show as ACTIVE in the grid. Root cause: those sessions never
+    /// trigger FileSystemWatcher events, so HandleExternalSessionDiscovered never runs.
+    /// Production discovery path LoadNamedSessions + grid paint must show ACTIVE icon.
+    /// </summary>
+    [LocalOnlyFact]
+    [Trait("Category", "LocalOnly")]
+    public async Task Startup_ExistingCopilotProcesses_ShowAsActiveAfterBoosterLaunchAsync()
+    {
+        await RunOnStaThreadAsync(this.ExecuteStartupRescanTestAsync).ConfigureAwait(false);
+    }
+
     [LocalOnlyFact]
     public async Task TwoRealCopilotTabs_LinkClickFocusesCorrectTabAsync()
     {
@@ -290,6 +303,150 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         {
             Program._settings = prevSettings;
         }
+
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Test implementation: launch copilot BEFORE constructing tracker, then verify
+    /// production startup path reports ACTIVE without manual HandleExternalSessionDiscovered call.
+    /// </summary>
+    private async Task ExecuteStartupRescanTestAsync()
+    {
+        SkipIfPreflightFails();
+        Directory.CreateDirectory(Program.SessionStateDir);
+        Directory.CreateDirectory(Program.AppDataDir);
+        SweepOrphanItSessionDirs();
+
+        var session = new RealCopilotSession("StartupRescan-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        session.SessionId = Guid.NewGuid().ToString();
+        session.SessionDir = Path.Combine(Program.SessionStateDir, session.SessionId);
+        Directory.CreateDirectory(session.SessionDir);
+        this._createdSessionDirs.Add(session.SessionDir);
+        this._createdSessionIds.Add(session.SessionId);
+
+        // Write sentinel file so Dispose cleanup can identify this as a test session
+        File.WriteAllText(Path.Combine(session.SessionDir, SessionCleanupSentinel), string.Empty);
+
+        // Write minimal workspace.yaml with id, cwd, and timestamps
+        var workspaceYaml = $@"id: {session.SessionId}
+cwd: {Environment.CurrentDirectory.Replace("\\", "/")}
+summary_count: 0
+created_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
+updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
+";
+        File.WriteAllText(Path.Combine(session.SessionDir, "workspace.yaml"), workspaceYaml);
+
+        // Write minimal events.jsonl with session.start event
+        var sessionStartEvent = new
+        {
+            timestamp = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+            type = "session.start",
+            data = new { sessionId = session.SessionId }
+        };
+        File.WriteAllText(
+            Path.Combine(session.SessionDir, "events.jsonl"),
+            JsonSerializer.Serialize(sessionStartEvent) + "\n");
+
+        // Launch Windows Terminal with copilot --resume
+        var gateway = new WindowsTerminalPaneGateway();
+        var launcher = Process.Start(new ProcessStartInfo
+        {
+            FileName = "wt.exe",
+            Arguments = $"new-tab --title \"{session.Label}\" --suppressApplicationTitle cmd /k copilot --resume \"{session.SessionId}\" --deny-url={session.Marker}",
+            UseShellExecute = true
+        });
+
+        if (launcher == null)
+        {
+            Assert.Fail("Failed to start wt.exe");
+            return;
+        }
+
+        this._startedProcesses.Add(launcher);
+
+        // Wait for copilot.exe process to appear (deterministic, timeout-based)
+        var copilotDetected = false;
+        for (int attempt = 0; attempt < 60; attempt++)
+        {
+            try
+            {
+                var (pid, pwshPid) = WaitForCopilotPidByDenyUrl(session.Marker, timeoutMs: 500);
+                if (pid > 0)
+                {
+                    session.CopilotPid = pid;
+                    session.PwshPid = pwshPid;
+                    this._copilotPids.Add(pid);
+                    this._pwshPids.Add(pwshPid);
+                    copilotDetected = true;
+                    break;
+                }
+            }
+            catch
+            {
+                // Process not found yet, keep waiting
+            }
+
+            await Task.Delay(500).ConfigureAwait(false);
+        }
+
+        if (!copilotDetected)
+        {
+            Assert.Fail("Copilot process did not start within 30 seconds");
+            return;
+        }
+
+        // Wait for ~/.copilot/logs/process-*-{pid}.log to exist — that file is what
+        // RescanExistingSessions reads to discover live copilot.exe processes. Without
+        // it, the rescan walks an empty list and the test cannot validate the bind path.
+        var logsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".copilot",
+            "logs");
+        var processLogPath = (string?)null;
+        for (int attempt = 0; attempt < 30; attempt++)
+        {
+            if (Directory.Exists(logsDir))
+            {
+                processLogPath = Directory
+                    .EnumerateFiles(logsDir, $"process-*-{session.CopilotPid}.log")
+                    .FirstOrDefault();
+                if (processLogPath != null && new FileInfo(processLogPath).Length > 0)
+                {
+                    break;
+                }
+            }
+
+            await Task.Delay(500).ConfigureAwait(false);
+        }
+
+        Assert.True(
+            processLogPath != null,
+            $"Expected ~/.copilot/logs/process-*-{session.CopilotPid}.log to be written by copilot.exe within 15s");
+
+        // NOW construct booster services using PRODUCTION startup path — NO HandleExternalSessionDiscovered call
+        var tracker = new ActiveStatusTracker();
+        var sessions = SessionService.LoadNamedSessions(
+            Program.SessionStateDir,
+            Program.PidRegistryFile,
+            Program.SessionStateFile,
+            Program.SessionAliasFile,
+            Program.SessionNameOverrideFile);
+
+        var ourSession = sessions.FirstOrDefault(s => string.Equals(s.Id, session.SessionId, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(ourSession);
+
+        // Rescan existing sessions (what MainForm.LoadInitialDataAsync does between LoadSessions and RefreshActiveStatus)
+        tracker.RescanExistingSessions();
+
+        // Trigger grid paint flow (what MainForm.OnLoad does)
+        var snapshot = tracker.FullRefresh(sessions);
+
+        // ASSERT: BuildActiveText must return "Copilot CLI" for this session
+        // This assertion MUST FAIL on current HEAD — session is not in _copilotHosts
+        var activeText = snapshot.ActiveTextBySessionId.GetValueOrDefault(session.SessionId);
+        Assert.NotNull(activeText);
+        Assert.Contains("Copilot CLI", activeText, StringComparison.OrdinalIgnoreCase);
 
         await Task.CompletedTask.ConfigureAwait(false);
     }

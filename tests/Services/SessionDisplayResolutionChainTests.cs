@@ -87,7 +87,7 @@ public sealed class SessionDisplayResolutionChainTests : IDisposable
         var result = SessionService.LoadNamedSessions(this._tempDir, null, null, this._aliasFile, this._overrideFile);
 
         Assert.Single(result);
-        Assert.Equal("", result[0].Summary);
+        Assert.Equal($"Session {sessionId.Substring(0, 8)}", result[0].Summary);
         Assert.Equal("myproject", result[0].Folder);
     }
 
@@ -103,7 +103,7 @@ public sealed class SessionDisplayResolutionChainTests : IDisposable
         var result = SessionService.LoadNamedSessions(this._tempDir, null, null, this._aliasFile, this._overrideFile);
 
         Assert.Single(result);
-        Assert.Equal("(no summary)", result[0].Summary);
+        Assert.Equal($"Session {sessionId.Substring(0, 8)}", result[0].Summary);
     }
 
     [Fact]

@@ -354,7 +354,8 @@ internal class SessionService
                     }
                     else
                     {
-                        displaySummary = string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "";
+                        // Fallback: use first 8 chars of session ID as deterministic display name
+                        displaySummary = id.Length >= 8 ? $"Session {id.Substring(0, 8)}" : $"Session {id}";
                     }
 
                     var isGitRepo = false;

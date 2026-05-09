@@ -448,11 +448,13 @@ internal class EventsJournalService : IDisposable
         {
             // Check if the current override is unresolved
             var currentOverride = SessionNameOverrideService.Get(Program.SessionNameOverrideFile, sessionId);
-            if (currentOverride == null || currentOverride.ResolvedFromUserMessage)
+            if (currentOverride != null && currentOverride.ResolvedFromUserMessage)
             {
-                // Already resolved or not present — no work to do
+                // Already resolved — no work to do
                 return;
             }
+
+            // If currentOverride is null or has ResolvedFromUserMessage == false, attempt resolution
 
             // Extract the first user.message content
             var rawContent = FirstUserMessageExtractor.Extract(eventsJsonlPath);
