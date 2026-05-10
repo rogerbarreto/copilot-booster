@@ -8,7 +8,7 @@ internal sealed partial class Win32KeyboardSender : IKeyboardSender
 {
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const byte VK_CONTROL = 0x11;
-    private const byte VK_TAB = 0x09;
+    private const byte VK_NEXT = 0x22;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
@@ -37,8 +37,10 @@ internal sealed partial class Win32KeyboardSender : IKeyboardSender
     [LibraryImport("user32.dll")]
     private static partial uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    public void SendCtrlTab()
+    public void SendNextTab()
     {
+        // Warp's ActivateNextTab on Windows is bound to Ctrl+PageDown (VK_NEXT),
+        // NOT Ctrl+Tab. See warp/app/src/util/bindings.rs.
         var inputs = new INPUT[4];
 
         // Press Ctrl
@@ -58,7 +60,7 @@ internal sealed partial class Win32KeyboardSender : IKeyboardSender
             }
         };
 
-        // Press Tab
+        // Press PageDown
         inputs[1] = new INPUT
         {
             Type = 1,
@@ -66,7 +68,7 @@ internal sealed partial class Win32KeyboardSender : IKeyboardSender
             {
                 Keyboard = new KEYBDINPUT
                 {
-                    wVk = VK_TAB,
+                    wVk = VK_NEXT,
                     wScan = 0,
                     dwFlags = 0,
                     time = 0,
@@ -75,7 +77,7 @@ internal sealed partial class Win32KeyboardSender : IKeyboardSender
             }
         };
 
-        // Release Tab
+        // Release PageDown
         inputs[2] = new INPUT
         {
             Type = 1,
@@ -83,7 +85,7 @@ internal sealed partial class Win32KeyboardSender : IKeyboardSender
             {
                 Keyboard = new KEYBDINPUT
                 {
-                    wVk = VK_TAB,
+                    wVk = VK_NEXT,
                     wScan = 0,
                     dwFlags = KEYEVENTF_KEYUP,
                     time = 0,

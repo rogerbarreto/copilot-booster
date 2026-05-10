@@ -264,20 +264,68 @@ internal class ActiveStatusTracker
             new Win32WindowTitleReader(),
             new Win32KeyboardSender(),
             new SystemPaneFocusClock(),
-            WindowFocusService.TryFocusWindowHandle);
+            focusHwnd: hwnd =>
+            {
+                if (!WindowFocusService.TryFocusWindowHandle(hwnd))
+                {
+                    return false;
+                }
+
+                // SetForegroundWindow is async on Windows. Wait for the actual
+                // foreground transfer before letting WarpPaneFocuser send keys —
+                // otherwise SendInput races and Ctrl+Tab lands on Booster.
+                return WindowFocusService.WaitForForeground(hwnd, 1000);
+            },
+            warmupMillis: 100);
         return focuser.TryFocusPane(warpProcessId, expectedTitle);
     }
 
     private static string? DefaultSessionDisplayNameProvider(string sessionId)
     {
-        if (string.IsNullOrEmpty(Program.SessionStateDir))
+        if (string.IsNullOrEmpty(Program.SessionStateDir) || string.IsNullOrEmpty(sessionId))
         {
             return null;
         }
 
-        var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
-        var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
-        return session?.Summary;
+        // Read workspace.yaml directly. Don't filter by pidRegistry — sessions
+        // started OUTSIDE Booster (e.g. user opened `copilot` inside Warp) are
+        // not in pidRegistry but their title in workspace.yaml is still the
+        // authoritative match for the host's pane title.
+        var workspaceFile = Path.Combine(Program.SessionStateDir, sessionId, "workspace.yaml");
+        if (!File.Exists(workspaceFile))
+        {
+            return null;
+        }
+
+        try
+        {
+            string? name = null;
+            string? summary = null;
+            foreach (var line in File.ReadAllLines(workspaceFile))
+            {
+                if (line.StartsWith("name:", StringComparison.Ordinal))
+                {
+                    name = line[5..].Trim().Trim('"');
+                }
+                else if (line.StartsWith("summary:", StringComparison.Ordinal))
+                {
+                    summary = line[8..].Trim().Trim('"');
+                }
+            }
+
+            // Copilot CLI v1.0.44+ writes authoritative title to `name:`; older
+            // sessions only have `summary:`. Prefer `name:` when present.
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return name;
+            }
+
+            return !string.IsNullOrWhiteSpace(summary) ? summary : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool IsProcessAlive(int pid)
@@ -788,9 +836,20 @@ internal class ActiveStatusTracker
         if (string.Equals(hostInfo.HostKindLabel, "Warp", StringComparison.OrdinalIgnoreCase))
         {
             string? expectedTitle = this._sessionDisplayNameProvider(sessionId);
+            RuntimeDiagnosticLog.Write(
+                "FocusCopilotHost Warp branch session={0} expectedTitle={1}",
+                sessionId,
+                expectedTitle ?? "<null>");
+
             if (!string.IsNullOrEmpty(expectedTitle))
             {
                 bool matched = this._warpPaneFocuser(hostInfo.HostPid, expectedTitle);
+                RuntimeDiagnosticLog.Write(
+                    "FocusCopilotHost Warp focuser result session={0} expectedTitle={1} matched={2}",
+                    sessionId,
+                    expectedTitle,
+                    matched);
+
                 if (matched)
                 {
                     RuntimeDiagnosticLog.Write(

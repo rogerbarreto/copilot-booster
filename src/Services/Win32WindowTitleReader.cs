@@ -15,7 +15,7 @@ internal sealed partial class Win32WindowTitleReader : IWindowTitleReader
     [LibraryImport("user32.dll")]
     private static partial int GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextLengthW")]
     private static partial int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

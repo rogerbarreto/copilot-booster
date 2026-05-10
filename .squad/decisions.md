@@ -712,6 +712,66 @@ internal abstract record AiParseResult
 
 **Strict Validation Rules:**
 - Rejects empty stdout, prose, markdown fences, non-object roots
+
+---
+
+## 2026-05-03: User Directive — Pre-Release Testing Gate
+
+**Date:** 2026-05-03T14:39:50Z  
+**By:** Roger Barreto  
+**Status:** Standing directive  
+
+### Decision
+
+**Do NOT push releases without giving Roger a chance to local-test first.**
+
+After all gating commands (build, format, unit, IT) pass and CHANGELOG/README/version are bumped, **STOP** and hand off to Roger for local smoke test **BEFORE** creating the tag.
+
+**Operationalization:**
+1. Coordinator prepares release: version bumped, CHANGELOG/README updated, all gates green.
+2. Coordinator commits and pushes the release-prep **commit** to main (CI gates re-validate).
+3. **STOP.** Await Roger's go-ahead for local smoke test.
+4. Only after Roger confirms: `git tag v<version>` and `git push origin main --tags`.
+
+The git tag is the irreversible step (triggers `release.yml` and signing workflow). The commit alone is safe and can be rolled back.
+
+**Note:** v0.21.0 was pushed before this directive arrived. Per team policy (never move/force-push tags), v0.21.0 ships as-is.
+
+---
+
+## 2026-05-03: User Directive — ITs Must Mimic Real Copilot Host Startup
+
+**Date:** 2026-05-03T19:58:58Z  
+**By:** Roger  
+**Status:** Standing directive  
+
+### Decision
+
+Integration tests for Copilot Host scenarios (Windows Terminal, panes, multi-tab) **MUST launch real `copilot.exe`** (or whatever Copilot host the scenario covers), wait long enough for the process to fully start, and assert against the title/UI as Copilot itself produces them.
+
+**What NOT to do:**
+- No PowerShell marker scripts
+- No synthetic tab labels like `PaneA-Probe` / `PaneB-Probe`
+
+**Why:** Copilot takes over the tab title once it loads. An IT that does not match reality is worse than no IT. The existing fake-pane IT tests pass but do not exercise the real discovery/host-resolution/focus pipeline — that is exactly where production bugs live.
+
+**Scope:** All future Copilot Host integration tests.
+
+---
+
+## 2026-05-03: User Directive — ITs Use [Fact] Not [LocalOnlyFact]
+
+**Date:** 2026-05-03T20:09:23Z  
+**By:** Roger  
+**Status:** Standing directive  
+
+### Decision
+
+Integration tests should be marked `[Fact]`, not `[LocalOnlyFact]`. Roger runs them manually from Visual Studio's test GUI and skips them there when he doesn't want them; the env-var gate of `[LocalOnlyFact]` interferes with that workflow.
+
+**Rationale:** Hands-on developer ergonomics. The test author (Roger) is the gate.
+
+**Scope:** New ITs in this repo, including pre-existing-WT and real-Copilot E2E.
 - Requires `candidates` field (array, not null)
 - Rejects candidate non-objects, missing required fields, wrong JSON types
 - Enforces case-sensitive type values: `issue` or `pr` only

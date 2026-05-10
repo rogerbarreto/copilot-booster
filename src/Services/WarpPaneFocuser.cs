@@ -13,6 +13,7 @@ internal sealed class WarpPaneFocuser
     private readonly Func<IntPtr, bool> _focusHwnd;
     private readonly int _maxIterations;
     private readonly int _settleMillis;
+    private readonly int _warmupMillis;
 
     public WarpPaneFocuser(
         IWindowTitleReader titleReader,
@@ -20,7 +21,8 @@ internal sealed class WarpPaneFocuser
         IPaneFocusClock clock,
         Func<IntPtr, bool> focusHwnd,
         int maxIterations = DefaultMaxIterations,
-        int settleMillis = DefaultSettleMillis)
+        int settleMillis = DefaultSettleMillis,
+        int warmupMillis = 0)
     {
         this._titleReader = titleReader;
         this._keys = keys;
@@ -28,6 +30,7 @@ internal sealed class WarpPaneFocuser
         this._focusHwnd = focusHwnd;
         this._maxIterations = maxIterations;
         this._settleMillis = settleMillis;
+        this._warmupMillis = warmupMillis;
     }
 
     /// <summary>
@@ -41,7 +44,7 @@ internal sealed class WarpPaneFocuser
     ///   3. Read current title → originalTitle.
     ///   4. If originalTitle matches expectedTitle (case-insensitive) → return true.
     ///   5. Loop up to maxIterations:
-    ///      a. SendCtrlTab().
+    ///      a. SendNextTab() (Ctrl+PageDown for Warp).
     ///      b. Sleep(settleMillis).
     ///      c. Read title → currentTitle.
     ///      d. If currentTitle matches expectedTitle → return true.
@@ -71,6 +74,16 @@ internal sealed class WarpPaneFocuser
             return false;
         }
 
+        // 2b. Warmup pause: SetForegroundWindow returns before focus has
+        // actually transferred, and SendInput sends to whatever window IS
+        // foreground at fire time. Without this pause, Ctrl+Tab races with
+        // the foreground transfer and lands on Booster instead of Warp,
+        // leaving Warp focused but on the wrong tab.
+        if (this._warmupMillis > 0)
+        {
+            this._clock.Sleep(this._warmupMillis);
+        }
+
         // 3. Read current title → originalTitle
         string originalTitle = this._titleReader.ReadTitle(hwnd);
 
@@ -83,8 +96,8 @@ internal sealed class WarpPaneFocuser
         // 5. Loop up to maxIterations
         for (int i = 0; i < this._maxIterations; i++)
         {
-            // a. SendCtrlTab()
-            this._keys.SendCtrlTab();
+            // a. SendNextTab() — Ctrl+PageDown for Warp on Windows
+            this._keys.SendNextTab();
 
             // b. Sleep(settleMillis)
             this._clock.Sleep(this._settleMillis);

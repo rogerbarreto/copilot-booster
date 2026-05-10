@@ -147,7 +147,7 @@ public sealed class WarpPaneFocusLiveTests : IDisposable
 
         for (var i = 0; i < 20; i++)
         {
-            keys.SendCtrlTab();
+            keys.SendNextTab();
             clock.Sleep(150);
 
             var title = titleReader.ReadTitle(hwnd);
@@ -224,7 +224,7 @@ internal sealed class LiveWarpScenario
                 return;
             }
 
-            keys.SendCtrlTab();
+            keys.SendNextTab();
             clock.Sleep(150);
         }
     }
@@ -338,7 +338,7 @@ internal sealed class Win32KeyboardSender : IKeyboardSender
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, nuint dwExtraInfo);
 
-    public void SendCtrlTab()
+    public void SendNextTab()
     {
         const byte VK_CONTROL = 0x11;
         const byte VK_TAB = 0x09;
