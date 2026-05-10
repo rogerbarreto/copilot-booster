@@ -7,6 +7,7 @@ namespace CopilotBooster.IntegrationTests;
 /// The service uses dwFlags=0x0002 which includes WINEVENT_SKIPOWNPROCESS,
 /// so test windows must be created in a separate process via cmd.exe.
 /// </summary>
+[Trait("Category", "RequiresInteractiveDesktop")]
 [Collection(WindowEventHookCollection.Name)]
 public class WindowEventHookIntegrationTests
 {

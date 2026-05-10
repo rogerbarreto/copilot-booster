@@ -9,6 +9,7 @@ namespace CopilotBooster.IntegrationTests.Integration;
 /// "Copilot CLI - {sessionId}" title for Copilot CLI — the same way MainForm launches them.
 /// Wires WindowEventHookService → ActiveStatusTracker → SessionGridVisuals identically to MainForm.
 /// </summary>
+[Trait("Category", "RequiresInteractiveDesktop")]
 [Collection(WindowEventHookCollection.Name)]
 public sealed class RunningAppsGridDetectionTests : IDisposable
 {

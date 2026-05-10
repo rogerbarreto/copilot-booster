@@ -2,6 +2,7 @@
 
 namespace CopilotBooster.IntegrationTests;
 
+[Trait("Category", "RequiresInteractiveDesktop")]
 [Collection(WindowEventHookCollection.Name)]
 public class TerminalTitleDetectionIntegrationTests(ITestOutputHelper output)
 {
