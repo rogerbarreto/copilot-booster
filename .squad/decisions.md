@@ -1,3 +1,42 @@
+## 2026-05-10: CI split — `test.yml` owns validation, `release.yml` delegates via `workflow_call`
+
+**Date:** 2026-05-10  
+**Status:** Delivered  
+**Contributors:** Neo (workflow split), Tank (CI-fragile test trait)
+
+### Decision A — Two workflows, one validation pipeline
+
+`.github/workflows/test.yml` is the canonical validation gate. Triggers: `pull_request` on `[dev, preview, main, insider]`, `push` on `main`, `merge_group`, `workflow_call`. Steps: setup-dotnet 10.0.x → build src + both test projects → `dotnet format --verify-no-changes` → unit tests → Playwright install → integration tests with `-notrait "Category=LocalOnly" -notrait "Category=RequiresInteractiveDesktop"`. Runs on `windows-latest` (WinForms + Playwright requirement).
+
+`.github/workflows/release.yml` triggers only on `v*` tag push and contains two jobs:
+
+```yaml
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+  signing-info:
+    needs: test
+```
+
+The release workflow no longer duplicates test logic — it reuses `test.yml` via `workflow_call`. After validation, `signing-info` produces the summary table consumed by the private signing repository.
+
+`.github/workflows/squad-ci.yml` (the scaffolding stub that echoed `"No build commands configured"`) was deleted. Branch-protection ruleset already required the `test` context, so no GitHub-settings change was needed.
+
+**Rationale:** Roger's directive — "release only worries about the release, if possible we use the test.yml and release job runs if test passes in merge_queue or main." Reusable workflow `workflow_call` is the cleanest way to express "tag push must satisfy the same gate as PRs" without copy-pasting the test job.
+
+### Decision B — `RequiresInteractiveDesktop` trait for desktop-bound integration tests
+
+Integration tests that spawn real Windows processes (`cmd.exe`, `wt.exe`, Warp, `mspaint.exe`, IDE simulators) and rely on global `WinEvent` hooks (`EVENT_OBJECT_NAMECHANGE`, foreground/create/destroy notifications) are tagged with `[Trait("Category", "RequiresInteractiveDesktop")]`. CI filters them via `-notrait`; locally they run by default (no env var opt-in needed, distinguishing this from the existing `LocalOnly` category).
+
+**Class-level (entire class is desktop-bound):** `TerminalTitleDetectionIntegrationTests`, `WindowEventHookIntegrationTests`, `RunningAppsGridDetectionTests`.  
+**Method-level (mixed class):** 6 tests in `IdeTrackingIntegrationTests`.
+
+**When to opt in:** any new test that launches a real terminal/IDE/window process or depends on hosted-runner WinEvent hook delivery.
+
+**Rationale:** GitHub-hosted `windows-latest` runners do not reliably deliver global WinEvent notifications for externally-spawned console windows. The 7+ tests that surfaced as failures when CI moved off the stub workflow are environmentally fragile, not product bugs. `LocalOnly` was rejected because it auto-skips locally without `COPILOT_BOOSTER_RUN_LOCALONLY=1`, which would regress local dev convenience.
+
+---
+
 ## 2026-05-10: PR/Issue auto-link at session creation — return-shape struct + lambda-internal seeding
 
 **Date:** 2026-05-10  
