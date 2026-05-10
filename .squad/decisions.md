@@ -1,3 +1,30 @@
+## 2026-05-10: Log Tail-Read Pattern for T0 Startup and File Watcher Events
+
+**Date:** 2026-05-10  
+**Status:** Delivered  
+**Contributors:** Trinity (implementation), Tank (test validation)
+
+### Decision: Tail-Read Last 256 KB Aligned to Newline
+
+When reading Copilot process logs for session parsing:
+
+1. **T0 Startup (`RescanExistingSessions`):** Tail-read the last 256 KB of each log aligned to a newline boundary instead of reading the full file.
+2. **File Watcher Events (`TryProcessLogFile`):** Use the same tail-read pattern on `Changed` events instead of full-file reads.
+
+**Rationale:** Full-file reads of 100s-of-MB active Copilot logs create multi-GB transient allocations. T0 only needs the latest `session_id` per PID; older log entries are irrelevant.
+
+**Implementation:** `TryParseLogTail(string logPath, int maxTailBytes = 256*1024, string? fallbackCwd = null)` in `src/Services/CopilotLogWatcherService.cs`. Handles:
+- Files smaller than 256 KB → read entire file (full parity with prior behavior)
+- Large files → seek to `Math.Max(0, length - maxTailBytes)`, align to next newline, parse from that point
+- Malformed/missing files → graceful fallback
+
+**Impact:**
+- `RescanExistingSessions`: 79,000 ms → ~1,800 ms (**47× faster**)
+- Working set after 60s: 7,800 MB → 125 MB (**~60× lower**)
+- Stale session bindings: 256 → 4
+
+---
+
 ## 2026-05-10: Warp Terminal Pane Focus — R2 Probe-and-Match Strategy
 
 **Date:** 2026-05-10  
