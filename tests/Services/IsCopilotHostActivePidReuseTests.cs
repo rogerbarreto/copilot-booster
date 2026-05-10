@@ -32,7 +32,8 @@ public sealed class IsCopilotHostActivePidReuseTests
             focusWindowHandle: _ => true,
             isWindowAlive: _ => true,
             isProcessAlive: _ => true,
-            isExpectedCopilotProcess: _ => false);
+            isExpectedCopilotProcess: _ => false,
+            isSessionLiveForCopilotPid: (_, _) => true);
 
         var info = new CopilotHostInfo(
             HostHwnd: new IntPtr(0x6D11A),
@@ -60,7 +61,8 @@ public sealed class IsCopilotHostActivePidReuseTests
             focusWindowHandle: _ => true,
             isWindowAlive: _ => true,
             isProcessAlive: _ => true,
-            isExpectedCopilotProcess: _ => true);
+            isExpectedCopilotProcess: _ => true,
+            isSessionLiveForCopilotPid: (_, _) => true);
 
         var info = new CopilotHostInfo(
             HostHwnd: new IntPtr(0x14062E),

@@ -1,0 +1,48 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [dev, preview, main, insider]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  merge_group:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        shell: pwsh
+        run: |
+          dotnet build src/CopilotBooster.csproj -c Release --nologo
+          dotnet build tests/CopilotBooster.Tests.csproj -c Release --nologo
+          dotnet build tests/CopilotBooster.IntegrationTests.csproj -c Release --nologo
+
+      - name: Format check
+        run: dotnet format copilot-booster.sln --verify-no-changes --verbosity normal
+
+      - name: Unit Tests
+        run: dotnet run --project tests/CopilotBooster.Tests.csproj -c Release
+
+      - name: Install Playwright browsers
+        shell: pwsh
+        run: |
+          dotnet build tests/CopilotBooster.IntegrationTests.csproj -c Release --nologo
+          $pw = Get-ChildItem -Path tests/bin -Recurse -Filter "playwright.ps1" | Select-Object -First 1
+          if ($pw) { & pwsh $pw.FullName install chromium }
+          else { Write-Error "playwright.ps1 not found"; exit 1 }
+
+      - name: Integration Tests
+        run: dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release -- -notrait "Category=LocalOnly"

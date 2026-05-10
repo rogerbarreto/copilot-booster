@@ -277,8 +277,8 @@ public sealed class WarpMultiTabE2ETests : IDisposable
         var tab2Title = $"TAB-2-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
         var tab3Title = $"TAB-3-{Guid.NewGuid().ToString("N").Substring(0, 8)}";
 
-        this.OpenNewTabAndSetTitle(hwnd, tab2Title);
-        this.OpenNewTabAndSetTitle(hwnd, tab3Title);
+        OpenNewTabAndSetTitle(hwnd, tab2Title);
+        OpenNewTabAndSetTitle(hwnd, tab3Title);
 
         for (var i = 0; i < 10; i++)
         {
@@ -294,7 +294,7 @@ public sealed class WarpMultiTabE2ETests : IDisposable
         return new SpawnedWarpScenario(newWarpPid, hwnd, originalTitle, tab2Title, tab3Title);
     }
 
-    private void OpenNewTabAndSetTitle(IntPtr hwnd, string title)
+    private static void OpenNewTabAndSetTitle(IntPtr hwnd, string title)
     {
         if (!FocusWindow(hwnd))
         {
