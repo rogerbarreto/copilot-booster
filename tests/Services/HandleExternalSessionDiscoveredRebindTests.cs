@@ -1,9 +1,5 @@
 ﻿
-using System;
 using System.Diagnostics;
-using System.IO;
-using CopilotBooster.Models;
-using CopilotBooster.Services;
 
 namespace CopilotBooster.Tests.Services;
 /// <summary>
