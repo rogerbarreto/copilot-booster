@@ -23,7 +23,8 @@ public class TerminalTitleDetectionIntegrationTests(ITestOutputHelper output)
             };
             hookService.Start();
 
-            proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title Terminal - test-session-abc")
+            var titleArg = TestWindowTitle.For("Terminal - test-session-abc");
+            proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title {titleArg}")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -62,7 +63,8 @@ public class TerminalTitleDetectionIntegrationTests(ITestOutputHelper output)
             };
             hookService.Start();
 
-            proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title Copilot CLI - session-xyz")
+            var titleArg = TestWindowTitle.For("Copilot CLI - session-xyz");
+            proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title {titleArg}")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -98,7 +100,8 @@ public class TerminalTitleDetectionIntegrationTests(ITestOutputHelper output)
             };
             hookService.Start();
 
-            proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title Terminal - test-session-123")
+            var titleArg = TestWindowTitle.For("Terminal - test-session-123");
+            proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title {titleArg}")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -142,9 +145,10 @@ public class TerminalTitleDetectionIntegrationTests(ITestOutputHelper output)
             hookService.Start();
 
             // Launch cmd.exe — it initially gets a generic title, then changes it after a delay
+            var titleArg = TestWindowTitle.For("Terminal - dynamic-session");
             proc = Process.Start(new ProcessStartInfo(
                 "cmd.exe",
-                "/k \"ping -n 3 127.0.0.1 >nul & title Terminal - dynamic-session\"")
+                $"/k \"ping -n 3 127.0.0.1 >nul & title {titleArg}\"")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)

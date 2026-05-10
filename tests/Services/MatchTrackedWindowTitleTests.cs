@@ -141,6 +141,34 @@ public class MatchTrackedWindowTitleTests
     }
 
     [Fact]
+    public void TestSuitePrefix_TerminalPattern_StripsPrefixAndMatches()
+    {
+        // Integration tests label spawned windows with the Administrator-style prefix
+        // "BoosterTest-{testName}:  " so leaked windows can be traced back to the
+        // test that opened them. The prefix must be stripped exactly like the
+        // Windows "Administrator:  " elevation prefix.
+        var result = WindowFocusService.MatchTrackedWindowTitle(
+            "BoosterTest-WindowDestroyed_FiresForTrackedHwnd:  Terminal - abc-123",
+            null);
+
+        Assert.NotNull(result);
+        Assert.Equal("abc-123", result.Value.SessionId);
+        Assert.Equal("Terminal", result.Value.Label);
+    }
+
+    [Fact]
+    public void TestSuitePrefix_CopilotCliPattern_StripsPrefixAndMatches()
+    {
+        var result = WindowFocusService.MatchTrackedWindowTitle(
+            "BoosterTest-CopilotCliTitle_DetectedByHooksAndMatched:  Copilot CLI - session-xyz",
+            null);
+
+        Assert.NotNull(result);
+        Assert.Equal("session-xyz", result.Value.SessionId);
+        Assert.Equal("Copilot CLI", result.Value.Label);
+    }
+
+    [Fact]
     public void TitleWithColonInContent_DoesNotFalseStrip()
     {
         // A title like "Terminal - session:  with colon" should NOT strip "Terminal - session" as admin prefix

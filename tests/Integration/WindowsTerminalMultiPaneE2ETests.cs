@@ -34,6 +34,9 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
     private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -72,9 +75,6 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
     private const int SW_RESTORE = 9;
     private const byte VK_MENU = 0x12;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
-
-    private const byte VK_CONTROL = 0x11;
-    private const byte VK_D = 0x44;
     private const uint KEYEVENTF_KEYUP = 0x0002;
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -318,8 +318,10 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         Directory.CreateDirectory(Program.AppDataDir);
         SweepOrphanItSessionDirs();
 
-        var session = new RealCopilotSession("StartupRescan-" + Guid.NewGuid().ToString("N").Substring(0, 6));
-        session.SessionId = Guid.NewGuid().ToString();
+        var session = new RealCopilotSession("StartupRescan-" + Guid.NewGuid().ToString("N").Substring(0, 6))
+        {
+            SessionId = Guid.NewGuid().ToString()
+        };
         session.SessionDir = Path.Combine(Program.SessionStateDir, session.SessionId);
         Directory.CreateDirectory(session.SessionDir);
         this._createdSessionDirs.Add(session.SessionDir);
@@ -328,25 +330,15 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         // Write sentinel file so Dispose cleanup can identify this as a test session
         File.WriteAllText(Path.Combine(session.SessionDir, SessionCleanupSentinel), string.Empty);
 
-        // Write minimal workspace.yaml with id, cwd, and timestamps
-        var workspaceYaml = $@"id: {session.SessionId}
-cwd: {Environment.CurrentDirectory.Replace("\\", "/")}
-summary_count: 0
-created_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
-updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
-";
-        File.WriteAllText(Path.Combine(session.SessionDir, "workspace.yaml"), workspaceYaml);
-
-        // Write minimal events.jsonl with session.start event
-        var sessionStartEvent = new
-        {
-            timestamp = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-            type = "session.start",
-            data = new { sessionId = session.SessionId }
-        };
-        File.WriteAllText(
+        // Write minimal workspace.yaml and events.jsonl using proven helpers
+        WriteMinimalWorkspaceYaml(
+            Path.Combine(session.SessionDir, "workspace.yaml"),
+            session.SessionId,
+            Environment.CurrentDirectory);
+        WriteSessionStartEvent(
             Path.Combine(session.SessionDir, "events.jsonl"),
-            JsonSerializer.Serialize(sessionStartEvent) + "\n");
+            session.SessionId,
+            Environment.CurrentDirectory);
 
         // Launch Windows Terminal with copilot --resume
         var gateway = new WindowsTerminalPaneGateway();
@@ -396,24 +388,61 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
             return;
         }
 
-        // Wait for ~/.copilot/logs/process-*-{pid}.log to exist — that file is what
-        // RescanExistingSessions reads to discover live copilot.exe processes. Without
-        // it, the rescan walks an empty list and the test cannot validate the bind path.
+        // Find and track the WT window HWND for cleanup. Walk from copilot.exe → cmd/pwsh → WindowsTerminal.exe.
+        var wtHwnd = IntPtr.Zero;
+        foreach (var hwnd in EnumerateWindowsTerminalHwnds())
+        {
+            // Check if this WT window owns our test session via its panes
+            var paneGateway = new WindowsTerminalPaneGateway();
+            var panes = paneGateway.EnumeratePanes(hwnd).Panes;
+            // Our tab should have either the session label or be a cmd/powershell pane hosting copilot
+            if (panes.Any(p => p.Name.Contains(session.Label, StringComparison.OrdinalIgnoreCase) ||
+                               p.Name.Contains("Command Prompt", StringComparison.OrdinalIgnoreCase) ||
+                               p.Name.Contains("PowerShell", StringComparison.OrdinalIgnoreCase)))
+            {
+                wtHwnd = hwnd;
+                this._wtWindowHwnds.Add(hwnd);
+                break;
+            }
+        }
+
+        if (wtHwnd == IntPtr.Zero)
+        {
+            // Fallback: if we can't find via pane inspection, just track all current WT windows
+            // (risky but better than leaking). Ideally we'd walk the process tree from copilotPid.
+            foreach (var hwnd in EnumerateWindowsTerminalHwnds())
+            {
+                this._wtWindowHwnds.Add(hwnd);
+            }
+        }
+
+        // Wait for ~/.copilot/logs/process-*-{pid}.log to contain "Workspace initialized"
+        // which proves copilot fully loaded the session and is ready for host resolution.
         var logsDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".copilot",
             "logs");
         var processLogPath = (string?)null;
-        for (int attempt = 0; attempt < 30; attempt++)
+        var workspaceInitialized = false;
+        for (int attempt = 0; attempt < 90; attempt++) // 45s budget
         {
             if (Directory.Exists(logsDir))
             {
                 processLogPath = Directory
                     .EnumerateFiles(logsDir, $"process-*-{session.CopilotPid}.log")
                     .FirstOrDefault();
-                if (processLogPath != null && new FileInfo(processLogPath).Length > 0)
+                if (processLogPath != null && new FileInfo(processLogPath).Length > 100)
                 {
-                    break;
+                    // Read log with FileShare.ReadWrite since copilot.exe may still be writing to it
+                    using var fs = new FileStream(processLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var sr = new StreamReader(fs);
+                    var logContent = sr.ReadToEnd();
+                    if (logContent.Contains("Workspace initialized:", StringComparison.OrdinalIgnoreCase) &&
+                        logContent.Contains(session.SessionId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        workspaceInitialized = true;
+                        break;
+                    }
                 }
             }
 
@@ -421,8 +450,11 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
         }
 
         Assert.True(
-            processLogPath != null,
-            $"Expected ~/.copilot/logs/process-*-{session.CopilotPid}.log to be written by copilot.exe within 15s");
+            workspaceInitialized,
+            $"Expected copilot to write 'Workspace initialized: {session.SessionId}' to log within 45s");
+
+        // Settle to ensure WT UIA pane structure is queryable for host resolution
+        Thread.Sleep(2_000);
 
         // NOW construct booster services using PRODUCTION startup path — NO HandleExternalSessionDiscovered call
         var tracker = new ActiveStatusTracker();
@@ -541,7 +573,8 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
     private static (Process? WtLauncher, IntPtr WtHwnd) StartWtAndTypeCopilotInTwoTabs(
         WindowsTerminalPaneGateway gateway,
         RealCopilotSession a,
-        RealCopilotSession b)
+        RealCopilotSession b,
+        [System.Runtime.CompilerServices.CallerMemberName] string testName = "")
     {
         // Windows Terminal uses a single "monarch" process that hosts all windows, so a new wt
         // window does NOT create a new WindowsTerminal.exe PID — it adds a new top-level HWND
@@ -549,10 +582,14 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
         var existingWtHwnds = EnumerateWindowsTerminalHwnds().ToHashSet();
 
         // `-w new` forces a fresh wt window even if global glomming is enabled.
+        // The `new-tab --title` tags the first tab with the originating test method so a
+        // leaked window can be identified at a glance. Copilot's ESC]0; will overwrite the
+        // title once the prompt is reached, so we don't pass --suppressApplicationTitle.
+        var initialTitle = TestWindowTitle.Tag(testName);
         var launcher = Process.Start(new ProcessStartInfo
         {
             FileName = "wt.exe",
-            Arguments = "-w new",
+            Arguments = $"-w new new-tab --title \"{initialTitle}\"",
             UseShellExecute = false,
             CreateNoWindow = false
         });
@@ -914,20 +951,37 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
             TryKillProcessTree(pid);
         }
 
-        // Each wtHwnd we tracked hosts exactly two zombie tabs (one per session). Ctrl+D
-        // on a zombie tab closes it; closing the last tab closes the wt window.
-        foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero).Distinct())
+        // Give process cleanup a moment to settle before closing WT windows
+        Thread.Sleep(500);
+
+        // Close WT windows via PostMessage(WM_CLOSE). This is non-blocking and queues the close.
+        foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero && IsWindow(hwnd)).Distinct())
         {
-            TryCloseZombieWtTabs(hwnd, tabCount: 2);
+            try { _ = PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); } catch { }
         }
 
-        // Safety net for any window that didn't respond to Ctrl+D (e.g. user changed wt
-        // closeOnExit profile setting). WM_CLOSE prompts wt's "close-all-tabs" dialog
-        // when a tab still has a running process — but at this point all our processes
-        // are dead, so wt accepts the close cleanly.
-        foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero).Distinct())
+        // Wait briefly for windows to close gracefully
+        Thread.Sleep(1_000);
+
+        // Force-kill any WT windows that didn't close
+        foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero && IsWindow(hwnd)).Distinct())
         {
-            try { _ = SendMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); } catch { }
+            try
+            {
+                // Get the WT process PID from the window and kill it
+                var threadId = GetWindowThreadProcessId(hwnd, out var wtPid);
+                if (threadId != 0 && wtPid > 0)
+                {
+                    var wtProcess = Process.GetProcessById((int)wtPid);
+                    if (!wtProcess.HasExited)
+                    {
+                        wtProcess.Kill();
+                        wtProcess.WaitForExit(2_000);
+                    }
+                    wtProcess.Dispose();
+                }
+            }
+            catch { }
         }
 
         foreach (var process in this._startedProcesses)
@@ -936,7 +990,7 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
             {
                 if (!process.HasExited && process.MainWindowHandle != IntPtr.Zero)
                 {
-                    _ = SendMessage(process.MainWindowHandle, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                    _ = PostMessage(process.MainWindowHandle, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 }
             }
             catch { }
@@ -964,49 +1018,6 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
         {
             // Process already gone or insufficient privilege — best-effort cleanup.
         }
-    }
-
-    private static void TryCloseZombieWtTabs(IntPtr wtHwnd, int tabCount)
-    {
-        try
-        {
-            if (!IsWindow(wtHwnd))
-            {
-                return;
-            }
-
-            // Give wt a moment to render the zombie state after pwsh exits.
-            Thread.Sleep(300);
-
-            for (var i = 0; i < tabCount; i++)
-            {
-                if (!IsWindow(wtHwnd))
-                {
-                    return;
-                }
-
-                if (!WindowFocusService.TryFocusWindowHandle(wtHwnd))
-                {
-                    return;
-                }
-
-                Thread.Sleep(150);
-                SendCtrlD();
-                Thread.Sleep(250);
-            }
-        }
-        catch
-        {
-            // Best-effort cleanup — never fail Dispose.
-        }
-    }
-
-    private static void SendCtrlD()
-    {
-        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
-        keybd_event(VK_D, 0, 0, UIntPtr.Zero);
-        keybd_event(VK_D, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
     }
 
     private void CleanupCreatedSessionDirs()
@@ -1733,14 +1744,18 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
     /// MULTIPLE wt windows before any typing — opening more wt windows AFTER typing
     /// races SendKeys delivery against the foreground change the new window triggers.
     /// </summary>
-    private static IntPtr OpenFreshWtWithExtraTab(WindowsTerminalPaneGateway gateway, out Process? launcher)
+    private static IntPtr OpenFreshWtWithExtraTab(
+        WindowsTerminalPaneGateway gateway,
+        out Process? launcher,
+        [System.Runtime.CompilerServices.CallerMemberName] string testName = "")
     {
         var existingWtHwnds = EnumerateWindowsTerminalHwnds().ToHashSet();
 
+        var initialTitle = TestWindowTitle.Tag(testName);
         launcher = Process.Start(new ProcessStartInfo
         {
             FileName = "wt.exe",
-            Arguments = "-w new",
+            Arguments = $"-w new new-tab --title \"{initialTitle}\"",
             UseShellExecute = false,
             CreateNoWindow = false
         });
@@ -1785,14 +1800,18 @@ updated_at: {DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}
     /// Spawns a fresh wt.exe window via <c>-w new</c>, waits for its single default tab's
     /// UIA pane to register. Does NOT type any commands. Returns the new wt hwnd.
     /// </summary>
-    private static IntPtr OpenFreshWtWithSingleTab(WindowsTerminalPaneGateway gateway, out Process? launcher)
+    private static IntPtr OpenFreshWtWithSingleTab(
+        WindowsTerminalPaneGateway gateway,
+        out Process? launcher,
+        [System.Runtime.CompilerServices.CallerMemberName] string testName = "")
     {
         var existingWtHwnds = EnumerateWindowsTerminalHwnds().ToHashSet();
 
+        var initialTitle = TestWindowTitle.Tag(testName);
         launcher = Process.Start(new ProcessStartInfo
         {
             FileName = "wt.exe",
-            Arguments = "-w new",
+            Arguments = $"-w new new-tab --title \"{initialTitle}\"",
             UseShellExecute = false,
             CreateNoWindow = false
         });

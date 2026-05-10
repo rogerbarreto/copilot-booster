@@ -38,6 +38,8 @@ internal class ActiveStatusTracker
     private readonly Func<IntPtr, bool> _focusWindowHandle;
     private readonly Func<IntPtr, bool> _isWindowAlive;
     private readonly Func<int, bool> _isProcessAlive;
+    private readonly Func<int, bool> _isExpectedCopilotProcess;
+    private readonly Func<string, int, bool> _isSessionLiveForCopilotPid;
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     internal readonly EventsJournalService EventsJournal = new();
     private bool _handleCacheInitialLoadDone;
@@ -118,6 +120,31 @@ internal class ActiveStatusTracker
         Func<IntPtr, bool> focusWindowHandle,
         Func<IntPtr, bool> isWindowAlive,
         Func<int, bool> isProcessAlive)
+        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, isWindowAlive, isProcessAlive, IsExpectedCopilotProcess)
+    {
+    }
+
+    internal ActiveStatusTracker(
+        CopilotHostResolver hostResolver,
+        IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
+        WindowsTerminalPaneCacheService windowsTerminalPaneCache,
+        Func<IntPtr, bool> focusWindowHandle,
+        Func<IntPtr, bool> isWindowAlive,
+        Func<int, bool> isProcessAlive,
+        Func<int, bool> isExpectedCopilotProcess)
+        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, isWindowAlive, isProcessAlive, isExpectedCopilotProcess, DefaultIsSessionLiveForCopilotPid)
+    {
+    }
+
+    internal ActiveStatusTracker(
+        CopilotHostResolver hostResolver,
+        IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
+        WindowsTerminalPaneCacheService windowsTerminalPaneCache,
+        Func<IntPtr, bool> focusWindowHandle,
+        Func<IntPtr, bool> isWindowAlive,
+        Func<int, bool> isProcessAlive,
+        Func<int, bool> isExpectedCopilotProcess,
+        Func<string, int, bool> isSessionLiveForCopilotPid)
     {
         this._hostResolver = hostResolver;
         this._windowsTerminalPaneGateway = windowsTerminalPaneGateway;
@@ -125,6 +152,21 @@ internal class ActiveStatusTracker
         this._focusWindowHandle = focusWindowHandle;
         this._isWindowAlive = isWindowAlive;
         this._isProcessAlive = isProcessAlive;
+        this._isExpectedCopilotProcess = isExpectedCopilotProcess;
+        this._isSessionLiveForCopilotPid = isSessionLiveForCopilotPid;
+    }
+
+    private static bool DefaultIsSessionLiveForCopilotPid(string sessionId, int copilotPid)
+    {
+        // Test-friendly: if SessionStateDir is not set, assume the binding is live
+        if (string.IsNullOrEmpty(Program.SessionStateDir))
+        {
+            return true;
+        }
+
+        // T1/T2 paths: allow missing events.jsonl (fresh sessions)
+        // T0 (RescanExistingSessions) explicitly uses allowMissingEventsJsonl: false via direct static calls
+        return SessionPidLivenessValidator.IsLive(Program.SessionStateDir, sessionId, copilotPid, allowMissingEventsJsonl: true);
     }
 
     private static bool IsProcessAlive(int pid)
@@ -137,6 +179,38 @@ internal class ActiveStatusTracker
         try
         {
             return !Process.GetProcessById(pid).HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Validates that the process at <paramref name="pid"/> is actually a copilot.exe
+    /// process — not a different process whose PID was recycled by Windows after the
+    /// original copilot died. This guards <see cref="IsCopilotHostActive"/> against
+    /// PID-reuse false positives where stale <c>_copilotHosts</c> bindings would
+    /// otherwise still register as live (e.g. msedge.exe taking over a dead copilot's PID).
+    /// Edge:Copilot tab tracking flows through <c>_edgeWorkspaces</c>, not <c>_copilotHosts</c>,
+    /// so the hardcoded "copilot" expectation does not affect Edge handling.
+    /// </summary>
+    private static bool IsExpectedCopilotProcess(int pid)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var p = Process.GetProcessById(pid);
+            if (p.HasExited)
+            {
+                return false;
+            }
+
+            return string.Equals(p.ProcessName, "copilot", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -225,6 +299,35 @@ internal class ActiveStatusTracker
     /// </summary>
     internal void HandleExternalSessionDiscovered(string sessionId, int copilotPid)
     {
+        // Bug D rebind: if this copilotPid is already bound to a DIFFERENT sessionId, evict the old binding first
+        string? staleSessionId = null;
+        foreach (var kvp in this._copilotHosts)
+        {
+            if (kvp.Value.CopilotPid == copilotPid && !string.Equals(kvp.Key, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                staleSessionId = kvp.Key;
+                break;
+            }
+        }
+
+        if (staleSessionId != null)
+        {
+            Program.Logger.LogInformation(
+                "Bug D rebind: copilotPid={Pid} was bound to {OldSession}, rebinding to {NewSession}",
+                copilotPid, staleSessionId, sessionId);
+            this.RemoveCopilotHost(staleSessionId);
+        }
+
+        // Bug B gate: consult validator (with allowMissingEventsJsonl=true default for T1)
+        if (!this._isSessionLiveForCopilotPid(sessionId, copilotPid))
+        {
+            Program.Logger.LogDebug(
+                "Bug B gate: rejecting external discovery sessionId={SessionId} copilotPid={Pid} (validator returned false)",
+                sessionId,
+                copilotPid);
+            return;
+        }
+
         var info = this.ResolveCopilotHost(sessionId, copilotPid, sessionSummary: null);
         if (info == null)
         {
@@ -250,7 +353,7 @@ internal class ActiveStatusTracker
     {
         // Don't re-resolve if we already have a host for this session and it's still alive
         var existing = this.GetCopilotHost(sessionId);
-        if (existing != null && this.IsCopilotHostActive(existing))
+        if (existing != null && this.IsCopilotHostActive(sessionId, existing))
         {
             return;
         }
@@ -312,7 +415,7 @@ internal class ActiveStatusTracker
 
                 scannedCount++;
 
-                // Parse the log file to get the session ID
+                // Parse the log file to get ALL session IDs (Bug D: handle /resume)
                 try
                 {
                     string[] lines;
@@ -322,22 +425,39 @@ internal class ActiveStatusTracker
                         lines = reader.ReadToEnd().Split('\n');
                     }
 
-                    var (sessionId, _) = CopilotLogWatcherService.TryParseLogContent(lines);
-                    if (sessionId == null)
+                    var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
+                    if (sessions.Count == 0)
                     {
                         continue;
                     }
 
-                    // If we already have a host for this session and it's still alive, skip
-                    var existing = this.GetCopilotHost(sessionId);
-                    if (existing != null && this.IsCopilotHostActive(existing))
+                    // Bug D: T0 rescan processes ALL sessions from the log (not just first)
+                    // For each session in this PID's log, bind if eligible.
+                    foreach (var (sessionId, _) in sessions)
                     {
-                        continue;
-                    }
+                        // Bug B gate: drop stale bindings before checking existing hosts
+                        if (!SessionPidLivenessValidator.IsLive(Program.SessionStateDir, sessionId, pid.Value, allowMissingEventsJsonl: false))
+                        {
+                            // Stale binding — drop and don't rebind.
+                            if (this.GetCopilotHost(sessionId) != null)
+                            {
+                                this.RemoveCopilotHost(sessionId);
+                            }
 
-                    // Bind this session to its host via the standard discovery path
-                    this.HandleExternalSessionDiscovered(sessionId, pid.Value);
-                    boundCount++;
+                            continue;
+                        }
+
+                        // If we already have a host for this session and it's still alive, skip
+                        var existing = this.GetCopilotHost(sessionId);
+                        if (existing != null && this.IsCopilotHostActive(sessionId, existing))
+                        {
+                            continue;
+                        }
+
+                        // Bind this session to its host via the standard discovery path
+                        this.HandleExternalSessionDiscovered(sessionId, pid.Value);
+                        boundCount++;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -746,13 +866,23 @@ internal class ActiveStatusTracker
                 return null;
             }
 
+            string? name = null;
+            string? summary = null;
             foreach (var line in File.ReadLines(workspaceFile))
             {
-                if (line.StartsWith("summary:", StringComparison.OrdinalIgnoreCase))
+                if (line.StartsWith("name:", StringComparison.OrdinalIgnoreCase))
                 {
-                    return line[8..].Trim().Trim('"');
+                    name = line[5..].Trim().Trim('"');
+                }
+                else if (line.StartsWith("summary:", StringComparison.OrdinalIgnoreCase))
+                {
+                    summary = line[8..].Trim().Trim('"');
                 }
             }
+
+            // Prefer the v1.0.44 `name:` field (authoritative current title) over the
+            // legacy `summary:` so user-renamed sessions still match their pane titles.
+            return !string.IsNullOrWhiteSpace(name) ? name : summary;
         }
         catch (Exception ex)
         {
@@ -947,7 +1077,7 @@ internal class ActiveStatusTracker
     {
         var parts = new List<string>();
         var hasLiveCopilotHost = this._copilotHosts.TryGetValue(sessionId, out var copilotHost)
-            && this.IsCopilotHostActive(copilotHost);
+            && this.IsCopilotHostActive(sessionId, copilotHost);
         if (hasLiveCopilotHost)
         {
             parts.Add("Copilot CLI");
@@ -1073,10 +1203,13 @@ internal class ActiveStatusTracker
         return string.Join("\n", parts);
     }
 
-    private bool IsCopilotHostActive(CopilotHostInfo hostInfo)
+    private bool IsCopilotHostActive(string sessionId, CopilotHostInfo hostInfo)
     {
         var focusHwnd = IsWindowsTerminalHost(hostInfo) ? GetParentHostHwnd(hostInfo) : hostInfo.HostHwnd;
-        return this._isWindowAlive(focusHwnd) && this._isProcessAlive(hostInfo.CopilotPid);
+        return this._isWindowAlive(focusHwnd)
+            && this._isProcessAlive(hostInfo.CopilotPid)
+            && this._isExpectedCopilotProcess(hostInfo.CopilotPid)
+            && this._isSessionLiveForCopilotPid(sessionId, hostInfo.CopilotPid);
     }
 
     /// <summary>
@@ -1086,7 +1219,7 @@ internal class ActiveStatusTracker
     internal bool TryFocusCopilotCli(string sessionId)
     {
         // Priority 1: Use host HWND if available and alive
-        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
+        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(sessionId, hostInfo))
         {
             this.FocusCopilotHost(sessionId, hostInfo);
             return true;
@@ -1098,6 +1231,14 @@ internal class ActiveStatusTracker
             var cli = tracked.FirstOrDefault(t => t.Label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase));
             if (cli != default && this._isWindowAlive(cli.Hwnd))
             {
+                // Bug B: if a host is bound, gate by session liveness. (Legacy title-scan
+                // entries without a host fall through and focus normally.)
+                if (this._copilotHosts.TryGetValue(sessionId, out var boundHost)
+                    && !this._isSessionLiveForCopilotPid(sessionId, boundHost.CopilotPid))
+                {
+                    return false;
+                }
+
                 WindowFocusService.TryFocusWindowHandle(cli.Hwnd);
                 return true;
             }
@@ -1110,16 +1251,21 @@ internal class ActiveStatusTracker
             var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
             if (session != null && session.CopilotPid > 0)
             {
-                try
+                // Bug A + Bug B guards: validate process is copilot AND session is live for this PID
+                if (this._isExpectedCopilotProcess(session.CopilotPid)
+                    && this._isSessionLiveForCopilotPid(sessionId, session.CopilotPid))
                 {
-                    var p = Process.GetProcessById(session.CopilotPid);
-                    if (!p.HasExited)
+                    try
                     {
-                        WindowFocusService.TryFocusProcessWindow(session.CopilotPid);
-                        return true;
+                        var p = Process.GetProcessById(session.CopilotPid);
+                        if (!p.HasExited)
+                        {
+                            WindowFocusService.TryFocusProcessWindow(session.CopilotPid);
+                            return true;
+                        }
                     }
+                    catch { }
                 }
-                catch { }
             }
         }
 
@@ -1130,7 +1276,7 @@ internal class ActiveStatusTracker
     {
         var focusTargets = new List<(string name, Action focus)>();
         // Priority 1: Add host-resolved Copilot CLI first if available and alive
-        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(hostInfo))
+        if (this._copilotHosts.TryGetValue(sessionId, out var hostInfo) && this.IsCopilotHostActive(sessionId, hostInfo))
         {
             var capturedHostInfo = hostInfo;
             var capturedSessionId = sessionId;
@@ -1149,6 +1295,14 @@ internal class ActiveStatusTracker
                     continue;
                 }
 
+                // Bug B: if label is "Copilot CLI" and a host is bound, gate by session liveness
+                if (label.Equals("Copilot CLI", StringComparison.OrdinalIgnoreCase)
+                    && this._copilotHosts.TryGetValue(sessionId, out var boundHost)
+                    && !this._isSessionLiveForCopilotPid(sessionId, boundHost.CopilotPid))
+                {
+                    continue;
+                }
+
                 var capturedHwnd = hwnd;
                 focusTargets.Add((label, () => WindowFocusService.TryFocusWindowHandle(capturedHwnd)));
             }
@@ -1160,8 +1314,13 @@ internal class ActiveStatusTracker
             var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
             if (session != null && session.CopilotPid > 0)
             {
-                var pid = session.CopilotPid;
-                focusTargets.Add(("Copilot CLI", () => WindowFocusService.TryFocusProcessWindow(pid)));
+                // Bug A + Bug B guards: validate process is copilot AND session is live for this PID
+                if (this._isExpectedCopilotProcess(session.CopilotPid)
+                    && this._isSessionLiveForCopilotPid(sessionId, session.CopilotPid))
+                {
+                    var pid = session.CopilotPid;
+                    focusTargets.Add(("Copilot CLI", () => WindowFocusService.TryFocusProcessWindow(pid)));
+                }
             }
         }
 
@@ -1621,7 +1780,7 @@ internal class ActiveStatusTracker
             }
 
             var existing = this.GetCopilotHost(session.Id);
-            if (existing != null && this.IsCopilotHostActive(existing))
+            if (existing != null && this.IsCopilotHostActive(session.Id, existing))
             {
                 continue;
             }
@@ -2449,11 +2608,11 @@ internal class ActiveStatusTracker
     internal IEnumerable<EdgeWorkspaceService> GetTrackedEdgeWorkspaces()
         => this._edgeWorkspaces.Values.ToList();
 
-    private void ReprojectActiveCopilotHosts()
+    internal void ReprojectActiveCopilotHosts()
     {
         foreach (var kvp in this._copilotHosts.ToList())
         {
-            if (this.IsCopilotHostActive(kvp.Value))
+            if (this.IsCopilotHostActive(kvp.Key, kvp.Value))
             {
                 this.ProjectCopilotHostToActiveWindows(kvp.Key, kvp.Value);
             }

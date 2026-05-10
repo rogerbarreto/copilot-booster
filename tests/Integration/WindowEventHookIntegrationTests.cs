@@ -23,7 +23,8 @@ public class WindowEventHookIntegrationTests
             hookService.WindowCreated += hwnd => { detectedHwnd = hwnd; detected.Set(); };
             hookService.Start();
 
-            proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title CreatedTestWindow")
+            var titleArg = TestWindowTitle.For("CreatedTestWindow");
+            proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title {titleArg}")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -76,9 +77,11 @@ public class WindowEventHookIntegrationTests
             };
             hookService.Start();
 
+            var initialTitleArg = TestWindowTitle.For("InitialTitle");
+            var changedTitleArg = TestWindowTitle.For("ChangedTitle");
             proc = Process.Start(new ProcessStartInfo(
                 "cmd.exe",
-                "/k \"title InitialTitle & ping -n 2 127.0.0.1 >nul & title ChangedTitle\"")
+                $"/k \"title {initialTitleArg} & ping -n 2 127.0.0.1 >nul & title {changedTitleArg}\"")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -130,9 +133,10 @@ public class WindowEventHookIntegrationTests
 
             // Use /c so cmd.exe exits naturally after the ping completes (~3s),
             // triggering a normal window close and EVENT_OBJECT_DESTROY.
+            var titleArg = TestWindowTitle.For("DestroyTest");
             proc = Process.Start(new ProcessStartInfo(
                 "cmd.exe",
-                "/c \"title DestroyTest & ping -n 4 127.0.0.1 >nul\"")
+                $"/c \"title {titleArg} & ping -n 4 127.0.0.1 >nul\"")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -169,7 +173,8 @@ public class WindowEventHookIntegrationTests
             };
             hookService.Start();
 
-            proc = Process.Start(new ProcessStartInfo("cmd.exe", "/k title Terminal - test-session-id")
+            var titleArg = TestWindowTitle.For("Terminal - test-session-id");
+            proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title {titleArg}")
             {
                 UseShellExecute = true,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)

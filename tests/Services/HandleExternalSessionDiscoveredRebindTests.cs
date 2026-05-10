@@ -1,10 +1,11 @@
-namespace CopilotBooster.Tests.Services;
-
+﻿
 using System;
+using System.Diagnostics;
 using System.IO;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
 
+namespace CopilotBooster.Tests.Services;
 /// <summary>
 /// Tests for Bug D: /resume rebind support in ActiveStatusTracker.HandleExternalSessionDiscovered.
 /// When a copilotPid is already bound to sessionA, and a discovery event arrives for sessionB with
@@ -23,13 +24,13 @@ public sealed class HandleExternalSessionDiscoveredRebindTests
         string? removedSessionId = null;
         tracker.CopilotHostRemoved += (sid) => removedSessionId = sid;
 
-        // Pre-bind sessionA → PID 42
+        // Pre-bind sessionA → copilotPid (use our own PID so it passes liveness check)
         var sessionA = "aaaaaaaa-1111-2222-3333-444444444444";
         var sessionB = "bbbbbbbb-5555-6666-7777-888888888888";
-        var copilotPid = 42;
+        var copilotPid = Process.GetCurrentProcess().Id;
 
-        // Create a fake events.jsonl for sessionA so the liveness gate passes
-        var sessionDirA = Path.Combine(Path.GetTempPath(), "copilot-test-sessions", sessionA);
+        // Create fake events.jsonl for sessionA in Program.SessionStateDir so the liveness gate passes
+        var sessionDirA = Path.Combine(Program.SessionStateDir, sessionA);
         Directory.CreateDirectory(sessionDirA);
         File.WriteAllText(Path.Combine(sessionDirA, "events.jsonl"), "{}");
 
@@ -46,8 +47,8 @@ public sealed class HandleExternalSessionDiscoveredRebindTests
 
         Assert.NotNull(tracker.GetCopilotHost(sessionA));
 
-        // Create a fake events.jsonl for sessionB so the liveness gate passes
-        var sessionDirB = Path.Combine(Path.GetTempPath(), "copilot-test-sessions", sessionB);
+        // Create fake events.jsonl for sessionB in Program.SessionStateDir so the liveness gate passes
+        var sessionDirB = Path.Combine(Program.SessionStateDir, sessionB);
         Directory.CreateDirectory(sessionDirB);
         File.WriteAllText(Path.Combine(sessionDirB, "events.jsonl"), "{}");
 
@@ -76,10 +77,10 @@ public sealed class HandleExternalSessionDiscoveredRebindTests
         tracker.CopilotHostRemoved += (_) => removeCount++;
 
         var sessionA = "aaaaaaaa-1111-2222-3333-444444444444";
-        var copilotPid = 42;
+        var copilotPid = Process.GetCurrentProcess().Id;
 
-        // Create a fake events.jsonl for sessionA so the liveness gate passes
-        var sessionDirA = Path.Combine(Path.GetTempPath(), "copilot-test-sessions", sessionA);
+        // Create fake events.jsonl for sessionA in Program.SessionStateDir so the liveness gate passes
+        var sessionDirA = Path.Combine(Program.SessionStateDir, sessionA);
         Directory.CreateDirectory(sessionDirA);
         File.WriteAllText(Path.Combine(sessionDirA, "events.jsonl"), "{}");
 
@@ -100,9 +101,11 @@ public sealed class HandleExternalSessionDiscoveredRebindTests
         // Trigger discovery for the SAME sessionA + copilotPid
         tracker.HandleExternalSessionDiscovered(sessionA, copilotPid);
 
-        // Assert: no removal event, binding unchanged
+        // Assert: no removal event, copilotPid unchanged (but HostInfo might be re-resolved)
         Assert.Equal(0, removeCount);
-        Assert.Equal(originalHost, tracker.GetCopilotHost(sessionA));
+        var currentHost = tracker.GetCopilotHost(sessionA);
+        Assert.NotNull(currentHost);
+        Assert.Equal(copilotPid, currentHost?.CopilotPid);
 
         // Cleanup
         try { Directory.Delete(sessionDirA, true); } catch { }

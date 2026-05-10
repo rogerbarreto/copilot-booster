@@ -95,8 +95,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
     {
         var lines = RealisticLogContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
         Assert.Equal(@"S:\repo\community\sandcastle", cwd);
     }
@@ -114,8 +115,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
         // No cwd in JSON or debug lines → falls back to UserProfile
         Assert.Equal(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cwd);
@@ -138,8 +140,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
         Assert.Equal(@"C:\FromJson", cwd);
     }
@@ -156,8 +159,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines, @"E:\MyFallback");
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines, @"E:\MyFallback");
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
         Assert.Equal(@"E:\MyFallback", cwd);
     }
@@ -175,8 +179,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
         Assert.Equal(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cwd);
     }
@@ -195,14 +200,15 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines, @"E:\MyFallback");
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines, @"E:\MyFallback");
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
         Assert.Equal(@"D:\FromDebugLine", cwd);
     }
 
     [Fact]
-    public void TryParseLogContent_ReturnsNullSessionId_WhenNoTelemetryBlock()
+    public void TryParseLogContent_ReturnsEmptyList_WhenNoTelemetryBlock()
     {
         var logContent = """
             2026-03-17T12:58:44.775Z [DEBUG] Sending telemetry event: copilot-cli/extension.activate
@@ -210,11 +216,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
-        Assert.Null(sessionId);
-        // CWD always falls back to UserProfile when not found
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Empty(sessions);
     }
 
     [Fact]
@@ -231,23 +235,23 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
         Assert.False(string.IsNullOrEmpty(cwd));
     }
 
     [Fact]
-    public void TryParseLogContent_ReturnsNullSessionId_ForEmptyInput()
+    public void TryParseLogContent_ReturnsEmptyList_ForEmptyInput()
     {
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent([]);
+        var sessions = CopilotLogWatcherService.TryParseLogContent([]);
 
-        Assert.Null(sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Empty(sessions);
     }
 
     [Fact]
-    public void TryParseLogContent_ReturnsNullSessionId_ForMalformedJson()
+    public void TryParseLogContent_ReturnsEmptyList_ForMalformedJson()
     {
         var logContent = """
             2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
@@ -256,10 +260,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
-        Assert.Null(sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Empty(sessions);
     }
 
     [Fact]
@@ -272,7 +275,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
+
+        var (sessionId, cwd) = sessions.Single();
 
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
         Assert.False(string.IsNullOrEmpty(cwd));
@@ -403,8 +408,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
         Assert.False(string.IsNullOrEmpty(cwd));
     }
@@ -412,7 +418,8 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
     [Fact]
     public void TryParseLogContent_ReturnsFirstSessionId_WhenMultipleTelemetryBlocksPresent()
     {
-        // Multiple telemetry blocks → last session_id wins (parser processes sequentially and keeps most recent)
+        // Bug D fix: returns ALL session IDs now, but old test expected only first/last one. 
+        // For backwards compatibility of this test, check that BOTH sessions are present.
         var logContent = """
             2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
             {
@@ -427,15 +434,17 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
-        // Trinity's parser returns the last valid session_id found
-        Assert.Equal("22222222-2222-2222-2222-222222222222", sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        // Bug D: Parser now returns ALL sessions (for /resume support)
+        Assert.Equal(2, sessions.Count);
+        Assert.Equal("11111111-1111-1111-1111-111111111111", sessions[0].sessionId);
+        Assert.Equal("22222222-2222-2222-2222-222222222222", sessions[1].sessionId);
+        Assert.False(string.IsNullOrEmpty(sessions[0].cwd));
     }
 
     [Fact]
-    public void TryParseLogContent_ReturnsNull_WhenNoSessionIdAnywhere()
+    public void TryParseLogContent_ReturnsEmptyList_WhenNoSessionIdAnywhere()
     {
         // Neither telemetry blocks nor INFO lines with session_id
         var logContent = """
@@ -444,10 +453,9 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
-        Assert.Null(sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Empty(sessions);
     }
 
     [Fact]
@@ -467,8 +475,10 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        // Should have parsed the first valid session only
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
         Assert.False(string.IsNullOrEmpty(cwd));
     }
@@ -476,7 +486,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
     [Fact]
     public void TryParseLogContent_RejectsMalformedSessionId()
     {
-        // session_id present but not GUID-shaped → parser should reject it (return null)
+        // session_id present but not GUID-shaped → parser should reject it (return empty list)
         var logContent = """
             2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
             {
@@ -485,10 +495,10 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             }
             """;
         var lines = logContent.Split('\n');
-        var (sessionId, _) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
         // Trinity's parser correctly validates GUID format and rejects malformed IDs
-        Assert.Null(sessionId);
+        Assert.Empty(sessions);
     }
 
     // ── Integration: Full Flow — Parse Log + Create workspace.yaml ───
@@ -504,23 +514,24 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
 
         // Act — parse the log file
         var lines = File.ReadAllLines(logFile);
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
         // Assert — parser found session_id and cwd
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
         Assert.Equal(@"S:\repo\community\sandcastle", cwd);
 
         // Arrange — create session folder WITHOUT workspace.yaml
         var sessionStateDir = Path.Combine(this._tempDir, "session-state");
-        var sessionDir = Path.Combine(sessionStateDir, sessionId!);
+        var sessionDir = Path.Combine(sessionStateDir, sessionId);
         Directory.CreateDirectory(sessionDir);
 
         // Assert — should create workspace
-        Assert.True(CopilotLogWatcherService.ShouldCreateWorkspace(sessionStateDir, sessionId!));
+        Assert.True(CopilotLogWatcherService.ShouldCreateWorkspace(sessionStateDir, sessionId));
 
         // Act — create workspace.yaml
         var wsFile = Path.Combine(sessionDir, "workspace.yaml");
-        CopilotLogWatcherService.CreateWorkspaceYaml(wsFile, sessionId!, cwd, sessionId!);
+        CopilotLogWatcherService.CreateWorkspaceYaml(wsFile, sessionId, cwd, sessionId);
 
         // Assert — workspace.yaml was created with correct fields
         Assert.True(File.Exists(wsFile));
@@ -531,7 +542,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         Assert.Contains("updated_at:", content);
 
         // Assert — ShouldCreateWorkspace now returns false (workspace.yaml exists)
-        Assert.False(CopilotLogWatcherService.ShouldCreateWorkspace(sessionStateDir, sessionId!));
+        Assert.False(CopilotLogWatcherService.ShouldCreateWorkspace(sessionStateDir, sessionId));
     }
 
     [Fact]
@@ -552,17 +563,18 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
 
         // Parse — cwd should fall back to UserProfile, never null/empty
         var lines = File.ReadAllLines(logFile);
-        var (sessionId, cwd) = CopilotLogWatcherService.TryParseLogContent(lines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
+        var (sessionId, cwd) = sessions.Single();
         Assert.Equal("abcdabcd-1234-5678-abcd-1234567890ab", sessionId);
         Assert.False(string.IsNullOrEmpty(cwd));
 
         // Create workspace.yaml and verify cwd is present
         var sessionStateDir = Path.Combine(this._tempDir, "session-state");
-        var sessionDir = Path.Combine(sessionStateDir, sessionId!);
+        var sessionDir = Path.Combine(sessionStateDir, sessionId);
         Directory.CreateDirectory(sessionDir);
         var wsFile = Path.Combine(sessionDir, "workspace.yaml");
-        CopilotLogWatcherService.CreateWorkspaceYaml(wsFile, sessionId!, cwd, sessionId!);
+        CopilotLogWatcherService.CreateWorkspaceYaml(wsFile, sessionId, cwd, sessionId);
 
         var content = File.ReadAllText(wsFile);
         Assert.DoesNotContain("cwd: \r", content);

@@ -145,7 +145,7 @@ internal class SessionService
         try
         {
             var lines = File.ReadAllLines(path);
-            string? id = null, cwd = null, summary = null;
+            string? id = null, cwd = null, summary = null, name = null;
 
             foreach (var line in lines)
             {
@@ -156,6 +156,10 @@ internal class SessionService
                 else if (line.StartsWith("cwd:"))
                 {
                     cwd = line[4..].Trim();
+                }
+                else if (line.StartsWith("name:"))
+                {
+                    name = line[5..].Trim().Trim('"');
                 }
                 else if (line.StartsWith("summary:"))
                 {
@@ -170,9 +174,12 @@ internal class SessionService
 
             var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
             string displaySummary;
-            if (!string.IsNullOrEmpty(summary))
+            // Copilot CLI v1.0.44 writes the authoritative title to `name:` (with optional
+            // `user_named:`). Older sessions only have `summary:`. Prefer `name:` when present.
+            var workspaceTitle = !string.IsNullOrWhiteSpace(name) ? name : summary;
+            if (!string.IsNullOrWhiteSpace(workspaceTitle))
             {
-                displaySummary = summary;
+                displaySummary = workspaceTitle;
             }
             else
             {
@@ -308,7 +315,7 @@ internal class SessionService
                 try
                 {
                     var lines = File.ReadAllLines(wsFile);
-                    string? id = null, cwd = null, summary = null;
+                    string? id = null, cwd = null, summary = null, name = null;
                     foreach (var line in lines)
                     {
                         if (line.StartsWith("id:"))
@@ -319,6 +326,10 @@ internal class SessionService
                         {
                             cwd = line[4..].Trim();
                         }
+                        else if (line.StartsWith("name:"))
+                        {
+                            name = line[5..].Trim().Trim('"');
+                        }
                         else if (line.StartsWith("summary:"))
                         {
                             summary = line[8..].Trim().Trim('"');
@@ -326,6 +337,15 @@ internal class SessionService
                     }
 
                     if (id == null)
+                    {
+                        return null;
+                    }
+
+                    // Skip stray directories whose folder name doesn't match the workspace.yaml id.
+                    // This rejects backup folders Copilot CLI creates during YAML migrations
+                    // (e.g. <session-id>-backup-pre-strip-<datetime>) which would otherwise appear
+                    // as duplicate session rows in the grid.
+                    if (!string.Equals(sessionDirName, id, StringComparison.OrdinalIgnoreCase))
                     {
                         return null;
                     }
@@ -340,13 +360,18 @@ internal class SessionService
 
                     var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
                     string displaySummary;
+                    // Copilot CLI v1.0.44 writes the authoritative title to `name:` (with
+                    // optional `user_named:`); older sessions only have `summary:`. Prefer
+                    // `name:` so user-renamed sessions reflect their current title and the
+                    // booster does not surface a stale first-user-message override.
+                    var workspaceTitle = !string.IsNullOrWhiteSpace(name) ? name : summary;
                     if (aliases.TryGetValue(id, out var alias))
                     {
                         displaySummary = alias;
                     }
-                    else if (!string.IsNullOrWhiteSpace(summary))
+                    else if (!string.IsNullOrWhiteSpace(workspaceTitle))
                     {
-                        displaySummary = summary;
+                        displaySummary = workspaceTitle!;
                     }
                     else if (overrides.TryGetValue(id, out var overrideEntry))
                     {

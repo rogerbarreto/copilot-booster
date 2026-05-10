@@ -356,7 +356,13 @@ internal sealed class AiDetectionService : IDisposable
 
             Program.Logger.LogInformation("AI detection start session_id={SessionId} resolved_owner_repo={Owner}/{Repo} configured_timeout_seconds={TimeoutSeconds}", sessionId, repo.Value.owner, repo.Value.repo, invocationSettings.TimeoutSeconds);
 
-            var prompt = AiPromptBuilder.Build(repo.Value.owner, repo.Value.repo, sessionStateFolder);
+            var existingTracking = GitHubTrackingService.Load(sessionId);
+            var existingAttachments = (existingTracking?.Items ?? [])
+                .Where(item => item.Number > 0 && !string.IsNullOrWhiteSpace(item.Type))
+                .Select(item => new AiPromptBuilder.ExistingAttachment(item.Type, item.Number))
+                .ToList();
+
+            var prompt = AiPromptBuilder.Build(repo.Value.owner, repo.Value.repo, sessionStateFolder, existingAttachments);
             var logDir = this.CreateInvocationLogDir(sessionId);
             var args = new List<string>
             {

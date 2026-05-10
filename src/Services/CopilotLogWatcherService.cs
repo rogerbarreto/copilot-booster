@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -28,7 +29,7 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     private readonly string _sessionStateDir;
     private FileSystemWatcher? _watcher;
     private readonly Dictionary<string, Timer> _pendingTimers = [];
-    private readonly HashSet<string> _processedSessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<(int pid, string sessionId)> _processedPidSessions = new(new PidSessionEqualityComparer());
     private readonly HashSet<string> _processedLogFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _cacheLock = new();
 
@@ -171,59 +172,63 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
                 lines = reader.ReadToEnd().Split('\n');
             }
 
-            var (sessionId, cwd) = TryParseLogContent(lines);
+            var sessions = TryParseLogContent(lines);
 
-            if (sessionId == null)
+            if (sessions.Count == 0)
             {
                 return;
             }
 
-            lock (this._cacheLock)
+            // Bug D: Process ALL sessions in the log, not just the first
+            foreach (var (sessionId, cwd) in sessions)
             {
-                if (this._processedSessions.Contains(sessionId))
+                // Check if we've already processed this (pid, sessionId) pair
+                lock (this._cacheLock)
                 {
-                    this._processedLogFiles.Add(logFilePath);
-                    return;
-                }
-            }
-
-            if (!ShouldCreateWorkspace(this._sessionStateDir, sessionId))
-            {
-                if (!Directory.Exists(Path.Combine(this._sessionStateDir, sessionId)))
-                {
-                    // Session folder not created yet — retry after delay
-                    if (retriesLeft > 0)
+                    if (this._processedPidSessions.Contains((pid.Value, sessionId)))
                     {
-                        var timer = new Timer(_ => this.TryProcessLogFile(logFilePath, retriesLeft - 1), null, 2000, Timeout.Infinite);
-                        lock (this._pendingTimers)
+                        continue;
+                    }
+                }
+
+                if (!ShouldCreateWorkspace(this._sessionStateDir, sessionId))
+                {
+                    if (!Directory.Exists(Path.Combine(this._sessionStateDir, sessionId)))
+                    {
+                        // Session folder not created yet — retry after delay
+                        if (retriesLeft > 0)
                         {
-                            this._pendingTimers[$"retry:{logFilePath}:{retriesLeft}"] = timer;
+                            var timer = new Timer(_ => this.TryProcessLogFile(logFilePath, retriesLeft - 1), null, 2000, Timeout.Infinite);
+                            lock (this._pendingTimers)
+                            {
+                                this._pendingTimers[$"retry:{logFilePath}:{retriesLeft}"] = timer;
+                            }
                         }
                     }
-                }
-                else
-                {
-                    // workspace.yaml already exists — cache this session
-                    lock (this._cacheLock)
+                    else
                     {
-                        this._processedSessions.Add(sessionId);
-                        this._processedLogFiles.Add(logFilePath);
+                        // workspace.yaml already exists — cache this (pid, sessionId) pair
+                        lock (this._cacheLock)
+                        {
+                            this._processedPidSessions.Add((pid.Value, sessionId));
+                            this._processedLogFiles.Add(logFilePath);
+                        }
                     }
+
+                    continue;
                 }
 
-                return;
-            }
+                // Session folder exists without workspace.yaml — create one
+                var sessionDir = Path.Combine(this._sessionStateDir, sessionId);
+                CreateWorkspaceYamlFromPid(Path.Combine(sessionDir, "workspace.yaml"), sessionId, cwd, pid.Value);
+                Program.Logger.LogInformation("External Copilot session discovered: {SessionId} at {Cwd}", sessionId, cwd);
+                this.ExternalSessionDiscovered?.Invoke(sessionId, pid.Value);
 
-            // Session folder exists without workspace.yaml — create one
-            var sessionDir = Path.Combine(this._sessionStateDir, sessionId);
-            CreateWorkspaceYamlFromPid(Path.Combine(sessionDir, "workspace.yaml"), sessionId, cwd, pid.Value);
-            Program.Logger.LogInformation("External Copilot session discovered: {SessionId} at {Cwd}", sessionId, cwd);
-            this.ExternalSessionDiscovered?.Invoke(sessionId, pid.Value);
-
-            lock (this._cacheLock)
-            {
-                this._processedSessions.Add(sessionId);
-                this._processedLogFiles.Add(logFilePath);
+                lock (this._cacheLock)
+                {
+                    this._processedPidSessions.Add((pid.Value, sessionId));
+                    this._processedLogFiles.Add(logFilePath);
+                }
             }
         }
         catch (IOException) when (retriesLeft > 0)
@@ -256,14 +261,16 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     }
 
     /// <summary>
-    /// Parses log file lines looking for a cli.telemetry session_start JSON block
-    /// and a cwd= pattern from remoteHosts debug lines.
+    /// Parses log file lines looking for ALL session_id values across cli.telemetry JSON blocks
+    /// and INFO patterns (Workspace initialized, Registering foreground session).
+    /// Bug D fix: returns a list of ALL sessions encountered in order, not just the first.
     /// CWD fallback chain: (1) JSON context.cwd → (2) debug line cwd= → (3) fallbackCwd → (4) UserProfile.
-    /// Returns (sessionId, cwd) where cwd is guaranteed non-empty.
+    /// Returns list of (sessionId, cwd) tuples — cwd is process-wide and shared across all sessions.
+    /// Consecutive duplicate session IDs are deduplicated.
     /// </summary>
-    internal static (string? sessionId, string cwd) TryParseLogContent(string[] lines, string? fallbackCwd = null)
+    internal static IReadOnlyList<(string sessionId, string cwd)> TryParseLogContent(string[] lines, string? fallbackCwd = null)
     {
-        string? sessionId = null;
+        var sessions = new List<string>();
         string? cwdFromJson = null;
         string? cwdFromDebugLine = null;
         var jsonBuilder = new StringBuilder();
@@ -281,6 +288,21 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
                 if (cwdMatch.Success)
                 {
                     cwdFromDebugLine = cwdMatch.Groups[1].Value;
+                }
+            }
+
+            // Fallback: Look for session ID in deterministic INFO patterns
+            var regMatch = SessionIdFromInfoRegex().Match(trimmed);
+            if (regMatch.Success)
+            {
+                var candidate = regMatch.Groups[1].Value;
+                if (IsValidSessionId(candidate))
+                {
+                    // Dedupe consecutive duplicates
+                    if (sessions.Count == 0 || !string.Equals(sessions[sessions.Count - 1], candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        sessions.Add(candidate);
+                    }
                 }
             }
 
@@ -317,23 +339,31 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
                         using var doc = JsonDocument.Parse(jsonBuilder.ToString());
                         var root = doc.RootElement;
 
-                        if (root.TryGetProperty("kind", out var kindProp)
-                            && kindProp.GetString() == "session_start"
-                            && root.TryGetProperty("session_id", out var sidProp))
+                        // Accept ANY telemetry JSON with a non-empty session_id field
+                        if (root.TryGetProperty("session_id", out var sidProp))
                         {
-                            sessionId = sidProp.GetString();
-
-                            // Level 1: Try extracting cwd from JSON context.cwd
-                            if (root.TryGetProperty("context", out var ctx)
-                                && ctx.TryGetProperty("cwd", out var cwdProp))
+                            var candidate = sidProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(candidate) && IsValidSessionId(candidate))
                             {
-                                cwdFromJson = cwdProp.GetString();
+                                // Dedupe consecutive duplicates
+                                if (sessions.Count == 0 || !string.Equals(sessions[sessions.Count - 1], candidate, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    sessions.Add(candidate);
+                                }
+
+                                // Level 1: Try extracting cwd from JSON context.cwd (only once)
+                                if (cwdFromJson == null
+                                    && root.TryGetProperty("context", out var ctx)
+                                    && ctx.TryGetProperty("cwd", out var cwdProp))
+                                {
+                                    cwdFromJson = cwdProp.GetString();
+                                }
                             }
                         }
                     }
                     catch (JsonException)
                     {
-                        // Not valid JSON — continue scanning
+                        // Not valid JSON or truncated — skip and continue scanning
                     }
                 }
             }
@@ -345,7 +375,23 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
             ?? fallbackCwd
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-        return (sessionId, cwd);
+        // Return list of (sessionId, cwd) tuples — all sessions share the same process-wide cwd
+        return sessions.Select(sid => (sid, cwd)).ToList();
+    }
+
+    /// <summary>
+    /// Validates that a session ID is a 36-character GUID-shaped string (lowercase hex + hyphens).
+    /// </summary>
+    private static bool IsValidSessionId(string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || sessionId.Length != 36)
+        {
+            return false;
+        }
+
+        // GUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        var guidRegex = GuidValidationRegex();
+        return guidRegex.IsMatch(sessionId);
     }
 
     /// <summary>
@@ -455,4 +501,26 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
 
     [GeneratedRegex(@"cwd=([^,]+)")]
     private static partial Regex CwdRegex();
+
+    [GeneratedRegex(@"\[INFO\]\s+(?:Registering foreground session|Workspace initialized):\s+([0-9a-f-]{36})", RegexOptions.IgnoreCase)]
+    private static partial Regex SessionIdFromInfoRegex();
+
+    [GeneratedRegex(@"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOptions.IgnoreCase)]
+    private static partial Regex GuidValidationRegex();
+
+    /// <summary>
+    /// Custom equality comparer for (pid, sessionId) tuples with case-insensitive sessionId comparison.
+    /// </summary>
+    private sealed class PidSessionEqualityComparer : IEqualityComparer<(int pid, string sessionId)>
+    {
+        public bool Equals((int pid, string sessionId) x, (int pid, string sessionId) y)
+        {
+            return x.pid == y.pid && string.Equals(x.sessionId, y.sessionId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public int GetHashCode((int pid, string sessionId) obj)
+        {
+            return HashCode.Combine(obj.pid, obj.sessionId.ToLowerInvariant());
+        }
+    }
 }

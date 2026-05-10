@@ -357,44 +357,102 @@ internal static partial class WindowFocusService
             return true;
         }, IntPtr.Zero);
 
-        // Fallback: re-validate previously tracked HWNDs that weren't matched by title
-        // (Copilot CLI changes the terminal title dynamically while working)
-        if (previouslyTracked != null)
+        // Re-validate previously tracked HWNDs that the fresh scan above missed:
+        // preserve them ONLY when the HWND's current title still identifies the same
+        // session under the same label. Guards against wt panes that were tagged when
+        // copilot.exe was alive but later got reused for a different shell.
+        PreservePreviouslyTrackedHwnds(
+            results,
+            matchedHwnds,
+            previouslyTracked,
+            sessionSummaries,
+            DefaultIsWindowAlive,
+            DefaultReadWindowTitle);
+
+        return results;
+    }
+
+    /// <summary>
+    /// Re-validates previously tracked HWNDs that were not matched by the fresh title scan and
+    /// merges them back into <paramref name="results"/> when they should still be considered
+    /// associated with the same session.
+    /// </summary>
+    /// <remarks>
+    /// A previously tracked HWND is preserved only when ALL of the following are true:
+    /// - It was not already matched by the fresh scan (<paramref name="matchedHwnds"/>).
+    /// - The window is still alive and visible (<paramref name="isWindowAlive"/>).
+    /// - Its current title still matches the same session via
+    ///   <see cref="MatchTrackedWindowTitle(string, Dictionary{string, string}?)"/>, with the
+    ///   same label as previously recorded. This guards against the case where a wt pane that
+    ///   once hosted a Copilot CLI session is later repurposed for a different shell (e.g. wsl,
+    ///   ssh) — the HWND lives on but no longer represents the original session.
+    /// </remarks>
+    internal static void PreservePreviouslyTrackedHwnds(
+        Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>> results,
+        HashSet<IntPtr> matchedHwnds,
+        Dictionary<string, List<(string Label, string Title, IntPtr Hwnd)>>? previouslyTracked,
+        Dictionary<string, string>? sessionSummaries,
+        Func<IntPtr, bool> isWindowAlive,
+        Func<IntPtr, string> readWindowTitle)
+    {
+        if (previouslyTracked == null)
         {
-            foreach (var kvp in previouslyTracked)
+            return;
+        }
+
+        foreach (var kvp in previouslyTracked)
+        {
+            if (results.ContainsKey(kvp.Key))
             {
-                if (results.ContainsKey(kvp.Key))
+                continue;
+            }
+
+            foreach (var (label, _, prevHwnd) in kvp.Value)
+            {
+                if (matchedHwnds.Contains(prevHwnd) || !isWindowAlive(prevHwnd))
                 {
                     continue;
                 }
 
-                foreach (var (label, _, prevHwnd) in kvp.Value)
+                var currentTitle = readWindowTitle(prevHwnd) ?? string.Empty;
+
+                // Re-validate that the current title still associates this HWND with
+                // the same session under the same label. Without this guard a wt pane
+                // tagged once via session-summary match would stay tagged forever even
+                // after the user starts a different shell (wsl/ssh/codex/etc.) in it.
+                var match = MatchTrackedWindowTitle(currentTitle, sessionSummaries);
+                if (match == null
+                    || !string.Equals(match.Value.SessionId, kvp.Key, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(match.Value.Label, label, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!matchedHwnds.Contains(prevHwnd) && IsWindow(prevHwnd) && IsWindowVisible(prevHwnd))
-                    {
-                        // Read current title for display
-                        int len = GetWindowTextLength(prevHwnd);
-                        var currentTitle = "";
-                        if (len > 0)
-                        {
-                            var sb = new System.Text.StringBuilder(len + 1);
-                            _ = GetWindowText(prevHwnd, sb, sb.Capacity);
-                            currentTitle = sb.ToString();
-                        }
-
-                        if (!results.TryGetValue(kvp.Key, out List<(string, string, nint)>? value))
-                        {
-                            value = [];
-                            results[kvp.Key] = value;
-                        }
-
-                        value.Add((label, currentTitle, prevHwnd));
-                    }
+                    continue;
                 }
+
+                if (!results.TryGetValue(kvp.Key, out List<(string Label, string Title, IntPtr Hwnd)>? value))
+                {
+                    value = [];
+                    results[kvp.Key] = value;
+                }
+
+                value.Add((label, currentTitle, prevHwnd));
             }
         }
+    }
 
-        return results;
+    private static bool DefaultIsWindowAlive(IntPtr hwnd)
+        => IsWindow(hwnd) && IsWindowVisible(hwnd);
+
+    private static string DefaultReadWindowTitle(IntPtr hwnd)
+    {
+        int len = GetWindowTextLength(hwnd);
+        if (len <= 0)
+        {
+            return string.Empty;
+        }
+
+        var sb = new System.Text.StringBuilder(len + 1);
+        _ = GetWindowText(hwnd, sb, sb.Capacity);
+        return sb.ToString();
     }
 
     /// <summary>

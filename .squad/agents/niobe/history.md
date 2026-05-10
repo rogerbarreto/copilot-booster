@@ -10,6 +10,8 @@
 
 ## Learnings
 
+- **2026-05-10 — Copilot CLI log format: /resume session transition logging:** When a user executes `/resume session_b` inside an active process running session_a, the Copilot CLI log file records BOTH session IDs with distinct timestamps. First occurrence: "No persisted remote state for session_a" (early log line), followed by "Workspace initialized: session_b" (~135ms later in observed case), then "session_resume" telemetry with session_id=session_b. The log is the primary source of truth for session activation order and timing. Additionally, session-state files (workspace.yaml, events.jsonl) mtimes are updated AFTER log entry, not before; do not rely solely on mtimes for session state causality — correlate with log timestamps.
+
 - **2026-05-09 — Documentation for 0.22.0 refinements:** Updated CHANGELOG.md (added two bullets under Changed section) and README.md (removed Copilot CLI path field, enhanced Model dropdown documentation with API cache details). No version bumps as per directive.
 
 - **2026-05-09 — GitHub Copilot models API (auth flow correction):** The endpoint `https://api.githubcopilot.com/models` works with standard GitHub PAT (via `gh auth token`), not a special `copilot_internal/v2/token` endpoint. The internal endpoint returns 404 and does not exist. API returns 35 models; Copilot CLI help lists 17. Use API as primary source with 24h cache, hardcoded fallback.

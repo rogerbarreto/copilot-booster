@@ -48,6 +48,7 @@
 - **2026-05-08 — Issue #20 IConfirmDialog seam for slice #22:** Morpheus created `IConfirmDialog` interface at `src/Services/IConfirmDialog.cs` for cancel confirmation tests. Production uses `MessageBoxConfirmDialog` with `MessageBox.Show(YesNo)` appending button labels to body. Tank will fake this interface in slice #22 tests.
 - **2026-05-08 — Issue #21 ICopilotProbe location and Func<AiDetectionSettings> injection:** Trinity implemented `ICopilotProbe` at `src/Services/ICopilotProbe.cs` with lazy `--version` probe and in-memory cache invalidation. AiDetectionService now accepts `Func<AiDetectionSettings> getSettings` in its constructor instead of holding settings directly. This allows per-detection-run configuration and prevents settings-changed-mid-detection conflicts. The getter is called at detection start time to capture a point-in-time snapshot; if user changes settings while detection runs, next detection picks up the new settings without affecting in-flight runs.
 - **2026-05-08 — Issue #22 IMessageBox seam for click-to-dismiss flow:** Morpheus created `IMessageBox` interface at `src/Services/IMessageBox.cs` for click-to-dismiss confirmation tests. Production uses `MessageBoxWrapper` with `MessageBox.Show(OKCancel)`. Sibling to Issue #20 `IConfirmDialog`. Tank fakes this interface in slice #22 integration tests for dismiss dialog scenarios (confirm dismiss or keep detecting).
+- **2026-05-10 — Bug B session-pid liveness test suite:** Created 5 test files for Bug B (stale session-pid mapping fix). Trinity has ALREADY implemented the fix (SessionPidLivenessValidator + 8-arg ActiveStatusTracker constructor + session-aware IsCopilotHostActive). Tests verify: (1) pure DateTime liveness invariant including Roger's 8-hour-stale scenario, (2) T1 watcher gate rejection, (3) session-aware eviction of existing stale hosts via ReprojectActiveCopilotHosts, (4) discrimination between fresh/stale sessions, (5) TryFocusCopilotCli focus path. **Status:** 9 of 10 tests PASS; 1 test (TryFocusCopilotCli_StaleSession_DoesNotFocus) FAILS, revealing that the focus callback is invoked even when the session is stale — Trinity needs to investigate the TryFocusCopilotCli Priority 1 path. Key learning: HandleExternalSessionDiscovered calls SessionPidLivenessValidator.IsLive directly (real-FS overload), NOT the injected _isSessionLiveForCopilotPid callback; the callback is only used in IsCopilotHostActive.
 
 - **2026-05-09 — Issue #15 refinement — CopilotModelsService tests (11 tests):** Comprehensive test matrix for cache-first + stale-fallback service: cache-hit (fresh), cache-miss (API call + write), stale-cache fallback (API failure + return stale), network error (return hardcoded), cancellation (OperationCanceledException rethrown), TTL expiry (force refresh), concurrent fetch (no corruption), null-models (API returns no valid models), empty-models (API returns empty array), network recovery (transient error then success), and fast-path reuse. LocalAppData isolation pattern documented in `.squad/skills/localappdata-test-isolation/SKILL.md` for future use. All 11 tests passing.
 
@@ -164,6 +165,77 @@ The "process-probe-stdout-trap" pattern (don't use RedirectStandardOutput + Wait
 ---
 **Next:** Trinity implements fix → unskip IsCopilotAvailable_WhenLocatorReturnsExistingPath_ReturnsTrue → verify all tests GREEN → verify on Roger's machine (menu no longer greyed out).
 
+## Learnings — 2026-05-09: Real CLI v1.0.44 Log Fixtures (Fixture Refresh)
+
+### Context
+The unit tests in `tests/Services/CopilotLogWatcherServiceTests.cs` used synthetic fixtures with `"kind": "session_start"` JSON. **Real copilot CLI v1.0.44 never emits that kind** — the fixtures baked in a stale assumption. Tests passed against a parser that would fail in production.
+
+### Real CLI v1.0.44 Log Shape
+Harvested from Roger's `~/.copilot/logs/process-*.log`:
+
+1. **Telemetry blocks use diverse `kind` values:**
+   - `"kind": "cli_ready"` — main startup telemetry with session_id, client metadata, feature flags
+   - `"kind": "allow_all_enabled"` — yolo mode telemetry
+   - `"kind": "session_resume"` — resuming existing session
+   - `"kind": "memory_usage"` — periodic stats
+   - **NEVER** `"kind": "session_start"` in CLI v1.0.44
+
+2. **INFO line patterns for session discovery:**
+   - `[INFO] Workspace initialized: <uuid> (checkpoints: N)`
+   - `[INFO] Registering foreground session: <uuid>`
+   - These provide regex fallback when telemetry blocks are incomplete
+
+3. **Telemetry block structure (verbatim from CLI v1.0.44):**
+   ```json
+   {
+     "kind": "cli_ready",
+     "properties": { "copilot_pid": "74528", "engagement_id": "..." },
+     "metrics": { "startup_duration_ms": 979 },
+     "session_id": "ba62613b-7f04-46bc-9c1e-778b12616687",
+     "features": { ... },
+     "created_at": "2026-05-09T10:59:34.127Z",
+     "copilot_tracking_id": "...",
+     "client": { "cli_version": "1.0.44", ... }
+   }
+   ```
+
+### Fixture Refresh Strategy
+1. **Verbatim pinned fixture:** `RealisticLogContent` constant contains a **real** CLI v1.0.44 log slice with comment:  
+   `// Real CLI v1.0.44 telemetry shape — DO NOT modify without re-harvesting from a current copilot log`
+
+2. **Updated all synthetic fixtures:** Replaced `"kind": "session_start"` with `"kind": "cli_ready"` or other real kinds
+
+3. **Added 7 new tests for Trinity's new parser:**
+   - `TryParseLogContent_ExtractsSessionId_FromAnyTelemetryKind` — accepts ANY kind value
+   - `TryParseLogContent_ExtractsSessionId_FromInfoRegisteringForegroundSessionLine` — regex fallback
+   - `TryParseLogContent_ExtractsSessionId_FromInfoWorkspaceInitializedLine` — regex fallback
+   - `TryParseLogContent_ReturnsFirstSessionId_WhenMultipleTelemetryBlocksPresent` — first-match behavior
+   - `TryParseLogContent_ReturnsNull_WhenNoSessionIdAnywhere` — neither telemetry nor INFO
+   - `TryParseLogContent_ToleratesTruncatedFinalJsonBlock_AndStillReturnsEarlierSessionId` — mid-stream tolerance
+   - `TryParseLogContent_RejectsMalformedSessionId` — malformed GUID handling
+
+4. **Integration test updated:** `tests/Integration/ExternalSessionDiscoveredIntegrationTests.cs` changed `"kind": "session_start"` to `"kind": "cli_ready"`
+
+### Test Status
+12 tests initially RED (expected) because Trinity's parser still required `kind: "session_start"`. Once Trinity shipped the new parser that:
+- Accepts ANY telemetry block with `session_id` field (regardless of `kind`)
+- Has regex fallback for `[INFO] Registering foreground session:` and `[INFO] Workspace initialized:` lines
+
+...tests went GREEN after fixing 9 malformed placeholder GUIDs.
+
+**UPDATE 2026-05-09 15:32:** Trinity's parser delivered. After fixing 9 malformed placeholder GUIDs to valid 36-char GUID shapes (e.g., `aaaa-bbbb-cccc-dddd` → `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`), **all 801 unit tests PASS** (1 skipped). Trinity's parser correctly:
+- Validates GUID format (rejects malformed IDs like `not-a-valid-guid-shape`)
+- Accepts any telemetry `kind` value
+- Returns the **last** valid session_id when multiple blocks present (sequential processing with overwrite)
+
+### Why Pin to Real Logs?
+1. **Detect silent format drift:** If copilot CLI changes its log format in a future version, the verbatim fixture will catch it
+2. **Prevent false confidence:** Tests that pass against synthetic fixtures but fail against real logs are worse than no tests
+3. **Document third-party contract:** The verbatim fixture serves as living documentation of what copilot CLI actually emits
+
+### Reusable Skill
+Created `.squad/skills/real-log-pinned-fixtures/SKILL.md` documenting the pattern: always pin at least ONE fixture to a verbatim slice of real third-party-tool output to catch silent format drift.
+
 ## Learnings — 2026-05-09: Empty Session Title RED Tests
 
 ### Context
@@ -262,3 +334,27 @@ This pattern applies to any service with multi-source resolution: DNS, config fi
 
 ---
 **Status:** All 4 tests written. Test 1 confirmed RED on original code (empty string), GREEN after Trinity's fix (Session 11111111). Tests ready for commit alongside Trinity's SessionService changes.
+
+## Learnings
+
+### Baseline Tests Breaking After Domain Changes
+
+**Context:** Trinity shipped Bug B's session-liveness gate in ActiveStatusTracker. The new 8-arg constructor added isSessionLiveForCopilotPid validator with a default implementation that queries real filesystem state (events.jsonl + process start time). Three baseline tests in ActiveStatusTrackerHostTests.cs broke because they:
+- Used fake PIDs and session IDs
+- Called the old 3-arg constructor which now delegates through to the real validator
+- Had no fake filesystem state to match their fake test data
+
+**Fix pattern:**
+1. Updated CreateTracker helper (line 826) to use the 8-arg constructor with (_, _) => true for session liveness
+2. Updated FocusActiveProcess_WindowsTerminalHostWithRuntimeId_FocusesParentBeforePaneSelection test's direct constructor call to add the 8th parameter
+3. This restored the original test behavior: permissive validation so the tests exercise their actual logic (title matching, host rebinding, focus sequencing)
+
+**Result:** All 834 unit tests pass. The 3 failing baseline tests now construct with an always-true validator, maintaining test isolation.
+
+**Pattern for future breaks:**
+- When domain code adds validators with filesystem/process dependencies, baseline tests need explicit mocks/fakes
+- Check if there's a shared test helper (like CreateTracker) that can inject the fake once for many tests
+- Reference implementation: IsCopilotHostActivePidReuseTests.cs already used the 7-arg form cleanly
+
+**Team impact:** This unblocks Trinity's parallel fix to Tank's TryFocusCopilotCli_StaleSession_DoesNotFocus test, which also broke from the same validator change.
+

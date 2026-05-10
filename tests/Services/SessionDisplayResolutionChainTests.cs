@@ -173,4 +173,77 @@ public sealed class SessionDisplayResolutionChainTests : IDisposable
         Assert.Single(result);
         Assert.Equal("Override Name", result[0].Summary);
     }
+
+    [Fact]
+    public void Resolution_WorkspaceNamePresent_BeatsSummaryAndOverride()
+    {
+        // Copilot CLI v1.0.44 schema: workspace.yaml may carry `name:` (current title)
+        // alongside the legacy `summary:`. The `name:` field is authoritative.
+        var sessionId = Guid.NewGuid().ToString();
+        var sessionDir = Path.Combine(this._tempDir, sessionId);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
+            $"id: {sessionId}\ncwd: C:\\myproject\nname: WS Name\nuser_named: false\nsummary: WS Summary");
+
+        SessionNameOverrideService.Set(this._overrideFile, sessionId, "Stale Override", true);
+
+        var result = SessionService.LoadNamedSessions(this._tempDir, null, null, this._aliasFile, this._overrideFile);
+
+        Assert.Single(result);
+        Assert.Equal("WS Name", result[0].Summary);
+    }
+
+    [Fact]
+    public void Resolution_WorkspaceUserNamedTrue_NoSummary_BeatsStaleOverride()
+    {
+        // Reproduces the bug: user renames the session via Copilot CLI, which writes
+        // `name: <new>` + `user_named: true` and drops `summary:`. The stored override
+        // (booster-resolved from first user message) is now stale and must be ignored.
+        var sessionId = Guid.NewGuid().ToString();
+        var sessionDir = Path.Combine(this._tempDir, sessionId);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
+            $"id: {sessionId}\ncwd: C:\\myproject\nname: Install and Verify\nuser_named: true");
+
+        SessionNameOverrideService.Set(this._overrideFile, sessionId, "please install, I need to check", true);
+
+        var result = SessionService.LoadNamedSessions(this._tempDir, null, null, this._aliasFile, this._overrideFile);
+
+        Assert.Single(result);
+        Assert.Equal("Install and Verify", result[0].Summary);
+    }
+
+    [Fact]
+    public void Resolution_AliasStillBeatsWorkspaceName()
+    {
+        // Roger's manual alias must win even when CLI has set `name:`.
+        var sessionId = Guid.NewGuid().ToString();
+        var sessionDir = Path.Combine(this._tempDir, sessionId);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
+            $"id: {sessionId}\ncwd: C:\\myproject\nname: WS Name\nuser_named: true");
+
+        SessionAliasService.SetAlias(this._aliasFile, sessionId, "Alias Name");
+
+        var result = SessionService.LoadNamedSessions(this._tempDir, null, null, this._aliasFile, this._overrideFile);
+
+        Assert.Single(result);
+        Assert.Equal("Alias Name", result[0].Summary);
+    }
+
+    [Fact]
+    public void Resolution_EmptyWorkspaceName_FallsBackToSummary()
+    {
+        // Defensive: a present-but-empty `name:` should not block summary fallback.
+        var sessionId = Guid.NewGuid().ToString();
+        var sessionDir = Path.Combine(this._tempDir, sessionId);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(Path.Combine(sessionDir, "workspace.yaml"),
+            $"id: {sessionId}\ncwd: C:\\myproject\nname: \"\"\nsummary: WS Summary");
+
+        var result = SessionService.LoadNamedSessions(this._tempDir, null, null, this._aliasFile, this._overrideFile);
+
+        Assert.Single(result);
+        Assert.Equal("WS Summary", result[0].Summary);
+    }
 }

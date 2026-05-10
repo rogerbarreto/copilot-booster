@@ -10,6 +10,7 @@
 
 <!-- Append learnings below -->
 
+- **2026-05-09 — Corruption error triage (CLI-144):** The error "Session file is corrupted (line 1: id: Required)" is **NOT** from booster code — it's from copilot.exe stderr when resuming a session without workspace.yaml. Roger's audit: 30 of 171 sessions (17.5%) have events.jsonl but no workspace.yaml. These are legitimate sessions created by copilot.exe that CopilotLogWatcherService failed to backfill (likely pre-v0.14.0 sessions). Code audit confirms all booster writers always include `id:` on line 1; no corruption is being written. Modern copilot.exe (0.0.410+) auto-creates workspace.yaml on resume with all required fields. Fix: backfill missing workspace.yaml on startup + before AI detection via new `CopilotLogWatcherService.BackfillMissingWorkspaceYaml` method. Trinity owns implementation; Tank owns tests; ships in v0.22.1.
 - **2026-05-03 — All-green integration directive (leadership note):** The grilling exposed that accepting environmental baseline failures as "normal" was a process smell. The team was building ceremony (baseline-comparison scripts, TROUBLESHOOTING docs) around test-output noise that shouldn't exist in the first place. User directive: binary green only — either self-bootstrap test environment (fixture installs) or skip explicitly (traits). This is simpler, more honest, and matches the user's actual release policy: "all tests must pass". Supersedes prior tolerance decisions.
 ### 2026-03-15 — Issue #12 Simplified Architecture
 

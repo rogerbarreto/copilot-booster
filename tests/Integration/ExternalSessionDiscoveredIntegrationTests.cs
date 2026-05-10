@@ -112,7 +112,7 @@ public sealed class ExternalSessionDiscoveredIntegrationTests : IDisposable
         {
             "[INFO] [Telemetry] cli.telemetry:",
             "{",
-            "  \"kind\": \"session_start\",",
+            "  \"kind\": \"cli_ready\",",
             $"  \"session_id\": \"{sessionId}\",",
             "  \"context\": {",
             $"    \"cwd\": \"{escapedCwd}\"",
