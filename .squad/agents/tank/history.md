@@ -6,6 +6,15 @@
 - **Role:** Tester
 - **Joined:** 2026-03-15T15:50:59.676Z
 
+### Key Testing Principles (distilled from learnings)
+
+- **All-Green Directive (Roger, 2026-05-03):** All integration tests must be GREEN at all times — no tolerance for environmental baseline failures. Tests that fail due to missing setup are TEST BUGS requiring self-bootstrapping (fixture installs) or explicit skip traits `[Trait("Category", "LocalOnly")]` or `[Trait("Category", "RequiresInteractiveDesktop")]`.
+- **Determinism over documentation:** When tests are flaky (e.g., race conditions, timing assumptions), fix the test design, not the baseline. Example: `AiDetectTreeKillIntegrationTests` flake fixed via temp-file handshake PID protocol instead of by-name process discovery.
+- **Test structure preferences:** xUnit v3 async facts (`[Fact] public async Task`), `[Theory]` with `[InlineData]` for parameterized cases, `IDisposable` with temp dirs for file-based tests, stub classes (no mocking framework) for seams, `[LocalOnlyFact]` + `[Trait("Category", "LocalOnly")]` for real-copilot/desktop-bound tests.
+- **Seam patterns:** Tests expose service internals via internal interfaces (`IProcessRunner`, `IConfirmDialog`, `IMessageBox`, `ICopilotProbe`) and `Func<T>` parameter injection (e.g., `Func<string, string?>` CWD resolver, `Func<AiDetectionSettings>` settings getter). Avoid refactoring code purely for testability; use reflection pins when seams would bloat production.
+- **Integration test serialization:** Desktop tests (WinEvent hooks, WinForms timers, terminal interaction) go in serialized xUnit collections `[Collection(WindowEventHookCollection.Name)]` to prevent race conditions.
+- **Performance bounds:** Synthetic tests (large file parsing, concurrency stress) use explicit `[Fact(Skip = "LocalOnly")]` to skip CI but validate locally. Regression tests capture max memory/iteration budgets and assert compliance.
+
 ## Learnings
 
 <!-- Append learnings below -->

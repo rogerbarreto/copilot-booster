@@ -6,6 +6,15 @@
 - **Role:** Services Dev
 - **Joined:** 2026-03-15T15:50:59.673Z
 
+### Key Architecture Patterns (distilled from prior work)
+
+- **Copilot Host Discovery (Phase 0.21.0–0.22.0):** Maps external `copilot.exe` processes to hosting terminals (Windows Terminal, Warp, Console) via PID → parent walk → IPC classifiers (process name, window title, UIA automation). Host entries keyed by `(HWND, runtime_id)` for WT; single HWND for non-UIA terminals. Stored in `WindowHandleCacheService` and `_copilotHosts` dict on `ActiveStatusTracker`. Five trigger types: T1 external log discovery, T2 launcher PID register, T4 periodic refresh, T5 window destruction, focus migration.
+- **Async Patterns:** `RunGitAsync` with concurrent stdout/stderr reading (Win32 deadlock prevention). `CancellationToken`-only contract; caller owns timeout policy via `CancellationTokenSource`. Streaming log parse with `ReadLine()` loops (not `ReadToEnd()`) for GB-scale files.
+- **Win32 Abstractions:** `IProcessTreeProvider` for in-memory process trees; `LibraryImport` for kernel32/user32 P/Invoke; Job Objects for process tree kill on cancellation. `WindowFocusService.IsWindowAlive` checks both `IsWindow` AND `IsWindowVisible`.
+- **Settings/State Patterns:** Use `Func<T> getSettings` injection (e.g., `Func<AiDetectionSettings>`) to capture point-in-time config at work start, preventing settings-changed-mid-operation races. Lazy probes with in-memory caches (e.g., `ICopilotProbe --version` cache invalidation on path change).
+- **UIA (Windows Terminal):** `(parent HWND, runtime_id)` tuples for pane identity (terminal tabs lack separate HWNDs). `SelectionItemPattern.Select()` with `InvokePattern.Invoke()` fallback. Closed-loop E2E markers: seed `--interactive` guid, assert selected pane content contains marker.
+- **Data Model:** `GitHubTrackedItem` is a `class` with mutable properties (no constructor), struct wrappers for dialog returns (plain struct, not record). Use `readonly record struct` for parser results.
+
 ## Summary of Prior Work (Phase 0.21.0 — Copilot Host Discovery + Async Worktree, 2026-03-15 to 2026-05-02)
 
 **Copilot Host Discovery (Phases 1-4):**

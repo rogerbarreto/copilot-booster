@@ -6,6 +6,15 @@
 - **Role:** UI Dev
 - **Joined:** 2026-03-15T15:50:59.675Z
 
+### Key UI Patterns (distilled from learnings)
+
+- **Dialog Return Structs:** Use plain `internal struct` (not record) for dialog results. Struct wrappers carry just enough for callers to dispatch to services without re-fetching (e.g., `WorkspaceGitHubLink` with `Owner`, `Repo`, `GitHubTrackedItem`).
+- **Async WinForms Pattern:** Form-owned `CancellationTokenSource`, marshal UI updates with `BeginInvoke`, cancel/dispose CTS in `Dispose(bool)`. Prevents orphaned background tasks on form close.
+- **JSON Extraction in Task.Run:** All field extraction (including nested state objects, labels, author, updatedAt) must complete INSIDE the `Task.Run` lambda before `JsonDocument` disposes. Capture extracted fields in closure-scoped variables.
+- **Smart Input Pattern:** Forms validate input in two stages: (1) bare number + case-insensitive owner/repo match (exact type expected), then (2) GitHub URL parsing for pasted links. URL type correction routes operations correctly without flipping visible UI state (e.g., Issue URL in PR panel routes to Issue API, not PR API).
+- **Spinner + Cancel Region:** GitHub cell reserves `16x16` top-right region for status icon. One shared `System.Windows.Forms.Timer` animates 8-frame spinner on visible `DetectionStatus.Running`. Corner clicks show confirm dialog: "Detecting... click to cancel."
+- **Settings Dropdowns:** Strict `ComboBoxStyle.DropDownList` with sentinel first item (e.g., `"(default — let Copilot decide)"`). Unknown saved IDs preserved by appending `" (custom)"` suffix on load; suffix stripped on save.
+
 ## Learnings
 
 <!-- Append learnings below -->
