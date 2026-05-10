@@ -155,3 +155,111 @@ See `src/Services/CopilotLogWatcherService.cs` → `TryParseLogContent`:
 ## Status
 
 ✅ **Validated** — Used in production to fix shipped regression (Copilot CLI v1.0.44 format change)
+
+---
+
+## Extension: Multi-Session-Per-PID Handling
+
+**Problem:** A single process PID can host multiple sessions sequentially (e.g., Copilot CLI `/resume` command switches sessions within one copilot.exe process). Parsers deduping globally by sessionId miss subsequent session switches.
+
+**Solution:** Dedupe by `(pid, sessionId)` tuple instead of sessionId alone.
+
+### Before (Global Dedupe):
+```csharp
+private readonly HashSet<string> _processedSessions = new(StringComparer.OrdinalIgnoreCase);
+
+// ... in processing loop:
+if (_processedSessions.Contains(sessionId)) {
+    return; // Skip — already processed this session GLOBALLY
+}
+_processedSessions.Add(sessionId);
+```
+
+**Problem:** Once a session appears in ANY PID's log, it's never processed again. If PID 42 switches from sessionA to sessionB, sessionB is skipped because it was already processed for PID 99.
+
+### After (Per-PID Dedupe):
+```csharp
+private readonly HashSet<(int pid, string sessionId)> _processedPidSessions 
+    = new(new PidSessionEqualityComparer());
+
+// ... in processing loop:
+if (_processedPidSessions.Contains((pid, sessionId))) {
+    continue; // Skip — already processed this (pid, sessionId) PAIR
+}
+_processedPidSessions.Add((pid, sessionId));
+```
+
+**Custom Comparer for Case-Insensitive SessionId:**
+```csharp
+private sealed class PidSessionEqualityComparer : IEqualityComparer<(int pid, string sessionId)>
+{
+    public bool Equals((int pid, string sessionId) x, (int pid, string sessionId) y)
+    {
+        return x.pid == y.pid 
+            && string.Equals(x.sessionId, y.sessionId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public int GetHashCode((int pid, string sessionId) obj)
+    {
+        return HashCode.Combine(obj.pid, obj.sessionId.ToLowerInvariant());
+    }
+}
+```
+
+### Return ALL Sessions from Parser:
+
+Change parser signature from single-value to list-based:
+
+```csharp
+// Before:
+internal static (string? sessionId, string cwd) TryParseLogContent(string[] lines)
+{
+    string? sessionId = null;
+    // ... parse first session only
+    return (sessionId, cwd);
+}
+
+// After:
+internal static IReadOnlyList<(string sessionId, string cwd)> TryParseLogContent(string[] lines)
+{
+    var sessions = new List<string>();
+    // ... collect ALL session IDs
+    foreach (var line in lines) {
+        // ... extract session ID
+        if (sessions.Count == 0 || !string.Equals(sessions[sessions.Count - 1], candidate, ...)) {
+            sessions.Add(candidate); // Dedupe consecutive duplicates
+        }
+    }
+    return sessions.Select(sid => (sid, cwd)).ToList();
+}
+```
+
+**Consecutive-Duplicate Dedupe:** Same session_id appearing in many consecutive telemetry events (common during normal operation) is deduplicated to reduce list size without losing rebind transitions.
+
+### Processing Loop:
+
+```csharp
+var sessions = TryParseLogContent(lines);
+foreach (var (sessionId, cwd) in sessions) {
+    if (_processedPidSessions.Contains((pid, sessionId))) {
+        continue;
+    }
+    // ... process this session
+    _processedPidSessions.Add((pid, sessionId));
+}
+```
+
+### When to Use:
+- When a single PID can host multiple sessions sequentially (e.g., interactive CLIs with session-switching commands)
+- When deduping must distinguish between "PID 42 running sessionA" and "PID 99 running sessionA"
+- When the log file is append-only and grows with each session switch
+
+### Real-World Example:
+
+See `src/Services/CopilotLogWatcherService.cs`:
+- `TryParseLogContent` returns `IReadOnlyList<(sessionId, cwd)>`
+- `_processedPidSessions: HashSet<(int, string)>` with `PidSessionEqualityComparer`
+- `TryProcessLogFile` loops over all sessions, emitting discovery event for each new `(pid, sessionId)` pair
+
+**Result:** Copilot CLI `/resume` rebind now works end-to-end — watcher emits discovery events for ALL sessions a PID hosts over time.
+
