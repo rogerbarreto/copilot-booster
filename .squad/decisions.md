@@ -1,3 +1,123 @@
+## 2026-05-10: Warp Terminal Pane Focus — R2 Probe-and-Match Strategy
+
+**Date:** 2026-05-10  
+**Status:** Delivered  
+**Contributors:** Roger (approval + verification), Trinity (WarpPaneFocuser implementation), Tank (unit + integration tests), Coordinator (verification)  
+
+### Context: Warp Terminal Challenge
+
+Warp (v0.2026.05.06 stable) shares a single `warp.exe` PID across all tabs/panes and renders UI with Winit + wgpu, exposing **zero UIA automation elements**. The booster's "Copilot CLI" link could not map `copilot.exe` PID → Warp pane UUID because:
+
+- SQLite stores pane UUIDs but no PID linkage; cwd/shell are identical across panes
+- PEB does not carry `WARP_PANE_UUID` env var (verified by reading PEB of 4 Warp shells)
+- Process-time correlation (pwsh.StartTime ↔ pane ordering) is heuristic, breaks on tab close/reorder — **rejected** per Roger's explicit guidance against silent-mis-focus failure modes
+- `warp://session/<uuid>` deep link (PR #9655 merged 2026-05-06) is useless without UUID mapping
+
+**Key fact verified 2026-05-10 (non-admin):** `GetWindowText(warp_main_hwnd)` returns the **active pane title** (e.g., `'Hi 1'`). Confirmed on PID 132268.
+
+### Decision: R2 Probe-and-Match (Active Tab Cycling)
+
+When focus dispatcher needs to focus a Copilot CLI session in Warp:
+
+1. Locate `warp.exe` main HWND (visible window with non-empty title)
+2. Read current pane title via `GetWindowText`; if matches session display name → **done**
+3. Else send Ctrl+Tab to advance pane; sleep ~150ms; re-read; match
+4. If we cycle back to original title without match → **return false** (no live tab hosts this session)
+5. Hard iteration cap = 30 to handle edge cases (titles mutating live, panes closing)
+
+**Invasiveness:** R2 is visible (tabs flash as they cycle). Roger approved: "clicking in the link in the copilot booster happens already outside of warp, we could disrupt it".
+
+**Determinism:** No heuristic failure modes. Either matches or provably no match.
+
+### Implementation: Trinity — WarpPaneFocuser Service
+
+Created 7 new files with 3-seam architecture for testability:
+
+**Interfaces:**
+- `IWindowTitleReader` — find main HWND, read title
+- `IKeyboardSender` — send Ctrl+Tab
+- `IPaneFocusClock` — abstract timing
+
+**Core Logic (WarpPaneFocuser.cs):**
+- Testable (no [ExcludeFromCodeCoverage])
+- TryFocusPane(int processId, string expectedTitle) → bool
+- Null/empty title → false immediately
+- Win32 apis abstracted via seams
+
+**Concrete Implementations:**
+- `Win32WindowTitleReader` — EnumWindows + IsWindowVisible + GetWindowText via LibraryImport
+- `Win32KeyboardSender` — SendInput API with INPUT structs for Ctrl+Tab sequence
+- `SystemPaneFocusClock` — Thread.Sleep
+
+All concrete classes marked [ExcludeFromCodeCoverage] (thin P/Invoke wrappers).
+
+### Wiring: Trinity — ActiveStatusTracker Integration
+
+Added two seams to maintain backward compatibility with 9 existing constructor overloads:
+- `Func<int, string, bool> _warpPaneFocuser` — default constructs WarpPaneFocuser
+- `Func<string, string?> _sessionDisplayNameProvider` — default reads SessionInfo.Summary
+
+Final (10th) constructor chains all overloads with defaults. No existing tests modified.
+
+**FocusCopilotHost branch on Warp:**
+1. Call `_sessionDisplayNameProvider(sessionId)` → expectedTitle
+2. Call `_warpPaneFocuser(hostInfo.HostPid, expectedTitle)`
+3. On match → log success, return
+4. On failure → log warning ("no Warp pane matched..."), focus warp.exe window as **fallback**, return
+
+Non-Warp hosts (Windows Terminal, Console, etc.) unchanged.
+
+### Testing: Tank — 12 Unit Tests + 3 LocalOnly Live Integration Tests
+
+**Unit Tests (WarpPaneFocuserTests.cs):**
+All edge cases covered, no mocking framework, stub classes only:
+1. NoMainWindow → false
+2. AlreadyOnTargetTab → true (no cycle)
+3. TitleMatchIsCaseInsensitive
+4. MatchOnSecondTab (1× Ctrl+Tab)
+5. MatchOnThirdTab (2× Ctrl+Tab)
+6. NoMatch_CyclesBackToOriginal → false
+7. HitsIterationCap → false
+8. DuplicateTitlesAcrossPanes_FirstMatchWins
+9. EmptyExpectedTitle → false
+10. NullExpectedTitle → false
+11. FocusHwndFails → false
+12. TitleReaderReturnsEmptyDuringProbe
+
+**Live Integration Tests (WarpPaneFocusLiveTests.cs):**
+Marked `[LocalOnlyStaFact]`, skip cleanly when Roger's live Warp scenario unavailable:
+1. FocusKnownPane_LandsOnExpectedTab — capture all pane titles, target second, restore, verify
+2. FocusUnknownPane_RestoresOriginal — fake title, assert failure + restore
+3. FocusAlreadyOnTarget_NoTabSwitch — current title as target
+
+**Test Infrastructure:**
+- `StubTitleReader` (Queue<string> script), `StubKeyboardSender` (count), `StubPaneFocusClock` (record)
+- `LiveWarpScenario.Detect()` probes for warp.exe + copilot.exe descendant (CIM `Win32_Process.ParentProcessId`)
+- `IDisposable` restore-on-teardown (guaranteed cleanup on assertion failure)
+- `[Collection(WindowEventHookCollection.Name)]` serializes live tests (existing pattern)
+- Added `System.Management 10.0.1` to IntegrationTests.csproj for CIM queries
+
+### Verification: Coordinator
+
+- **dotnet format** — clean
+- **dotnet build src/CopilotBooster.csproj -c Release --tl:off** — SUCCESS (0 warn, 0 err)
+- **Unit tests:** 851 total (+28 from 823 baseline, 1 pre-existing skip)
+- **Integration tests:** 141 total (3 new Warp live tests skip without COPILOT_BOOSTER_RUN_LOCALONLY)
+- **Live test verification:** All 3 LocalOnly Warp live tests pass against Roger's live Hi 1 / Hi 2
+
+### Deferred (Not R2)
+
+- `warp://session/<uuid>` deep link integration (needs upstream WARP_PANE_UUID env var)
+- Multi-window Warp cycling (v1 targets single warp.exe window)
+- Deterministic spawn automation (LocalOnly→CI conversion path documented in test code; out of scope per Roger)
+
+### Known Limitations (v1)
+
+- Multi-window Warp: EnumWindows picks FIRST visible warp.exe window with non-empty title; may focus wrong window if multiple exist (rare)
+- expectedTitle source: relies on SessionInfo.Summary; if session not yet started, Summary empty → no match
+
+---
+
 ## 2026-05-09: Issue #15 (refinement) — Auto-resolve Copilot CLI path + Dynamic model dropdown
 
 **Date:** 2026-05-09  

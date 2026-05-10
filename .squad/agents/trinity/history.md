@@ -48,6 +48,8 @@
 
 **2026-05-09: Active status regression fix (startup rescan):** Fixed shipped regression where pre-existing copilot.exe processes (launched before booster) never lit up as ACTIVE in the grid. Root cause: `ActiveStatusTracker._copilotHosts` was only populated via FileSystemWatcher events for NEW jsonl writes; existing sessions loaded via `SessionService.LoadNamedSessions` had no corresponding host binding. Added public `ActiveStatusTracker.RescanExistingSessions()` method that enumerates `~/.copilot/logs/process-*.log`, extracts session IDs and PIDs, verifies processes are alive, and calls `HandleExternalSessionDiscovered(sessionId, copilotPid)` for each live process. Rescan is idempotent (SetCopilotHost deduplicates by HWND/PID identity) and synchronous. Wired into `MainForm.LoadInitialDataAsync()` after `LoadSessions()` but before first `RefreshActiveStatus()` so active icons light up correctly on startup. Result: 795 unit tests + 138 integration tests passing (0 failures). Rescan logs `scanned {n} live copilot.exe process(es), bound {m} host(s)` at Information level when m > 0.
 
+**2026-05-10: Warp Terminal Pane Focus — R2 Probe-and-Match Implementation:** Implemented WarpPaneFocuser service with deterministic title-probe cycling for Warp terminal pane focus. Warp shares single warp.exe PID across all tabs/panes with zero UIA automation elements. Created 7 new files: IWindowTitleReader, IKeyboardSender, IPaneFocusClock (seam interfaces for testability), WarpPaneFocuser (core logic, testable), Win32WindowTitleReader, Win32KeyboardSender, SystemPaneFocusClock (concrete Win32 implementations marked [ExcludeFromCodeCoverage]). Algorithm: find main HWND, read title via GetWindowText, if matches expectedTitle → done; else loop up to 30 iterations sending Ctrl+Tab (150ms settle), reading, matching, detecting cycle-back to original. Integrated into ActiveStatusTracker via two seams: _warpPaneFocuser and _sessionDisplayNameProvider. Updated 9 existing constructor overloads plus created final 10th ctor with defaults (backward compatible). FocusCopilotHost branches on HostKindLabel == "Warp": reads session display name, calls focuser, on failure logs warning + focuses warp.exe window as fallback. Verified: dotnet format clean, build clean (0 warn, 0 err), unit tests 851 (+28 from 823 baseline). Live integration tests deferred to Tank (3 LocalOnly tests with restore-on-teardown). Known limitation: EnumWindows picks FIRST visible warp.exe window; multi-window instances may mis-focus (rare). Session title source relies on SessionInfo.Summary; empty summary → no match.
+
 ## Learnings Archive
 
 <!-- Detailed technical notes from prior phases -->
@@ -172,3 +174,45 @@ Extended `AiDetectionTooltips` with undecided and failure constants plus `ForFai
 
 
 **Post-fix:** Traced Tank's failing test — Priority 2 paths (tracked windows from ProjectCopilotHostToActiveWindows) bypassed session liveness. Added inline guard: if _copilotHosts contains sessionId and validator returns false, skip focus. Applied to both TryFocusCopilotCli Priority 2 (lines 1202-1206) and FocusActiveProcess Priority 2 loop (lines 1260-1265). Tank's TryFocusCopilotCliPidFallbackTests now passes. Baseline ActiveStatusTrackerHostTests failures remain (Tank updating in parallel).
+
+**2026-05-10: WarpPaneFocuser implementation (R2 probe-and-match):**
+
+Implemented deterministic Warp pane focus via title-probe cycling per decision .squad/decisions/inbox/squad-warp-r2-pivot.md.
+
+**Architecture pattern — seam-driven testing:**
+- Created 3 interfaces (IWindowTitleReader, IKeyboardSender, IPaneFocusClock) to abstract all Win32 dependencies
+- WarpPaneFocuser is 100% testable via constructor injection (NO [ExcludeFromCodeCoverage])
+- Concrete implementations (Win32WindowTitleReader, Win32KeyboardSender, SystemPaneFocusClock) are thin P/Invoke wrappers marked [ExcludeFromCodeCoverage]
+- This pattern lets Tank write pure unit tests with stub implementations that script title sequences and count SendCtrlTab calls
+
+**P/Invoke style consistency:**
+- Used LibraryImport partial methods in Win32WindowTitleReader (matching WindowFocusService pattern)
+- Used SendInput API (not keybd_event) in Win32KeyboardSender for modern keyboard input with INPUT structs
+- Both follow existing codebase convention: P/Invoke at top, [ExcludeFromCodeCoverage] on class
+
+**ActiveStatusTracker constructor telescoping:**
+- Added 2 new seams (_warpPaneFocuser, _sessionDisplayNameProvider) to final (10th) constructor
+- Updated ALL 9 intermediate constructors to chain through with default values
+- This maintains backward compatibility: existing tests compile without changes, new tests can inject mocks for precise control
+
+**Expected title source — pragmatic choice:**
+- _sessionDisplayNameProvider defaults to SessionService.GetActiveSessions().Summary
+- Summary is the canonical session name Copilot CLI sets as window title (same source used for Windows Terminal tab matching)
+- Rejected events.jsonl session_renamed tail parsing (heavier I/O), rejected alias (booster-only override)
+- Seam allows tests to inject any lookup logic
+
+**FocusCopilotHost Warp branch:**
+- Branched on hostInfo.HostKindLabel == "Warp" (HostKindClassifier already maps warp/warpterminal/warp-terminal → "Warp")
+- Calls _warpPaneFocuser(hostInfo.HostPid, expectedTitle) → logs success on match, logs warning on failure
+- Fallback: focus warp.exe window even if pane didn't match (courtesy behavior; user still gets foreground warp.exe)
+- Non-Warp hosts unchanged (Windows Terminal, Console, etc.)
+
+**Win32 quirks discovered:**
+- EnumWindows iteration order is NOT stable; for multi-window Warp (rare), we pick the FIRST visible window with non-empty title. Documented as v1 limitation.
+- GetWindowText returns empty string for hwnd == IntPtr.Zero or invisible windows; defensive check in ReadTitle
+
+**Reusable skill extraction candidate:**
+- Title-probe pattern (find main HWND → foreground → read title → loop SendCtrlTab + settle + read + match) is generic
+- Could work for WezTerm/Alacritty if they also expose active tab title via GetWindowText and support Ctrl+Tab cycling
+- Pattern has 2 seams (IWindowTitleReader for hwnd/title lookup, IKeyboardSender for tab-switch key sequence)
+- Document as .squad/skills/title-probe-tab-focus/SKILL.md if future terminals need it

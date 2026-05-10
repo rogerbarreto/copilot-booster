@@ -40,6 +40,8 @@ internal class ActiveStatusTracker
     private readonly Func<int, bool> _isProcessAlive;
     private readonly Func<int, bool> _isExpectedCopilotProcess;
     private readonly Func<string, int, bool> _isSessionLiveForCopilotPid;
+    private readonly Func<int, string, bool> _warpPaneFocuser;
+    private readonly Func<string, string?> _sessionDisplayNameProvider;
     private readonly HashSet<string> _startedSessionIds = new(StringComparer.OrdinalIgnoreCase);
     internal readonly EventsJournalService EventsJournal = new();
     private bool _handleCacheInitialLoadDone;
@@ -82,7 +84,17 @@ internal class ActiveStatusTracker
     internal event Action<string>? ActiveSessionHintChanged;
 
     internal ActiveStatusTracker()
-        : this(new CopilotHostResolver(), new WindowsTerminalPaneGateway(), new WindowsTerminalPaneCacheService())
+        : this(
+            new CopilotHostResolver(),
+            new WindowsTerminalPaneGateway(),
+            new WindowsTerminalPaneCacheService(),
+            WindowFocusService.TryFocusWindowHandle,
+            WindowFocusService.IsWindowAlive,
+            IsProcessAlive,
+            IsExpectedCopilotProcess,
+            DefaultIsSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
     {
     }
 
@@ -90,7 +102,17 @@ internal class ActiveStatusTracker
         CopilotHostResolver hostResolver,
         IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
         WindowsTerminalPaneCacheService windowsTerminalPaneCache)
-        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, WindowFocusService.TryFocusWindowHandle, WindowFocusService.IsWindowAlive)
+        : this(
+            hostResolver,
+            windowsTerminalPaneGateway,
+            windowsTerminalPaneCache,
+            WindowFocusService.TryFocusWindowHandle,
+            WindowFocusService.IsWindowAlive,
+            IsProcessAlive,
+            IsExpectedCopilotProcess,
+            DefaultIsSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
     {
     }
 
@@ -99,7 +121,17 @@ internal class ActiveStatusTracker
         IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
         WindowsTerminalPaneCacheService windowsTerminalPaneCache,
         Func<IntPtr, bool> focusWindowHandle)
-        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, WindowFocusService.IsWindowAlive)
+        : this(
+            hostResolver,
+            windowsTerminalPaneGateway,
+            windowsTerminalPaneCache,
+            focusWindowHandle,
+            WindowFocusService.IsWindowAlive,
+            IsProcessAlive,
+            IsExpectedCopilotProcess,
+            DefaultIsSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
     {
     }
 
@@ -109,7 +141,17 @@ internal class ActiveStatusTracker
         WindowsTerminalPaneCacheService windowsTerminalPaneCache,
         Func<IntPtr, bool> focusWindowHandle,
         Func<IntPtr, bool> isWindowAlive)
-        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, isWindowAlive, IsProcessAlive)
+        : this(
+            hostResolver,
+            windowsTerminalPaneGateway,
+            windowsTerminalPaneCache,
+            focusWindowHandle,
+            isWindowAlive,
+            IsProcessAlive,
+            IsExpectedCopilotProcess,
+            DefaultIsSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
     {
     }
 
@@ -120,7 +162,17 @@ internal class ActiveStatusTracker
         Func<IntPtr, bool> focusWindowHandle,
         Func<IntPtr, bool> isWindowAlive,
         Func<int, bool> isProcessAlive)
-        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, isWindowAlive, isProcessAlive, IsExpectedCopilotProcess)
+        : this(
+            hostResolver,
+            windowsTerminalPaneGateway,
+            windowsTerminalPaneCache,
+            focusWindowHandle,
+            isWindowAlive,
+            isProcessAlive,
+            IsExpectedCopilotProcess,
+            DefaultIsSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
     {
     }
 
@@ -132,7 +184,17 @@ internal class ActiveStatusTracker
         Func<IntPtr, bool> isWindowAlive,
         Func<int, bool> isProcessAlive,
         Func<int, bool> isExpectedCopilotProcess)
-        : this(hostResolver, windowsTerminalPaneGateway, windowsTerminalPaneCache, focusWindowHandle, isWindowAlive, isProcessAlive, isExpectedCopilotProcess, DefaultIsSessionLiveForCopilotPid)
+        : this(
+            hostResolver,
+            windowsTerminalPaneGateway,
+            windowsTerminalPaneCache,
+            focusWindowHandle,
+            isWindowAlive,
+            isProcessAlive,
+            isExpectedCopilotProcess,
+            DefaultIsSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
     {
     }
 
@@ -145,6 +207,31 @@ internal class ActiveStatusTracker
         Func<int, bool> isProcessAlive,
         Func<int, bool> isExpectedCopilotProcess,
         Func<string, int, bool> isSessionLiveForCopilotPid)
+        : this(
+            hostResolver,
+            windowsTerminalPaneGateway,
+            windowsTerminalPaneCache,
+            focusWindowHandle,
+            isWindowAlive,
+            isProcessAlive,
+            isExpectedCopilotProcess,
+            isSessionLiveForCopilotPid,
+            DefaultWarpPaneFocuser,
+            DefaultSessionDisplayNameProvider)
+    {
+    }
+
+    internal ActiveStatusTracker(
+        CopilotHostResolver hostResolver,
+        IWindowsTerminalPaneGateway windowsTerminalPaneGateway,
+        WindowsTerminalPaneCacheService windowsTerminalPaneCache,
+        Func<IntPtr, bool> focusWindowHandle,
+        Func<IntPtr, bool> isWindowAlive,
+        Func<int, bool> isProcessAlive,
+        Func<int, bool> isExpectedCopilotProcess,
+        Func<string, int, bool> isSessionLiveForCopilotPid,
+        Func<int, string, bool> warpPaneFocuser,
+        Func<string, string?> sessionDisplayNameProvider)
     {
         this._hostResolver = hostResolver;
         this._windowsTerminalPaneGateway = windowsTerminalPaneGateway;
@@ -154,6 +241,8 @@ internal class ActiveStatusTracker
         this._isProcessAlive = isProcessAlive;
         this._isExpectedCopilotProcess = isExpectedCopilotProcess;
         this._isSessionLiveForCopilotPid = isSessionLiveForCopilotPid;
+        this._warpPaneFocuser = warpPaneFocuser;
+        this._sessionDisplayNameProvider = sessionDisplayNameProvider;
     }
 
     private static bool DefaultIsSessionLiveForCopilotPid(string sessionId, int copilotPid)
@@ -167,6 +256,28 @@ internal class ActiveStatusTracker
         // T1/T2 paths: allow missing events.jsonl (fresh sessions)
         // T0 (RescanExistingSessions) explicitly uses allowMissingEventsJsonl: false via direct static calls
         return SessionPidLivenessValidator.IsLive(Program.SessionStateDir, sessionId, copilotPid, allowMissingEventsJsonl: true);
+    }
+
+    private static bool DefaultWarpPaneFocuser(int warpProcessId, string expectedTitle)
+    {
+        var focuser = new WarpPaneFocuser(
+            new Win32WindowTitleReader(),
+            new Win32KeyboardSender(),
+            new SystemPaneFocusClock(),
+            WindowFocusService.TryFocusWindowHandle);
+        return focuser.TryFocusPane(warpProcessId, expectedTitle);
+    }
+
+    private static string? DefaultSessionDisplayNameProvider(string sessionId)
+    {
+        if (string.IsNullOrEmpty(Program.SessionStateDir))
+        {
+            return null;
+        }
+
+        var activeSessions = SessionService.GetActiveSessions(Program.PidRegistryFile, Program.SessionStateDir);
+        var session = activeSessions.FirstOrDefault(s => s.Id == sessionId);
+        return session?.Summary;
     }
 
     private static bool IsProcessAlive(int pid)
@@ -658,6 +769,33 @@ internal class ActiveStatusTracker
         {
             this._focusWindowHandle(hostInfo.ParentHostHwnd);
             this.TrySelectWindowsTerminalPane(hostInfo);
+            return;
+        }
+
+        // Warp host: probe-and-match focus
+        if (string.Equals(hostInfo.HostKindLabel, "Warp", StringComparison.OrdinalIgnoreCase))
+        {
+            string? expectedTitle = this._sessionDisplayNameProvider(sessionId);
+            if (!string.IsNullOrEmpty(expectedTitle))
+            {
+                bool matched = this._warpPaneFocuser(hostInfo.HostPid, expectedTitle);
+                if (matched)
+                {
+                    RuntimeDiagnosticLog.Write(
+                        "FocusCopilotHost Warp pane matched session={0} title={1}",
+                        sessionId,
+                        expectedTitle);
+                    return;
+                }
+
+                Program.Logger.LogWarning(
+                    "No Warp pane matched session '{SessionId}' with title '{Title}'. Focusing warp.exe window as fallback.",
+                    sessionId,
+                    expectedTitle);
+            }
+
+            // Fallback: focus warp.exe window even if we couldn't match the pane
+            this._focusWindowHandle(hostInfo.HostHwnd);
             return;
         }
 

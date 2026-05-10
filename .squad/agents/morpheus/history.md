@@ -10,6 +10,15 @@
 
 <!-- Append learnings below -->
 
+### 2026-05-10 Warp Terminal Pane Focus
+
+* No UI changes in this iteration (R2 pane focus is a service-only feature).
+* Trinity wired WarpPaneFocuser into ActiveStatusTracker with _warpPaneFocuser and _sessionDisplayNameProvider seams.
+* FocusCopilotHost branches on HostKindLabel == "Warp": reads session display name, calls focuser, logs outcome.
+* On mismatch: logs warning, focuses warp.exe window as courtesy fallback.
+* Non-Warp hosts unchanged (Windows Terminal, Console, etc.).
+* Fallback window focus maintains booster usability even when no Warp pane matches (safety net for title mismatches, session renames).
+
 ### 2026-05-09 Settings AI model dropdown
 
 * Settings AI model selection uses a strict `ComboBoxStyle.DropDownList`, initially seeded with `"(default — let Copilot decide)"` so the form remains usable before async model discovery completes.
