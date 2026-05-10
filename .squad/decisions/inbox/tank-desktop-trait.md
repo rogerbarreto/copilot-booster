@@ -10,7 +10,7 @@ Use `[Trait("Category", "RequiresInteractiveDesktop")]` for integration tests th
 
 ## Meaning
 
-The trait means the test spawns real windows, drives terminal processes, or relies on global WinEvent hooks such as `EVENT_OBJECT_NAMECHANGE`, window create/destroy, or foreground-change notifications.
+The trait means the test spawns real windows, drives terminal/IDE processes, or relies on global WinEvent hooks such as `EVENT_OBJECT_NAMECHANGE`, window create/destroy, or foreground-change notifications.
 
 ## CI Filter
 
@@ -24,7 +24,7 @@ dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release -- 
 
 Mark a test or whole class with this trait when it:
 
-- launches `cmd.exe`, `wt.exe`, Warp, or another real terminal/window with `UseShellExecute = true`;
+- launches `cmd.exe`, `wt.exe`, Warp, `mspaint.exe`, IdeSimVS, or another real terminal/IDE/window process;
 - waits for `WindowEventHookService` events from the OS;
 - depends on global WinEvent hooks firing for externally spawned windows;
 - requires a real interactive desktop rather than a headless or hosted runner desktop.
