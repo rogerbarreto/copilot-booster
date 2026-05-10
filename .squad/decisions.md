@@ -1,3 +1,61 @@
+## 2026-05-10: GitHub URL Smart Input — Parser + Smart-Input Wiring in 3 Forms
+
+**Date:** 2026-05-10  
+**Status:** Delivered  
+**Contributors:** Neo (parser + integration)
+
+### Decision A — URL Parser: `GitHubLinkService.TryParseIssueOrPrUrl`
+
+New shared parser method accepts:
+- Bare positive integer: `"123"` → PR #123 or Issue #123 (caller determines type)
+- Full HTTPS URL: `"https://github.com/owner/repo/issues/123"` → Issue #123
+- Scheme-less URL: `"github.com/owner/repo/pull/456"` → PR #456
+
+**Rejects:**
+- Non-github hosts (`github-enterprise.com`, etc.)
+- `http://` scheme (requires HTTPS)
+- `/pulls` path segment (must be `/pull/`)
+- Extra path segments (`/files`, `/commits`, etc.)
+- Zero or negative numbers
+- Null/empty input
+
+**Return type:** `bool TryParseIssueOrPrUrl(string? input, string? owner, string? repo, out GitHubLinkParseResult result)` where `GitHubLinkParseResult` is `readonly record struct` with `ParsedOwner`, `ParsedRepo`, `IssueOrPrNumber`, `IsPr` fields.
+
+**Implementation:** Uses `Uri.TryCreate` + exact path segment matching. Case-insensitive owner/repo matching against configured remote.
+
+**Validation:** 14 unit tests in `GitHubLinkServiceParseUrlTests.cs` cover all decision branches.
+
+### Decision B — Smart Input Wiring in Three Forms
+
+1. **AddPrForm:** Text input now parses bare PR numbers AND full GitHub PR URLs. On URL parse, auto-selects remote (owner/repo case-insensitive match). Error handling: invalid URLs show validation tooltip.
+
+2. **AddIssueForm:** Text input now parses bare Issue numbers AND full GitHub Issue URLs. Mirrors AddPrForm pattern.
+
+3. **WorkspaceCreatorVisuals:** Dual-panel smart input with URL type correction:
+   - PR panel: `cmbRemote` + `txtPrNumber` with smart input
+   - Issue panel: `cmbIssueRemote` + `txtIssueNumber` with smart input
+   - Each panel maintains its own validation state
+   - When URL type differs from visible panel (e.g., Issue URL pasted in PR panel):
+     - **Do NOT flip radio button** (preserves user's panel stability)
+     - **DO validate as URL type** (Issue validation runs if Issue URL detected)
+     - **DO route creation by URL type** (workspace creation calls Issue API, not PR API)
+
+**Rationale:** Auto-flipping radio buttons rearranges UI state (base-branch controls, title placeholders, session-name derivation). Keeping the panel stable while routing creation by URL type avoids both wrong-API-fetch bugs (Issue URL in PR panel fetching PR refs) and unexpected UX reshuffles. The `GitHubTrackedItem.Type` persists the validated URL type, so downstream code uses the correct GitHub API.
+
+### Decision C — Skill Documentation
+
+Pattern documented in `.squad/skills/smart-github-url-input/SKILL.md` for future form enhancements (reports, filters, label suggestions, etc.).
+
+### Build & Test Outcome
+
+- Build: 0 errors / 0 warnings
+- `dotnet format`: clean
+- Unit tests: 14 new parser tests, all passing
+- Integration tests: all passing
+- No test regressions
+
+---
+
 ## 2026-05-10: CI split — `test.yml` owns validation, `release.yml` delegates via `workflow_call`
 
 **Date:** 2026-05-10  

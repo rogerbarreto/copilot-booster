@@ -29,6 +29,13 @@
 * Non-Warp hosts unchanged (Windows Terminal, Console, etc.).
 * Fallback window focus maintains booster usability even when no Warp pane matches (safety net for title mismatches, session renames).
 
+### 2026-05-10 Smart GitHub URL input pattern — Team awareness
+
+* Neo shipped `GitHubLinkService.TryParseIssueOrPrUrl` parser + smart input wiring in AddPrForm, AddIssueForm, WorkspaceCreatorVisuals.
+* Pattern: bare positive integer first, then full HTTPS/scheme-less GitHub URL parsing. Rejects `http://`, non-github hosts, `/pulls`, extra segments, non-positive numbers.
+* **WorkspaceCreatorVisuals dual-panel design:** PR and Issue panels have separate validation states. When URL type differs from visible panel (e.g., Issue URL in PR panel), do NOT flip radio buttons (preserves user stability), but DO route creation by URL type so PR URLs fetch PR refs and Issue URLs create issue-style branches.
+* Skill documented at `.squad/skills/smart-github-url-input/SKILL.md` for future form enhancements.
+
 ### 2026-05-09 Settings AI model dropdown
 
 * Settings AI model selection uses a strict `ComboBoxStyle.DropDownList`, initially seeded with `"(default — let Copilot decide)"` so the form remains usable before async model discovery completes.
