@@ -61,7 +61,9 @@ internal sealed class CopilotHostResolver
     /// <item>is alive (provider returns process name)</item>
     /// <item>is NOT the Booster's own PID</item>
     /// <item>owns a focusable top-level window (provider.GetTopLevelWindow returns non-zero)</item>
+    /// <item>is NOT a shell wrapper (PowerShell, Command Prompt, Console) — these are skipped to find the actual terminal host</item>
     /// </list>
+    /// If no non-shell ancestor is found, falls back to the first shell wrapper encountered (for standalone pwsh scenarios).
     /// Returns null if walk reaches PID 0, a cycle is detected, or no ancestor qualifies.
     /// Walk safety: cap at 32 ancestors and break on duplicate PIDs (cycle guard).
     /// HostProcessName is exactly what GetProcessName returned (raw, e.g., "WindowsTerminal", "pwsh").
@@ -71,6 +73,8 @@ internal sealed class CopilotHostResolver
     {
         try
         {
+            CopilotHostInfo? shellFallback = null;
+
             foreach (var ancestor in this.EnumerateAncestors(copilotPid))
             {
                 if (ancestor.Pid == this._ownPid || ancestor.ProcessName == null)
@@ -85,10 +89,29 @@ internal sealed class CopilotHostResolver
                 }
 
                 string hostKindLabel = HostKindClassifier.Classify(ancestor.ProcessName);
+
+                if (IsShellWrapper(hostKindLabel))
+                {
+                    // Cache as fallback for standalone shell scenarios
+                    if (shellFallback == null)
+                    {
+                        shellFallback = new CopilotHostInfo(hwnd, ancestor.Pid, copilotPid, ancestor.ProcessName, hostKindLabel);
+                    }
+
+                    RuntimeDiagnosticLog.Write(
+                        "CopilotHostResolver shell-wrapper skipped copilotPid={0} ancestorPid={1} hostKindLabel={2}",
+                        copilotPid,
+                        ancestor.Pid,
+                        hostKindLabel);
+                    continue;
+                }
+
+                // Found non-shell ancestor with HWND — this is the terminal host
                 return new CopilotHostInfo(hwnd, ancestor.Pid, copilotPid, ancestor.ProcessName, hostKindLabel);
             }
 
-            return null;
+            // No non-shell ancestor found — fall back to last shell (standalone pwsh scenario)
+            return shellFallback;
         }
         catch (Exception ex)
         {
@@ -178,6 +201,11 @@ internal sealed class CopilotHostResolver
             current = parentPid.Value;
             yield return (current, this._provider.GetProcessName(current));
         }
+    }
+
+    private static bool IsShellWrapper(string hostKindLabel)
+    {
+        return hostKindLabel is "PowerShell" or "Command Prompt" or "Console";
     }
 
     private static bool IsWindowsTerminalProcess(string processName)
