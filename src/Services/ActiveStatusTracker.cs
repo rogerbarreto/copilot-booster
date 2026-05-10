@@ -529,12 +529,7 @@ internal class ActiveStatusTracker
                 // Parse the log file to get ALL session IDs (Bug D: handle /resume)
                 try
                 {
-                    IReadOnlyList<(string sessionId, string cwd)> sessions;
-                    using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                    using (var reader = new StreamReader(fs, System.Text.Encoding.UTF8))
-                    {
-                        sessions = CopilotLogWatcherService.TryParseLogContent(reader);
-                    }
+                    var sessions = CopilotLogWatcherService.TryParseLogTail(logPath);
                     if (sessions.Count == 0)
                     {
                         continue;

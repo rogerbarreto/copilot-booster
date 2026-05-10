@@ -165,12 +165,12 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
                 return;
             }
 
-            IReadOnlyList<(string sessionId, string cwd)> sessions;
-            using (var fs = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (var reader = new StreamReader(fs, Encoding.UTF8))
-            {
-                sessions = TryParseLogContent(reader);
-            }
+            // Tail-read bounds the read to the last 256 KB regardless of total log size.
+            // Active copilot.exe logs grow to 100s of MB; reading the full file here on every
+            // FileSystemWatcher Changed event was a multi-GB transient allocation source at
+            // startup with several alive copilot.exe processes. The latest /resume marker is
+            // always near the tail, so 256 KB is enough to discover any new sessionId.
+            var sessions = TryParseLogTail(logFilePath);
 
             if (sessions.Count == 0)
             {
@@ -390,6 +390,54 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
 
         // Return list of (sessionId, cwd) tuples — all sessions share the same process-wide cwd
         return sessions.Select(sid => (sid, cwd)).ToList();
+    }
+
+    /// <summary>
+    /// Tail-reads a log file from approximately the last `maxTailBytes` bytes and parses
+    /// it for session markers. Used by T0 startup rescan to bound parse cost regardless
+    /// of log size — only the latest session_id per PID is needed at startup.
+    /// Falls back to reading the whole file if it's smaller than maxTailBytes.
+    /// Aligns the seek position to the next newline so we don't start in the middle
+    /// of a line or JSON block (which would confuse the parser's state machine).
+    /// </summary>
+    internal static IReadOnlyList<(string sessionId, string cwd)> TryParseLogTail(
+        string logPath, int maxTailBytes = 256 * 1024, string? fallbackCwd = null)
+    {
+        try
+        {
+            if (!File.Exists(logPath))
+            {
+                return [];
+            }
+
+            var tailBytes = Math.Max(1, maxTailBytes);
+            using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (fs.Length <= tailBytes)
+            {
+                fs.Seek(0, SeekOrigin.Begin);
+            }
+            else
+            {
+                fs.Seek(fs.Length - tailBytes, SeekOrigin.Begin);
+
+                int value;
+                while ((value = fs.ReadByte()) != -1)
+                {
+                    if (value == '\n')
+                    {
+                        break;
+                    }
+                }
+            }
+
+            using var reader = new StreamReader(fs, Encoding.UTF8);
+            return TryParseLogContent(reader, fallbackCwd);
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to tail-parse Copilot log file {Path}: {Error}", logPath, ex.Message);
+            return [];
+        }
     }
 
     /// <summary>
