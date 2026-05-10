@@ -540,33 +540,52 @@ internal class ActiveStatusTracker
                         continue;
                     }
 
-                    // Bug D: T0 rescan processes ALL sessions from the log (not just first)
-                    // For each session in this PID's log, bind if eligible.
-                    foreach (var (sessionId, _) in sessions)
+                    // Perf fix (T0 only): one alive copilot.exe PID hosts ONE currently-active session at a time.
+                    // /resume cycling produces interleaved session_id markers in the log (e.g., [A,B,A,B,A]).
+                    // Resolving the host (~300ms Win32 enumeration) once per parsed marker turned a 4-PID rescan
+                    // into a 76-second hang. We instead bind only the latest LIVE session per PID and evict any
+                    // stale historical bindings tied to this PID. T1 watcher path remains unchanged: new sessions
+                    // appearing mid-process still fire ExternalSessionDiscovered events.
+                    string? latestLiveSessionId = null;
+                    for (int i = sessions.Count - 1; i >= 0; i--)
                     {
-                        // Bug B gate: drop stale bindings before checking existing hosts
-                        if (!SessionPidLivenessValidator.IsLive(Program.SessionStateDir, sessionId, pid.Value, allowMissingEventsJsonl: false))
+                        var sid = sessions[i].sessionId;
+                        if (SessionPidLivenessValidator.IsLive(Program.SessionStateDir, sid, pid.Value, allowMissingEventsJsonl: false))
                         {
-                            // Stale binding — drop and don't rebind.
-                            if (this.GetCopilotHost(sessionId) != null)
-                            {
-                                this.RemoveCopilotHost(sessionId);
-                            }
-
-                            continue;
+                            latestLiveSessionId = sid;
+                            break;
                         }
-
-                        // If we already have a host for this session and it's still alive, skip
-                        var existing = this.GetCopilotHost(sessionId);
-                        if (existing != null && this.IsCopilotHostActive(sessionId, existing))
-                        {
-                            continue;
-                        }
-
-                        // Bind this session to its host via the standard discovery path
-                        this.HandleExternalSessionDiscovered(sessionId, pid.Value);
-                        boundCount++;
                     }
+
+                    // Evict ALL existing _copilotHosts entries tied to this PID except the latest live session.
+                    // This covers stale bindings from prior Booster sessions (cache rehydration) AND historical
+                    // sessions in the current log that aren't the active one anymore.
+                    var staleSessionIds = this._copilotHosts
+                        .Where(kvp => kvp.Value.CopilotPid == pid.Value
+                            && !string.Equals(kvp.Key, latestLiveSessionId, StringComparison.OrdinalIgnoreCase))
+                        .Select(kvp => kvp.Key)
+                        .ToList();
+                    foreach (var stale in staleSessionIds)
+                    {
+                        this.RemoveCopilotHost(stale);
+                    }
+
+                    if (latestLiveSessionId == null)
+                    {
+                        // No live session in this PID's log — nothing to bind.
+                        continue;
+                    }
+
+                    // Skip if already bound and alive.
+                    var existingHost = this.GetCopilotHost(latestLiveSessionId);
+                    if (existingHost != null && this.IsCopilotHostActive(latestLiveSessionId, existingHost))
+                    {
+                        continue;
+                    }
+
+                    // Bind the latest live session via the standard discovery path.
+                    this.HandleExternalSessionDiscovered(latestLiveSessionId, pid.Value);
+                    boundCount++;
                 }
                 catch (Exception ex)
                 {
