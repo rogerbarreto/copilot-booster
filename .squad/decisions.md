@@ -1048,6 +1048,43 @@ internal interface IMessageBox
 
 ---
 
+## 2026-05-10 — Win32 INPUT struct cbSize must match MOUSEINPUT-sized union
+
+**Date:** 2026-05-10  
+**Investigator:** Niobe (diagnosed), Squad (implemented)  
+**Status:** Shipped
+
+### Problem
+
+When user clicks "Hi 1" in Booster's grid while Hi 2 is the active tab in Warp, the Warp tab does NOT switch. Manual Ctrl+PageDown works, but `SendInput` via `WarpPaneFocuser` does not. The focuser returns `matched=False` after cycling.
+
+### Root Cause
+
+Win32KeyboardSender's INPUT union only contained KEYBDINPUT (24 bytes on x64), making `Marshal.SizeOf<INPUT>()` return 32 bytes. The actual Win32 INPUT struct is 40 bytes—the union must be sized for MOUSEINPUT (its largest member). Wrong cbSize caused `SendInput` to reject every keystroke with ERROR_INVALID_PARAMETER (87).
+
+**Diag Evidence:**
+- Before: `SendNextTab fg=2298016 sent=0/4 lastError=87` (all inputs rejected)
+- After: `SendNextTab fg=2298016 sent=4/4 lastError=0` (all inputs accepted)
+- UI: Ctrl+PageDown in Booster → Warp Hi 1 tab switch ✓
+
+### Decision
+
+1. **Extract canonical `Win32Input.cs`** — static class with MOUSEINPUT-sized union to prevent size recalculation errors
+2. **Refactor `Win32KeyboardSender`** — use Win32Input, add diag logging for sent count and lastError
+3. **Add `Win32InputLayoutTests`** — regression tests pinning `sizeof(INPUT)` at 40 bytes (x64) and 28 bytes (x86)
+
+### Outcome
+
+- 875/875 unit tests pass (4 new layout tests)
+- dotnet format clean
+- Live UI verified: Ctrl+PageDown → tab switch ✓
+
+### Latent Issue
+
+WindowsTerminalPaneGateway.cs:23-38 has the identical INPUT struct-size bug, currently masked by UIA SelectionItemPattern.Select being the primary path. Ticket-worthy follow-up: migrate WT to canonical Win32Input.cs.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
