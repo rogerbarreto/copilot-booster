@@ -1,3 +1,52 @@
+## 2026-05-10: PR/Issue auto-link at session creation — return-shape struct + lambda-internal seeding
+
+**Date:** 2026-05-10  
+**Status:** Delivered  
+**Contributors:** Neo (architecture gate), Morpheus (UI phases 1/3/4/5), Trinity (link helper), Tank (tests)
+
+### Decision A — Return shape: plain `internal struct`, not record
+
+`ShowWorkspaceCreator` returns `WorkspaceCreatorResult?` (replacing the prior `(string, string?, string?)?` tuple). The new types are **plain `internal struct`** (not `record`, not `record struct`), defined at the bottom of `src/Forms/WorkspaceCreatorVisuals.cs` in the `CopilotBooster.Forms` namespace:
+
+```csharp
+internal struct WorkspaceCreatorResult { public string WorktreePath; public string? SessionName; public WorkspaceGitHubLink? GitHubLink; }
+internal struct WorkspaceGitHubLink   { public string Owner; public string Repo; public GitHubTrackedItem Item; }
+```
+
+**Rationale:** Roger explicitly chose plain struct ("only use record if we ever need the benefits of a record") to avoid value-equality machinery and the `record` ceremony when the type is purely a return-value carrier. Co-locating with the producing dialog avoids polluting `src/Models/` with dialog-coupled types.
+
+### Decision B — Caller-side seeding sequence (parity with manual Add PR/Issue)
+
+When `WorkspaceCreatorResult.GitHubLink is { } link`, both callers (`MainForm.cs:~2097` and `MainForm.ContextMenu.cs:~137`) run the same five-step sequence after `CreateSessionAsync`:
+
+1. `this._githubTracker.AddItem(sid, link.Item)` — try/catch; failure shows a non-blocking warning toast (`⚠️ Session created. Couldn't auto-link …`).
+2. `this._githubPoller?.PollSessionNow(sid)` — try/catch; log + swallow.
+3. `this.AiDetectionService.Reset(sid)` — try/catch; log + swallow.
+4. `GitHubLinkService.GetItemUrl(link.Owner, link.Repo, link.Item)` → seed Edge tab.
+5. `await this.RefreshGridAsync(...)` with `trackingChanged: true`.
+
+**Intentional structural difference:** `MainForm.cs` caller calls `dialog.Close()` before the refresh; the context-menu caller does not. This asymmetry was preserved deliberately.
+
+**Helper extraction skipped:** the outer scaffolding (template-dir resolution, `dialog.Close()`) differs, even though the inner seeding sequence is byte-identical. Extracting only the inner block would force an awkward seam.
+
+### Decision C — Dialog must capture full `GitHubTrackedItem` fields inside the validation `Task.Run`
+
+Pre-existing dialog validation only extracted `title`/`headRef` (PR) and `title` (Issue), discarding `state`, `draft`/`stateReason`, `author`, `labels`/`headBranch`, `updatedAt`, and the parsed `owner`/`repo`. Because `using var doc` disposes the `JsonDocument` inside the `Task.Run`, all extraction MUST happen there — mirroring `AddPrForm.cs:190-220` and `AddIssueForm.cs:190-219`.
+
+### Decision D — Test seam gap: reflection contract pin instead of seeding-sequence unit test (Tank)
+
+The seeding sequence lives in event-handler lambdas with no injectable seam (`GitHubTrackingService` has no interface). Rather than refactor MainForm purely for testability, Tank pinned the contract with a reflection-based assertion on `ShowWorkspaceCreator`'s return type. **Follow-up:** if `IGitHubTrackingService` is ever introduced for other reasons, replace this pin with a real unit test of the seeding sequence (`SessionCreationAutoLinkTests`).
+
+### Service helper
+
+`GitHubLinkService.GetItemUrl(owner, repo, item)` dispatches via the case-insensitive `item.IsPr` flag. Existing inline ternaries at `MainForm.ContextMenu.cs:338-339, 651-652` and `CiInformationForm.cs:224` were intentionally left as-is (out of scope) — opportunistic dedup deferred.
+
+### Build & test outcome
+
+Build: 0 errors / 0 warnings. `dotnet format`: clean (single pre-existing CA1822 on `WarpMultiTabE2ETests.cs:297` unchanged). Unit tests: **884 passed / 0 failed / 2 skipped**. 9 new unit tests added (`GitHubLinkServiceGetItemUrlTests` ×5, `WorkspaceCreatorResultTests` ×4).
+
+---
+
 ## 2026-05-10: Log Tail-Read Pattern for T0 Startup and File Watcher Events
 
 **Date:** 2026-05-10  

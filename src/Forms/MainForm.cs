@@ -2099,28 +2099,45 @@ internal partial class MainForm : Form
             var gitRoot = SessionService.FindGitRoot(selectedCwd);
             if (gitRoot != null)
             {
-                var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot, this._githubApi); if (wsResult != null)
+                var wsResult = WorkspaceCreatorVisuals.ShowWorkspaceCreator(gitRoot, this._githubApi);
+                if (wsResult != null)
                 {
-                    var newSessionId = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
-                    if (newSessionId != null)
+                    var sid = await CopilotSessionCreatorService.CreateSessionAsync(wsResult.Value.WorktreePath, wsResult.Value.SessionName, CopilotSessionCreatorService.FindTemplateSessionDir()).ConfigureAwait(true);
+                    if (sid != null)
                     {
                         if (!string.IsNullOrWhiteSpace(wsResult.Value.SessionName))
                         {
-                            SessionAliasService.SetAlias(Program.SessionAliasFile, newSessionId, wsResult.Value.SessionName);
+                            SessionAliasService.SetAlias(Program.SessionAliasFile, sid, wsResult.Value.SessionName);
                         }
 
-                        // Auto-add Edge tab for PR/Issue URL
-                        if (!string.IsNullOrEmpty(wsResult.Value.GitHubUrl))
+                        if (wsResult.Value.GitHubLink is { } link)
                         {
-                            var existingTabs = EdgeTabPersistenceService.LoadTabs(newSessionId);
-                            if (!existingTabs.Contains(wsResult.Value.GitHubUrl))
+                            try
                             {
-                                existingTabs.Add(wsResult.Value.GitHubUrl);
-                                EdgeTabPersistenceService.SaveTabs(newSessionId, existingTabs);
+                                GitHubTrackingService.AddItem(sid, link.Owner, link.Repo, link.Item);
+                            }
+                            catch (Exception ex)
+                            {
+                                Program.Logger.LogWarning("[WorkspaceCreator] Failed to auto-link {Type} #{Number}: {Error}", link.Item.Type, link.Item.Number, ex.Message);
+                                this._toast.ShowWarning($"⚠️ Session created. Couldn't auto-link {link.Item.Type} #{link.Item.Number} — {ex.Message}");
+                            }
+
+                            try { this._githubPoller?.PollSessionNow(sid); }
+                            catch (Exception ex) { Program.Logger.LogWarning("[WorkspaceCreator] PollSessionNow failed: {Error}", ex.Message); }
+
+                            try { this.AiDetectionService.Reset(sid); }
+                            catch (Exception ex) { Program.Logger.LogWarning("[WorkspaceCreator] AiDetectionService.Reset failed: {Error}", ex.Message); }
+
+                            var url = GitHubLinkService.GetItemUrl(link.Owner, link.Repo, link.Item);
+                            var existingTabs = EdgeTabPersistenceService.LoadTabs(sid);
+                            if (!existingTabs.Contains(url))
+                            {
+                                existingTabs.Add(url);
+                                EdgeTabPersistenceService.SaveTabs(sid, existingTabs);
                             }
                         }
 
-                        this._interactionManager.LaunchSession(newSessionId);
+                        this._interactionManager.LaunchSession(sid);
                         dialog.Close();
                         await this.RefreshGridAsync().ConfigureAwait(true);
                     }

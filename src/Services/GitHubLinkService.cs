@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 
+using CopilotBooster.Models;
+
 namespace CopilotBooster.Services;
 
 /// <summary>
@@ -30,6 +32,14 @@ internal static class GitHubLinkService
     /// </summary>
     internal static string GetIssueUrl(string owner, string repo, int number) =>
         $"https://github.com/{owner}/{repo}/issues/{number}";
+
+    /// <summary>
+    /// Builds a GitHub PR or Issue URL from a tracked item, dispatching on <see cref="GitHubTrackedItem.IsPr"/>.
+    /// </summary>
+    internal static string GetItemUrl(string owner, string repo, GitHubTrackedItem item) =>
+        item.IsPr
+            ? GetPrUrl(owner, repo, item.Number)
+            : GetIssueUrl(owner, repo, item.Number);
 
     /// <summary>
     /// Builds a GitHub Actions run URL.

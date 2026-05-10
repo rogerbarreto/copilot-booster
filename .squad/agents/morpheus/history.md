@@ -10,6 +10,16 @@
 
 <!-- Append learnings below -->
 
+### 2026-05-10 Dialog-Return Struct Pattern (WorkspaceCreatorVisuals)
+
+* Replaced the `(string, string?, string?)?` tuple return from `ShowWorkspaceCreator` with `WorkspaceCreatorResult?` struct. Plain `internal struct` (not record) — chosen deliberately; only promote if value-equality ever needed.
+* `WorkspaceGitHubLink` holds `Owner`, `Repo`, and a `GitHubTrackedItem` — enough for callers to call `AddItem`, `GetItemUrl`, and seed Edge tabs without any re-fetch.
+* Both `Task.Run` validation blocks (PR and Issue) in `WorkspaceCreatorVisuals` dispose `JsonDocument` with `using var doc` inside the lambda — **all JSON extraction must complete before the lambda returns**. New fields (state, draft, author, merged→effectiveState, updatedAt, owner, repo for PR; state, stateReason, author, labels, updatedAt, owner, repo for Issue) were all extracted inside the lambda and returned via extended value tuples.
+* `fetchedPrGitHubLink` and `fetchedIssueGitHubLink` are closure-captured nullable structs built on successful validation; set to `null` in their respective `Reset*` functions.
+* GitHub URL is no longer computed or stored in the dialog result — callers use `GitHubLinkService.GetItemUrl(link.Owner, link.Repo, link.Item)` at the call site.
+* **Helper-dedupe skipped (Phase 5):** The two caller blocks differ in `CreateSessionAsync` source-dir arg and the `dialog.Close()` call present only in `MainForm.cs`. The inner seeding sequence is identical but extracting it alone would add indirection for minimal gain.
+* `MainForm.ContextMenu.cs` needed `using Microsoft.Extensions.Logging;` added — it wasn't imported despite `Program.Logger` being used via the shared partial class.
+
 ### 2026-05-10 Warp Terminal Pane Focus
 
 * No UI changes in this iteration (R2 pane focus is a service-only feature).
