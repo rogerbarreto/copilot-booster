@@ -165,14 +165,12 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
                 return;
             }
 
-            string[] lines;
+            IReadOnlyList<(string sessionId, string cwd)> sessions;
             using (var fs = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var reader = new StreamReader(fs, Encoding.UTF8))
             {
-                lines = reader.ReadToEnd().Split('\n');
+                sessions = TryParseLogContent(reader);
             }
-
-            var sessions = TryParseLogContent(lines);
 
             if (sessions.Count == 0)
             {
@@ -268,7 +266,7 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     /// Returns list of (sessionId, cwd) tuples — cwd is process-wide and shared across all sessions.
     /// Consecutive duplicate session IDs are deduplicated.
     /// </summary>
-    internal static IReadOnlyList<(string sessionId, string cwd)> TryParseLogContent(string[] lines, string? fallbackCwd = null)
+    internal static IReadOnlyList<(string sessionId, string cwd)> TryParseLogContent(TextReader reader, string? fallbackCwd = null)
     {
         var sessions = new List<string>();
         string? cwdFromJson = null;
@@ -277,8 +275,23 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
         bool collectingJson = false;
         int braceDepth = 0;
 
-        foreach (var line in lines)
+        string? line;
+        while ((line = reader.ReadLine()) != null)
         {
+            // Fast path: skip lines that have no parser-relevant markers.
+            // This avoids the Trim() allocation + regex matches for the ~99.9% of log lines
+            // that contain none of the markers we care about. Critical for keeping allocations
+            // bounded when scanning multi-hundred-MB process logs.
+            if (!collectingJson
+                && line.IndexOf("session_id", StringComparison.Ordinal) < 0
+                && line.IndexOf("Telemetry", StringComparison.Ordinal) < 0
+                && line.IndexOf("cwd=", StringComparison.Ordinal) < 0
+                && line.IndexOf("Workspace initialized", StringComparison.Ordinal) < 0
+                && line.IndexOf("Registering foreground session", StringComparison.Ordinal) < 0)
+            {
+                continue;
+            }
+
             var trimmed = line.Trim();
 
             // Level 2: Look for cwd in remoteHosts debug line: "cwd=S:\repo, featureFlagEnabled=..."
@@ -377,6 +390,17 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
 
         // Return list of (sessionId, cwd) tuples — all sessions share the same process-wide cwd
         return sessions.Select(sid => (sid, cwd)).ToList();
+    }
+
+    /// <summary>
+    /// Parses log file lines looking for ALL session_id values across cli.telemetry JSON blocks
+    /// and INFO patterns (Workspace initialized, Registering foreground session).
+    /// Array overload for test compatibility — wraps the streaming TextReader overload.
+    /// </summary>
+    internal static IReadOnlyList<(string sessionId, string cwd)> TryParseLogContent(string[] lines, string? fallbackCwd = null)
+    {
+        using var reader = new StringReader(string.Join('\n', lines));
+        return TryParseLogContent(reader, fallbackCwd);
     }
 
     /// <summary>
