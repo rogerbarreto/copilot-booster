@@ -4,11 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.22.0] - 2026-05-08
+## [0.22.0] - 2026-05-11
 
 ### Added
 
 - AI auto-detect GitHub issue / PR for sessions. Right-click → GitHub → AI → Auto Detect GitHub Issue and PR. Configurable in Settings → AI. (#17 #18 #19 #20 #21 #22 #23)
+- **Smart GitHub URL input** — PR/Issue number fields in *Add PR*, *Add Issue*, and the new-session dialog (PR + Issue panels) now accept full GitHub URLs such as `https://github.com/owner/repo/pull/123`. The number is extracted, the Remote dropdown auto-switches to the matching configured remote (or errors on foreign repositories), and the validated type is corrected from the URL path (`/pull/` vs `/issues/`). Accepts trailing slashes, query strings, fragments, surrounding whitespace, and scheme-less `github.com/...` URLs.
 
 ### Changed
 
