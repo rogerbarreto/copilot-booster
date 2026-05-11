@@ -10,11 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - AI auto-detect GitHub issue / PR for sessions. Right-click → GitHub → AI → Auto Detect GitHub Issue and PR. Configurable in Settings → AI. (#17 #18 #19 #20 #21 #22 #23)
 - **Smart GitHub URL input** — PR/Issue number fields in *Add PR*, *Add Issue*, and the new-session dialog (PR + Issue panels) now accept full GitHub URLs such as `https://github.com/owner/repo/pull/123`. The number is extracted, the Remote dropdown auto-switches to the matching configured remote (or errors on foreign repositories), and the validated type is corrected from the URL path (`/pull/` vs `/issues/`). Accepts trailing slashes, query strings, fragments, surrounding whitespace, and scheme-less `github.com/...` URLs.
+- **Auto-link PR/Issue on session creation** — when creating a session via the new-session dialog with PR or Issue panels populated, the session is automatically linked to the corresponding GitHub item (no additional "Add PR" or "Add Issue" steps required).
+- **Warp terminal host integration** — sessions running in Warp-hosted Copilot CLI now support deterministic tab/pane focus detection with title-probe-and-match strategy, proper pane switching via `Ctrl+PageDown`, and robust Win32 INPUT struct marshalling for tab navigation.
+- **Resume rebind: detect pre-existing Copilot sessions** — Copilot processes that are already running before Booster launches are now detected during startup rescanning. Sessions no longer require a restart; the booster detects and integrates them on first refresh.
 
 ### Changed
 
 - **AI auto-detect** — Copilot CLI path is now auto-resolved (WinGet locations + PATH lookup) and no longer requires manual configuration in Settings.
 - **AI auto-detect** — Settings model field is now a dropdown populated from the GitHub Copilot models API, with offline cache (24h TTL at `%LOCALAPPDATA%\CopilotBooster\models-cache.json`) and a `(default — let Copilot decide)` option.
+
+### Fixed
+
+- **Memory bloat from Copilot log streaming** — Copilot process logs are now streamed and tail-read (256 KB tail) instead of fully buffered, fixing 4GB memory bloat during heavy session usage.
+- **Session rescanning performance** — `RescanExistingSessions` is now bounded to the latest live session per process ID, eliminating O(n²) log-dir scanning that previously stalled the UI during refresh.
 
 ## [0.21.0] - 2026-05-04
 
