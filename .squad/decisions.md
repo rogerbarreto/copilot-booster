@@ -1,3 +1,30 @@
+## 2026-05-11: Standing Rule — PR Descriptions Must Include Closing Keywords for ALL Related Issues
+
+**Date:** 2026-05-11  
+**Status:** Directive  
+**Action Taken:** Post-mortem fix applied to PR #24; all 7 related slice issues now closed on GitHub
+
+### Standing Rule
+
+Every PR description MUST include GitHub closing keywords (`Closes #N` / `Fixes #N`) for **ALL** related issues, not just the primary one. This ensures automatic issue closure on merge and preserves full context in the PR description.
+
+### Why
+
+- Avoids orphaned open issues when PRs land
+- GitHub's release automation links issues correctly
+- Team sees full context of which issues a PR resolves
+- Prevents duplicate work when reviewing issue backlog
+
+### Retroactive Fixes
+
+For already-merged PRs with incomplete closing references:
+1. Edit the PR description to add missing `Closes #N` keywords
+2. Manually close the orphaned issues on GitHub with a back-reference comment linking to the merged PR
+
+**Example:** PR #24 was originally `Closes #15.` but resolved 7 slice issues. Post-mortem edit added `#17, #18, #19, #20, #21, #22, #23` to description and manually closed issues #17–#23.
+
+---
+
 ## 2026-05-10: GitHub URL Smart Input — Parser + Smart-Input Wiring in 3 Forms
 
 **Date:** 2026-05-10  
