@@ -66,6 +66,29 @@ internal static class SettingsVisuals
     }
 
     /// <summary>
+    /// Wraps a <see cref="ComboBox"/> in a <see cref="Panel"/> that provides a themed border.
+    /// </summary>
+    /// <param name="comboBox">The combo box to wrap.</param>
+    /// <returns>The wrapper panel containing the combo box.</returns>
+    internal static Panel WrapWithBorder(ComboBox comboBox)
+    {
+        comboBox.Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f);
+        var wrapper = new Panel
+        {
+            Location = comboBox.Location,
+            Size = new Size(comboBox.Width, comboBox.Height + 10),
+            Anchor = comboBox.Anchor,
+            Padding = new Padding(4, 3, 4, 3),
+            BackColor = Application.IsDarkModeEnabled ? Color.FromArgb(80, 80, 80) : SystemColors.ControlDark
+        };
+        comboBox.Location = Point.Empty;
+        comboBox.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        comboBox.Dock = DockStyle.Fill;
+        wrapper.Controls.Add(comboBox);
+        return wrapper;
+    }
+
+    /// <summary>
     /// Applies an info label and tooltip to a settings tab page.
     /// </summary>
     internal static void ApplyTabInfo(TabPage tab, string infoText, string tooltip)

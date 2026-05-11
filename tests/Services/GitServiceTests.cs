@@ -187,6 +187,129 @@
         Assert.Null(result);
     }
 
+    [Theory]
+    [InlineData("https://github.com/foo/bar", "foo", "bar")]
+    [InlineData("https://github.com/foo/bar.git", "foo", "bar")]
+    [InlineData("git@github.com:foo/bar", "foo", "bar")]
+    [InlineData("git@github.com:foo/bar.git", "foo", "bar")]
+    [InlineData("ssh://git@github.com/foo/bar.git", "foo", "bar")]
+    [InlineData("https://GitHub.com/Foo/Bar", "Foo", "Bar")]
+    public void ResolveGitHubRepo_GitHubOrigin_ReturnsOwnerRepo(string remoteUrl, string expectedOwner, string expectedRepo)
+    {
+        var repoPath = this.CreateGitRepo("origin", remoteUrl);
+
+        var result = GitService.ResolveGitHubRepo(repoPath);
+        var tryResult = GitService.TryResolveGitHubRepo(repoPath);
+
+        Assert.Equal(GitHubRepoResolution.Resolved, result.Status);
+        Assert.Equal(expectedOwner, result.Owner);
+        Assert.Equal(expectedRepo, result.Repo);
+        Assert.Equal((expectedOwner, expectedRepo), tryResult);
+    }
+
+    [Fact]
+    public void ResolveGitHubRepo_UpstreamAndOrigin_PrefersUpstream()
+    {
+        var repoPath = this.CreateGitRepo("origin", "https://github.com/fork/repo");
+        RunGitCmd(repoPath, "remote add upstream https://github.com/up/repo");
+
+        var result = GitService.ResolveGitHubRepo(repoPath);
+
+        Assert.Equal(GitHubRepoResolution.Resolved, result.Status);
+        Assert.Equal("up", result.Owner);
+        Assert.Equal("repo", result.Repo);
+    }
+
+    [Fact]
+    public void ResolveGitHubRepo_OnlyOrigin_FallsBackToOrigin()
+    {
+        var repoPath = this.CreateGitRepo("origin", "https://github.com/fork/repo");
+
+        var result = GitService.ResolveGitHubRepo(repoPath);
+
+        Assert.Equal(GitHubRepoResolution.Resolved, result.Status);
+        Assert.Equal("fork", result.Owner);
+        Assert.Equal("repo", result.Repo);
+    }
+
+    [Fact]
+    public void ResolveGitHubRepo_GitRepoWithNoRemotes_ReturnsNoRemote()
+    {
+        var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
+        Directory.CreateDirectory(repoPath);
+        RunGitCmd(repoPath, "init -q");
+
+        var result = GitService.ResolveGitHubRepo(repoPath);
+
+        Assert.Equal(GitHubRepoResolution.NoRemote, result.Status);
+        Assert.Null(GitService.TryResolveGitHubRepo(repoPath));
+    }
+
+    [Fact]
+    public void ResolveGitHubRepo_PlainFolder_ReturnsNotAGitRepo()
+    {
+        var folder = Path.Combine(this._tempDir, Path.GetRandomFileName());
+        Directory.CreateDirectory(folder);
+
+        var result = GitService.ResolveGitHubRepo(folder);
+
+        Assert.Equal(GitHubRepoResolution.NotAGitRepo, result.Status);
+        Assert.Null(GitService.TryResolveGitHubRepo(folder));
+    }
+
+    [Theory]
+    [InlineData("https://gitlab.com/foo/bar")]
+    [InlineData("https://dev.azure.com/foo/bar/_git/repo")]
+    [InlineData("git@gitlab.com:foo/bar.git")]
+    [InlineData("https://git.internal.example/foo/bar")]
+    public void ResolveGitHubRepo_NonGitHubOrigin_ReturnsNonGitHubRemote(string remoteUrl)
+    {
+        var repoPath = this.CreateGitRepo("origin", remoteUrl);
+
+        var result = GitService.ResolveGitHubRepo(repoPath);
+
+        Assert.Equal(GitHubRepoResolution.NonGitHubRemote, result.Status);
+        Assert.Null(GitService.TryResolveGitHubRepo(repoPath));
+    }
+
+    [Fact]
+    public void ResolveGitHubRepo_WorktreePath_ReturnsPrimaryRepoRemote()
+    {
+        var repoPath = this.InitBareGitRepo();
+        RunGitCmd(repoPath, "remote add origin https://github.com/worktree/repo.git");
+        var worktreePath = Path.Combine(this._tempDir, "worktree-" + Path.GetRandomFileName());
+        RunGitCmd(repoPath, $"worktree add -q \"{worktreePath}\" -b issue-19-worktree");
+
+        var result = GitService.ResolveGitHubRepo(worktreePath);
+
+        Assert.Equal(GitHubRepoResolution.Resolved, result.Status);
+        Assert.Equal("worktree", result.Owner);
+        Assert.Equal("repo", result.Repo);
+    }
+
+    [Fact]
+    public void ResolveGitHubRepo_ForkParentAvailable_ReturnsParentRepo()
+    {
+        var previousGhPath = Environment.GetEnvironmentVariable("GH_PATH");
+        var fakeGhPath = Path.Combine(this._tempDir, "fake-gh.cmd");
+        File.WriteAllText(fakeGhPath, "@echo upstream/repo\r\n");
+        Environment.SetEnvironmentVariable("GH_PATH", fakeGhPath);
+        try
+        {
+            var repoPath = this.CreateGitRepo("origin", "https://github.com/fork/repo.git");
+
+            var result = GitService.ResolveGitHubRepo(repoPath);
+
+            Assert.Equal(GitHubRepoResolution.Resolved, result.Status);
+            Assert.Equal("upstream", result.Owner);
+            Assert.Equal("repo", result.Repo);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GH_PATH", previousGhPath);
+        }
+    }
+
     [Fact]
     public void SanitizeWorkspaceDirName_TruncatesLongBranchToThreeWords()
     {
@@ -319,6 +442,17 @@
         File.WriteAllText(Path.Combine(repoPath, "README.md"), "# Test");
         RunGitCmd(repoPath, "add .");
         RunGitCmd(repoPath, "commit -m \"init\"");
+
+        return repoPath;
+    }
+
+    private string CreateGitRepo(string remoteName, string remoteUrl)
+    {
+        var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
+        Directory.CreateDirectory(repoPath);
+
+        RunGitCmd(repoPath, "init -q");
+        RunGitCmd(repoPath, $"remote add {remoteName} {remoteUrl}");
 
         return repoPath;
     }

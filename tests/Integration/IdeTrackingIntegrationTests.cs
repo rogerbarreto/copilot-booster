@@ -8,6 +8,7 @@ namespace CopilotBooster.IntegrationTests.Integration;
 /// so WINEVENT_SKIPOWNPROCESS doesn't filter its events.
 /// Tests the full scenario matrix: open, detect, close, reopen across multiple sessions.
 /// </summary>
+[Collection(WindowEventHookCollection.Name)]
 public sealed class IdeTrackingIntegrationTests : IDisposable
 {
     private readonly List<Process> _startedProcesses = [];
@@ -197,6 +198,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// 5. Open IDE for session 1 → detected for both
     /// 6. Close both → empty for both
     /// </summary>
+    [Trait("Category", "RequiresInteractiveDesktop")]
     [StaFact]
     public void E2E_FullIdeLifecycleMatrix()
     {
@@ -308,6 +310,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     ///
     /// The real IDE window exists but was never associated because its PID differs from the launcher PID.
     /// </summary>
+    [Trait("Category", "RequiresInteractiveDesktop")]
     [StaFact]
     public void E2E_LauncherPattern_IdeSurvivesFullRefreshAfterLauncherExits()
     {
@@ -370,6 +373,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// Splash (HWND #1) → destroyed → main window (HWND #2, generic title) → title update.
     /// All under same PID. Random titles — no title-based tracking.
     /// </summary>
+    [Trait("Category", "RequiresInteractiveDesktop")]
     [StaFact]
     public void E2E_VsSimulator_FolderMode_SplashTransition_OpenAndClose()
     {
@@ -451,6 +455,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// Splash (HWND #1) → destroyed → main window (HWND #2, project title immediately).
     /// No delayed title update. All under same PID. Random titles.
     /// </summary>
+    [Trait("Category", "RequiresInteractiveDesktop")]
     [StaFact]
     public void E2E_VsSimulator_SlnMode_SplashTransition_OpenAndClose()
     {
@@ -529,6 +534,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// when the process terminates abruptly), BuildActiveText should still detect
     /// that both PID and HWND are dead and NOT show the IDE.
     /// </summary>
+    [Trait("Category", "RequiresInteractiveDesktop")]
     [StaFact]
     public void E2E_IdeWithFolderPath_ProcessKilled_NoDestroyEvent_GridMustClear()
     {
@@ -605,6 +611,7 @@ public sealed class IdeTrackingIntegrationTests : IDisposable
     /// OnWindowDestroyed must NOT recapture to dying child windows.
     /// After process exit, the grid must be clear.
     /// </summary>
+    [Trait("Category", "RequiresInteractiveDesktop")]
     [StaFact]
     public void E2E_VsSimulator_KillProcess_CascadingDestroy_GridMustClear()
     {

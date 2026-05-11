@@ -35,6 +35,9 @@ if (-not (Get-Command copilot.exe -ErrorAction SilentlyContinue)) {
 
 # 2. Build
 Write-Host "Building CopilotBooster..." -ForegroundColor Cyan
+if (Test-Path $PublishDir) {
+    Remove-Item -Recurse -Force $PublishDir
+}
 Push-Location $SrcDir
 dotnet publish -c Release -o $PublishDir --nologo -v quiet
 if ($LASTEXITCODE -ne 0) {

@@ -268,6 +268,15 @@ internal partial class GitHubApiService
     /// </summary>
     internal async Task<JsonDocument?> GetPullRequestAsync(string owner, string repo, int number)
     {
+        if (this._processRunner != null)
+        {
+            var apiDoc = await this.GhApiAsync($"repos/{owner}/{repo}/pulls/{number}").ConfigureAwait(false);
+            if (apiDoc != null)
+            {
+                return apiDoc;
+            }
+        }
+
         var doc = await this.HtmlCheckAsync(owner, repo, "pull", number).ConfigureAwait(false);
         if (doc != null)
         {
@@ -284,6 +293,21 @@ internal partial class GitHubApiService
     /// </summary>
     internal async Task<JsonDocument?> GetIssueAsync(string owner, string repo, int number)
     {
+        if (this._processRunner != null)
+        {
+            var apiDoc = await this.GhApiAsync($"repos/{owner}/{repo}/issues/{number}").ConfigureAwait(false);
+            if (apiDoc != null && apiDoc.RootElement.TryGetProperty("pull_request", out _))
+            {
+                apiDoc.Dispose();
+                return null;
+            }
+
+            if (apiDoc != null)
+            {
+                return apiDoc;
+            }
+        }
+
         var doc = await this.HtmlCheckAsync(owner, repo, "issues", number).ConfigureAwait(false);
         if (doc != null)
         {

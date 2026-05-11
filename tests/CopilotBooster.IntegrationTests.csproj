@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Playwright" Version="1.52.0" />
+    <PackageReference Include="System.Management" Version="10.0.1" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -28,7 +29,8 @@
     <Compile Remove="**\*.cs" />
     <Compile Include="Integration\**\*.cs" />
     <!-- Exclude simulator tool source files from test compilation -->
-    <Compile Remove="Integration\TestTools\**\*.cs" />
+    <Compile Remove="Integration\TestTools\IdeSimVS\**\*.cs" />
+    <Compile Remove="Integration\TestTools\IdeSimVSCode\**\*.cs" />
   </ItemGroup>
 
   <!-- Build IDE simulators into the test output directory -->

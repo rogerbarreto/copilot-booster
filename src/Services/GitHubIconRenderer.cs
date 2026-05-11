@@ -112,6 +112,55 @@ internal static class GitHubIconRenderer
         return bmp;
     }
 
+    /// <summary>
+    /// Gets a spinner frame for AI detection progress.
+    /// </summary>
+    internal static Bitmap GetSpinnerIcon(int frame, int size = 16)
+    {
+        var normalizedFrame = ((frame % 8) + 8) % 8;
+        var key = $"spinner_{normalizedFrame}_{size}";
+        if (s_cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var bmp = RenderSpinner(normalizedFrame, OpenGreen, size);
+        s_cache[key] = bmp;
+        return bmp;
+    }
+
+    /// <summary>
+    /// Gets a question mark status icon for undecided AI detection results.
+    /// </summary>
+    internal static Bitmap GetQuestionIcon(int size = 16)
+    {
+        var key = $"question_{size}";
+        if (s_cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var bmp = RenderIcon(DrawQuestionIcon, PendingYellow, size);
+        s_cache[key] = bmp;
+        return bmp;
+    }
+
+    /// <summary>
+    /// Gets a warning status icon for failed AI detection results.
+    /// </summary>
+    internal static Bitmap GetWarningIcon(int size = 16)
+    {
+        var key = $"warning_{size}";
+        if (s_cache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        var bmp = RenderIcon(DrawWarningIcon, ClosedRed, size);
+        s_cache[key] = bmp;
+        return bmp;
+    }
+
     private static Bitmap RenderIcon(Action<Graphics, Color, int> drawAction, Color color, int size)
     {
         var bmp = new Bitmap(size, size);
@@ -120,6 +169,33 @@ internal static class GitHubIconRenderer
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         drawAction(g, color, size);
+        return bmp;
+    }
+
+    private static Bitmap RenderSpinner(int frame, Color color, int size)
+    {
+        var bmp = new Bitmap(size, size);
+        bmp.MakeTransparent();
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+        const int DotCount = 8;
+        float center = (size - 1) / 2f;
+        float radius = size * 0.34f;
+        float dotSize = Math.Max(2f, size * 0.18f);
+
+        for (int i = 0; i < DotCount; i++)
+        {
+            var index = (i + frame) % DotCount;
+            var alpha = 70 + (index * 185 / (DotCount - 1));
+            using var brush = new SolidBrush(Color.FromArgb(alpha, color));
+            var angle = (Math.PI * 2 * i / DotCount) - (Math.PI / 2);
+            var x = center + ((float)Math.Cos(angle) * radius) - (dotSize / 2);
+            var y = center + ((float)Math.Sin(angle) * radius) - (dotSize / 2);
+            g.FillEllipse(brush, x, y, dotSize, dotSize);
+        }
+
         return bmp;
     }
 
@@ -196,6 +272,39 @@ internal static class GitHubIconRenderer
 
         g.DrawLine(pen, 4f * s, 4f * s, 12f * s, 12f * s);
         g.DrawLine(pen, 12f * s, 4f * s, 4f * s, 12f * s);
+    }
+
+    private static void DrawQuestionIcon(Graphics g, Color color, int size)
+    {
+        float s = size / 16f;
+        using var font = new Font(FontFamily.GenericSansSerif, 12f * s, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(color);
+        var bounds = new RectangleF(0f, -1f * s, size, size);
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center
+        };
+
+        g.DrawString("?", font, brush, bounds, format);
+    }
+
+    private static void DrawWarningIcon(Graphics g, Color color, int size)
+    {
+        float s = size / 16f;
+        using var brush = new SolidBrush(color);
+        using var backgroundBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+        var triangle = new PointF[]
+        {
+            new(8f * s, 1.5f * s),
+            new(14.5f * s, 13.5f * s),
+            new(1.5f * s, 13.5f * s)
+        };
+        g.FillPolygon(brush, triangle);
+
+        using var pen = new Pen(backgroundBrush, 1.8f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawLine(pen, 8f * s, 5.2f * s, 8f * s, 9.3f * s);
+        g.FillEllipse(backgroundBrush, 7.1f * s, 10.8f * s, 1.8f * s, 1.8f * s);
     }
 
     /// <summary>

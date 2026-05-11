@@ -1,0 +1,76 @@
+﻿namespace CopilotBooster.Tests.Services;
+
+/// <summary>
+/// Tests that HandleExternalSessionDiscovered gates on the session liveness validator
+/// BEFORE calling CopilotHostResolver (T1 watcher path).
+/// </summary>
+public sealed class HandleExternalSessionDiscoveredGateTests
+{
+    [Fact]
+    public void HandleExternalSessionDiscovered_ValidatorReturnsFalse_DropsBinding()
+    {
+        // When the validator returns false, the binding must be dropped immediately;
+        // no CopilotHostResolved event should fire, and GetCopilotHost should return null.
+        int eventFiredCount = 0;
+        var tracker = new ActiveStatusTracker(
+            new CopilotHostResolver(),
+            new WindowsTerminalPaneGateway(),
+            new WindowsTerminalPaneCacheService(),
+            focusWindowHandle: _ => true,
+            isWindowAlive: _ => true,
+            isProcessAlive: _ => true,
+            isExpectedCopilotProcess: _ => true,
+            isSessionLiveForCopilotPid: (_, _) => false);
+
+        tracker.CopilotHostResolved += (_, _) => eventFiredCount++;
+
+        tracker.HandleExternalSessionDiscovered("session-x", 12345);
+
+        Assert.Null(tracker.GetCopilotHost("session-x"));
+        Assert.Equal(0, eventFiredCount);
+    }
+
+    [Fact]
+    public void HandleExternalSessionDiscovered_ValidatorReturnsFalse_DoesNotResolveHost()
+    {
+        // HandleExternalSessionDiscovered calls SessionPidLivenessValidator.IsLive directly (real-FS).
+        // This test verifies the gate rejects a binding when events.jsonl is missing.
+        // Since the validator will return false (no events.jsonl for fake session),
+        // the resolver should never be called, and no host should be bound.
+        int resolverCallCount = 0;
+        var spyResolver = new CopilotHostResolverSpy(() => resolverCallCount++);
+
+        var tracker = new ActiveStatusTracker(
+            spyResolver,
+            new WindowsTerminalPaneGateway(),
+            new WindowsTerminalPaneCacheService(),
+            focusWindowHandle: _ => true,
+            isWindowAlive: _ => true,
+            isProcessAlive: _ => true,
+            isExpectedCopilotProcess: _ => true,
+            isSessionLiveForCopilotPid: (_, _) => true);
+
+        // Use a fake session ID that won't have events.jsonl
+        tracker.HandleExternalSessionDiscovered("00000000-0000-0000-0000-000000000000", 99999);
+
+        // Resolver should not be called because validator gate rejects the binding
+        Assert.Equal(0, resolverCallCount);
+        Assert.Null(tracker.GetCopilotHost("00000000-0000-0000-0000-000000000000"));
+    }
+
+    private sealed class CopilotHostResolverSpy : CopilotHostResolver
+    {
+        private readonly Action _onResolveCalled;
+
+        internal CopilotHostResolverSpy(Action onResolveCalled)
+        {
+            this._onResolveCalled = onResolveCalled;
+        }
+
+        internal override CopilotHostInfo? Resolve(int copilotPid, string? sessionSummary)
+        {
+            this._onResolveCalled();
+            return base.Resolve(copilotPid, sessionSummary);
+        }
+    }
+}

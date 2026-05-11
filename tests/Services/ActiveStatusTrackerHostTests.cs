@@ -359,7 +359,9 @@ public sealed class ActiveStatusTrackerHostTests
                 return true;
             },
             _ => true,
-            _ => true);
+            _ => true,
+            _ => true,
+            (_, _) => true);
         var hostInfo = new CopilotHostInfo(
             parentHwnd,
             900,
@@ -822,7 +824,15 @@ public sealed class ActiveStatusTrackerHostTests
 
     private static ActiveStatusTracker CreateTracker(FakeProcessTree tree, IWindowsTerminalPaneGateway gateway)
     {
-        return new ActiveStatusTracker(new CopilotHostResolver(tree, ownPid: 0), gateway, new WindowsTerminalPaneCacheService());
+        return new ActiveStatusTracker(
+            new CopilotHostResolver(tree, ownPid: 0),
+            gateway,
+            new WindowsTerminalPaneCacheService(),
+            focusWindowHandle: _ => true,
+            isWindowAlive: _ => true,
+            isProcessAlive: _ => true,
+            isExpectedCopilotProcess: _ => true,
+            isSessionLiveForCopilotPid: (_, _) => true);
     }
 
     private sealed class FakeProcessTree : IProcessTreeProvider

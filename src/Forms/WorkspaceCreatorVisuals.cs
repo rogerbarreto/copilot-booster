@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using CopilotBooster.Models;
 using CopilotBooster.Services;
 
 namespace CopilotBooster.Forms;
@@ -22,9 +23,9 @@ internal static class WorkspaceCreatorVisuals
     /// </summary>
     /// <param name="repoPath">The git repository root path.</param>
     /// <returns>A tuple of worktree path and optional session name on success, or <c>null</c> if the user cancels.</returns>
-    internal static (string WorktreePath, string? SessionName, string? GitHubUrl)? ShowWorkspaceCreator(string repoPath, GitHubApiService? api = null)
+    internal static WorkspaceCreatorResult? ShowWorkspaceCreator(string repoPath, GitHubApiService? api = null)
     {
-        (string WorktreePath, string? SessionName, string? GitHubUrl)? result = null;
+        WorkspaceCreatorResult? result = null;
         var repoFolderName = Path.GetFileName(repoPath);
 
         const int FormWidthValue = 500;
@@ -341,6 +342,7 @@ internal static class WorkspaceCreatorVisuals
         bool prValidated = false;
         string? fetchedPrTitle = null;
         string? fetchedPrHeadBranch = null;
+        WorkspaceGitHubLink? fetchedPrGitHubLink = null;
 
         // --- Issue mode controls (hidden by default) ---
         var lblIssueRemote = new Label
@@ -482,11 +484,11 @@ internal static class WorkspaceCreatorVisuals
         {
             if (!chkIssueOverrideBranch.Checked)
             {
-                var issueText = txtIssueNumber.Text.Trim();
-                if (int.TryParse(issueText, out var num) && num > 0)
+                var (num, _) = ParseSmartInput(txtIssueNumber.Text);
+                if (num > 0)
                 {
                     var alias = !string.IsNullOrWhiteSpace(txtSessionName.Text) ? txtSessionName.Text.Trim() : null;
-                    txtIssueBranchName.Text = Models.LauncherSettings.FormatBranchName(
+                    txtIssueBranchName.Text = LauncherSettings.FormatBranchName(
                         Program._settings.IssueBranchPattern, num, alias);
                 }
                 else
@@ -506,7 +508,7 @@ internal static class WorkspaceCreatorVisuals
         };
         bool issueValidated = false;
         string? fetchedIssueTitle = null;
-        string? issueGitHubUrl = null;
+        WorkspaceGitHubLink? fetchedIssueGitHubLink = null;
 
         // Preview label
         var lblPreview = new Label
@@ -728,12 +730,66 @@ internal static class WorkspaceCreatorVisuals
             }
         }
 
+        static (int number, GitHubRef? parsedUrl) ParseSmartInput(string raw)
+        {
+            var trimmed = raw.Trim();
+            if (int.TryParse(trimmed, out var number) && number > 0)
+            {
+                return (number, null);
+            }
+
+            if (GitHubLinkService.TryParseIssueOrPrUrl(trimmed, out var parsedUrl))
+            {
+                return (parsedUrl.Number, parsedUrl);
+            }
+
+            return (0, null);
+        }
+
+        bool TryGetRemoteOwnerRepo(string remoteName, out string owner, out string repo)
+        {
+            owner = "";
+            repo = "";
+
+            var remoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
+            if (string.IsNullOrEmpty(remoteUrl))
+            {
+                return false;
+            }
+
+            var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
+            if (!parsed.HasValue)
+            {
+                return false;
+            }
+
+            (owner, repo) = parsed.Value;
+            return true;
+        }
+
+        int FindRemoteIndex(ComboBox combo, GitHubRef parsedUrl)
+        {
+            for (var i = 0; i < combo.Items.Count; i++)
+            {
+                var remoteName = combo.Items[i]?.ToString();
+                if (remoteName != null
+                    && TryGetRemoteOwnerRepo(remoteName, out var owner, out var repo)
+                    && owner.Equals(parsedUrl.Owner, StringComparison.OrdinalIgnoreCase)
+                    && repo.Equals(parsedUrl.Repo, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
         void UpdatePreview()
         {
             if (rdoFromPr.Checked)
             {
-                var prText = txtPrNumber.Text.Trim();
-                if (int.TryParse(prText, out var prNum) && prNum > 0)
+                var (prNum, _) = ParseSmartInput(txtPrNumber.Text);
+                if (prNum > 0)
                 {
                     lblPreview.Text = WorkspaceCreationService.BuildWorkspacePath(repoFolderName!, $"pr-{prNum}");
                 }
@@ -776,6 +832,7 @@ internal static class WorkspaceCreatorVisuals
             prValidated = false;
             fetchedPrTitle = null;
             fetchedPrHeadBranch = null;
+            fetchedPrGitHubLink = null;
             lblPrValidation.Text = "";
             lblPrValidation.ForeColor = Color.Black;
             chkUsePrTitle.Visible = false;
@@ -791,7 +848,7 @@ internal static class WorkspaceCreatorVisuals
         {
             issueValidated = false;
             fetchedIssueTitle = null;
-            issueGitHubUrl = null;
+            fetchedIssueGitHubLink = null;
             lblIssueValidation.Text = "";
             lblIssueValidation.ForeColor = Color.Black;
             chkUseIssueTitle.Visible = false;
@@ -812,9 +869,9 @@ internal static class WorkspaceCreatorVisuals
                 return;
             }
 
-            var remoteName = cmbRemote.SelectedItem?.ToString();
-            var prText = txtPrNumber.Text.Trim();
-            if (string.IsNullOrEmpty(remoteName) || !int.TryParse(prText, out var prNum) || prNum <= 0)
+            var remoteName = cmbRemote.SelectedItem?.ToString() ?? "";
+            var (prNum, parsedUrl) = ParseSmartInput(txtPrNumber.Text);
+            if (string.IsNullOrEmpty(remoteName) || prNum <= 0)
             {
                 lblPrValidation.Text = "Enter a valid PR number.";
                 lblPrValidation.ForeColor = Color.Red;
@@ -822,6 +879,35 @@ internal static class WorkspaceCreatorVisuals
                 btnCreate.Enabled = false;
                 return;
             }
+
+            var statusLines = new List<string>();
+            if (parsedUrl is { } urlRef)
+            {
+                var remoteIndex = FindRemoteIndex(cmbRemote, urlRef);
+                if (remoteIndex < 0)
+                {
+                    lblPrValidation.Text = $"❌ This URL points to {urlRef.Owner}/{urlRef.Repo}, which is not a configured remote.";
+                    lblPrValidation.ForeColor = Color.Red;
+                    prValidated = false;
+                    btnCreate.Enabled = false;
+                    return;
+                }
+
+                if (cmbRemote.SelectedIndex != remoteIndex)
+                {
+                    cmbRemote.SelectedIndex = remoteIndex;
+                    remoteName = cmbRemote.SelectedItem?.ToString() ?? "";
+                    statusLines.Add($"🔀 Switched remote to {remoteName} ({urlRef.Owner}/{urlRef.Repo})");
+                }
+
+                // Keep this panel selected; only the validation/tracked-link type follows the URL.
+                statusLines.Add(urlRef.Type == GitHubRefType.Pr
+                    ? "ℹ Detected PR from URL — validating as PR"
+                    : "ℹ Detected Issue from URL — validating as Issue");
+            }
+
+            var itemType = parsedUrl?.Type ?? GitHubRefType.Pr;
+            var itemTypeLabel = itemType == GitHubRefType.Pr ? "PR" : "Issue";
 
             if (!remotePlatforms.TryGetValue(remoteName, out var platform))
             {
@@ -836,39 +922,80 @@ internal static class WorkspaceCreatorVisuals
             bool found = false;
             string? prTitle = null;
             string? prHeadBranch = null;
+            string? prEffectiveState = null;
+            bool prDraft = false;
+            string? prAuthor = null;
+            string? prUpdatedAt = null;
+            string? prOwner = null;
+            string? prRepo = null;
+            string? prStateReason = null;
+            List<string> prLabels = [];
             try
             {
-                // Run git ls-remote and optional title fetch entirely on background thread
-                (found, prTitle, prHeadBranch) = await Task.Run(async () =>
+                (found, prTitle, prHeadBranch, prEffectiveState, prDraft, prAuthor, prUpdatedAt, prOwner, prRepo, prStateReason, prLabels) = await Task.Run(async () =>
                 {
-                    var valid = GitService.ValidatePrRef(repoPath, remoteName, platform, prNum);
+                    var valid = itemType == GitHubRefType.Pr
+                        && GitService.ValidatePrRef(repoPath, remoteName, platform, prNum);
                     string? title = null;
                     string? headRef = null;
+                    string? state = null;
+                    bool draft = false;
+                    string? author = null;
+                    string? updatedAt = null;
+                    string? extractedOwner = null;
+                    string? extractedRepo = null;
+                    string? stateReason = null;
+                    var labels = new List<string>();
 
-                    if (valid && platform == GitService.HostingPlatform.GitHub && api != null)
+                    if (platform == GitService.HostingPlatform.GitHub && api != null)
                     {
                         try
                         {
-                            var remoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
-                            if (!string.IsNullOrEmpty(remoteUrl))
+                            if (TryGetRemoteOwnerRepo(remoteName, out var owner, out var repo))
                             {
-                                var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
-                                if (parsed.HasValue)
+                                if (itemType == GitHubRefType.Pr && valid)
                                 {
-                                    var (owner, repo) = parsed.Value;
                                     using var doc = await api.GetPullRequestAsync(owner, repo, prNum).ConfigureAwait(false);
                                     if (doc != null)
                                     {
-                                        if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                                        var root = doc.RootElement;
+                                        title = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : null;
+                                        headRef = root.TryGetProperty("head", out var headProp) && headProp.TryGetProperty("ref", out var refProp) ? refProp.GetString() : null;
+                                        var rawState = root.TryGetProperty("state", out var sp) ? sp.GetString() ?? "open" : "open";
+                                        draft = root.TryGetProperty("draft", out var dp) && dp.GetBoolean();
+                                        author = root.TryGetProperty("user", out var up) && up.TryGetProperty("login", out var lp) ? lp.GetString() ?? "" : "";
+                                        var merged = root.TryGetProperty("merged", out var mp) && mp.GetBoolean();
+                                        updatedAt = root.TryGetProperty("updated_at", out var uap) ? uap.GetString() ?? "" : "";
+                                        state = merged ? "merged" : rawState;
+                                        extractedOwner = owner;
+                                        extractedRepo = repo;
+                                    }
+                                }
+                                else if (itemType == GitHubRefType.Issue)
+                                {
+                                    using var doc = await api.GetIssueAsync(owner, repo, prNum).ConfigureAwait(false);
+                                    if (doc != null)
+                                    {
+                                        valid = true;
+                                        var root = doc.RootElement;
+                                        title = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : null;
+                                        state = root.TryGetProperty("state", out var sp) ? sp.GetString() ?? "open" : "open";
+                                        author = root.TryGetProperty("user", out var up) && up.TryGetProperty("login", out var lp) ? lp.GetString() ?? "" : "";
+                                        updatedAt = root.TryGetProperty("updated_at", out var uap) ? uap.GetString() ?? "" : "";
+                                        stateReason = root.TryGetProperty("state_reason", out var srp) && srp.ValueKind != System.Text.Json.JsonValueKind.Null ? srp.GetString() : null;
+                                        if (root.TryGetProperty("labels", out var labelsArr))
                                         {
-                                            title = titleProp.GetString();
+                                            foreach (var lbl in labelsArr.EnumerateArray())
+                                            {
+                                                if (lbl.TryGetProperty("name", out var n))
+                                                {
+                                                    labels.Add(n.GetString() ?? "");
+                                                }
+                                            }
                                         }
 
-                                        if (doc.RootElement.TryGetProperty("head", out var headProp) &&
-                                            headProp.TryGetProperty("ref", out var refProp))
-                                        {
-                                            headRef = refProp.GetString();
-                                        }
+                                        extractedOwner = owner;
+                                        extractedRepo = repo;
                                     }
                                 }
                             }
@@ -879,7 +1006,7 @@ internal static class WorkspaceCreatorVisuals
                         }
                     }
 
-                    return (valid, title, headRef);
+                    return (valid, title, headRef, state, draft, author, updatedAt, extractedOwner, extractedRepo, stateReason, labels);
                 }).ConfigureAwait(true);
             }
             catch
@@ -889,9 +1016,10 @@ internal static class WorkspaceCreatorVisuals
 
             if (found)
             {
-                lblPrValidation.Text = prTitle != null
-                    ? $"✅ PR #{prNum}: {prTitle}"
-                    : $"✅ PR #{prNum} found";
+                statusLines.Add(prTitle != null
+                    ? $"✅ {itemTypeLabel} #{prNum}: {prTitle}"
+                    : $"✅ {itemTypeLabel} #{prNum} found");
+                lblPrValidation.Text = string.Join("\n", statusLines);
                 lblPrValidation.ForeColor = Color.Green;
                 prValidated = true;
                 btnCreate.Enabled = true;
@@ -904,10 +1032,42 @@ internal static class WorkspaceCreatorVisuals
                 }
 
                 fetchedPrHeadBranch = prHeadBranch;
+
+                if (prOwner != null && prRepo != null)
+                {
+                    var item = new GitHubTrackedItem
+                    {
+                        Type = itemType == GitHubRefType.Pr ? "pr" : "issue",
+                        Number = prNum,
+                        State = prEffectiveState ?? "open",
+                        Title = prTitle ?? "",
+                        Author = prAuthor ?? "",
+                        LastModifiedAt = prUpdatedAt ?? "",
+                        LastSeenAt = DateTime.UtcNow.ToString("o"),
+                    };
+
+                    if (itemType == GitHubRefType.Pr)
+                    {
+                        item.Draft = prDraft;
+                        item.HeadBranch = prHeadBranch ?? "";
+                    }
+                    else
+                    {
+                        item.StateReason = prStateReason;
+                        item.Labels = prLabels;
+                    }
+
+                    fetchedPrGitHubLink = new WorkspaceGitHubLink
+                    {
+                        Owner = prOwner,
+                        Repo = prRepo,
+                        Item = item,
+                    };
+                }
             }
             else
             {
-                lblPrValidation.Text = $"❌ PR #{prNum} not found";
+                lblPrValidation.Text = $"❌ {itemTypeLabel} #{prNum} not found";
                 lblPrValidation.ForeColor = Color.Red;
                 prValidated = false;
                 btnCreate.Enabled = false;
@@ -927,9 +1087,9 @@ internal static class WorkspaceCreatorVisuals
                 return;
             }
 
-            var remoteName = cmbIssueRemote.SelectedItem?.ToString();
-            var issueText = txtIssueNumber.Text.Trim();
-            if (string.IsNullOrEmpty(remoteName) || !int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+            var remoteName = cmbIssueRemote.SelectedItem?.ToString() ?? "";
+            var (issueNum, parsedUrl) = ParseSmartInput(txtIssueNumber.Text);
+            if (string.IsNullOrEmpty(remoteName) || issueNum <= 0)
             {
                 lblIssueValidation.Text = "Enter a valid issue number.";
                 lblIssueValidation.ForeColor = Color.Red;
@@ -938,6 +1098,35 @@ internal static class WorkspaceCreatorVisuals
                 return;
             }
 
+            var statusLines = new List<string>();
+            if (parsedUrl is { } urlRef)
+            {
+                var remoteIndex = FindRemoteIndex(cmbIssueRemote, urlRef);
+                if (remoteIndex < 0)
+                {
+                    lblIssueValidation.Text = $"❌ This URL points to {urlRef.Owner}/{urlRef.Repo}, which is not a configured remote.";
+                    lblIssueValidation.ForeColor = Color.Red;
+                    issueValidated = false;
+                    btnCreate.Enabled = false;
+                    return;
+                }
+
+                if (cmbIssueRemote.SelectedIndex != remoteIndex)
+                {
+                    cmbIssueRemote.SelectedIndex = remoteIndex;
+                    remoteName = cmbIssueRemote.SelectedItem?.ToString() ?? "";
+                    statusLines.Add($"🔀 Switched remote to {remoteName} ({urlRef.Owner}/{urlRef.Repo})");
+                }
+
+                // Keep this panel selected; only the validation/tracked-link type follows the URL.
+                statusLines.Add(urlRef.Type == GitHubRefType.Pr
+                    ? "ℹ Detected PR from URL — validating as PR"
+                    : "ℹ Detected Issue from URL — validating as Issue");
+            }
+
+            var itemType = parsedUrl?.Type ?? GitHubRefType.Issue;
+            var itemTypeLabel = itemType == GitHubRefType.Pr ? "PR" : "Issue";
+
             isValidatingIssue = true;
             lblIssueValidation.Text = "Checking...";
             lblIssueValidation.ForeColor = Color.Gray;
@@ -945,34 +1134,79 @@ internal static class WorkspaceCreatorVisuals
 
             bool found = false;
             string? issueTitle = null;
-            string? ghUrl = null;
+            string? issueExtOwner = null;
+            string? issueExtRepo = null;
+            string? issueExtState = null;
+            string? issueExtStateReason = null;
+            string? issueExtAuthor = null;
+            string? issueExtUpdatedAt = null;
+            string? issueHeadBranch = null;
+            bool issueDraft = false;
+            List<string> issueExtLabels = [];
             try
             {
-                (found, issueTitle, ghUrl) = await Task.Run(async () =>
+                (found, issueTitle, issueExtOwner, issueExtRepo, issueExtState, issueExtStateReason, issueExtAuthor, issueExtUpdatedAt, issueExtLabels, issueHeadBranch, issueDraft) = await Task.Run(async () =>
                 {
                     string? title = null;
-                    string? url = null;
+                    string? extractedOwner = null;
+                    string? extractedRepo = null;
+                    string? state = null;
+                    string? stateReason = null;
+                    string? author = null;
+                    string? updatedAt = null;
+                    string? headBranch = null;
+                    bool draft = false;
+                    var labels = new List<string>();
                     bool valid = false;
 
                     try
                     {
-                        var remoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
-                        if (!string.IsNullOrEmpty(remoteUrl))
+                        if (TryGetRemoteOwnerRepo(remoteName, out var owner, out var repo) && api != null)
                         {
-                            var parsed = GitService.ParseGitHubOwnerRepo(remoteUrl);
-                            if (parsed.HasValue && api != null)
+                            if (itemType == GitHubRefType.Issue)
                             {
-                                var (owner, repo) = parsed.Value;
                                 using var doc = await api.GetIssueAsync(owner, repo, issueNum).ConfigureAwait(false);
                                 if (doc != null)
                                 {
                                     valid = true;
-                                    if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                                    var root = doc.RootElement;
+                                    title = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : null;
+                                    state = root.TryGetProperty("state", out var sp) ? sp.GetString() ?? "open" : "open";
+                                    author = root.TryGetProperty("user", out var up) && up.TryGetProperty("login", out var lp) ? lp.GetString() ?? "" : "";
+                                    updatedAt = root.TryGetProperty("updated_at", out var uap) ? uap.GetString() ?? "" : "";
+                                    stateReason = root.TryGetProperty("state_reason", out var srp) && srp.ValueKind != System.Text.Json.JsonValueKind.Null ? srp.GetString() : null;
+                                    if (root.TryGetProperty("labels", out var labelsArr))
                                     {
-                                        title = titleProp.GetString();
+                                        foreach (var lbl in labelsArr.EnumerateArray())
+                                        {
+                                            if (lbl.TryGetProperty("name", out var n))
+                                            {
+                                                labels.Add(n.GetString() ?? "");
+                                            }
+                                        }
                                     }
 
-                                    url = $"https://github.com/{owner}/{repo}/issues/{issueNum}";
+                                    extractedOwner = owner;
+                                    extractedRepo = repo;
+                                }
+                            }
+                            else
+                            {
+                                using var doc = await api.GetPullRequestAsync(owner, repo, issueNum).ConfigureAwait(false);
+                                if (doc != null)
+                                {
+                                    valid = true;
+                                    var root = doc.RootElement;
+                                    title = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : null;
+                                    headBranch = root.TryGetProperty("head", out var headProp) && headProp.TryGetProperty("ref", out var refProp) ? refProp.GetString() : null;
+                                    var rawState = root.TryGetProperty("state", out var sp) ? sp.GetString() ?? "open" : "open";
+                                    draft = root.TryGetProperty("draft", out var dp) && dp.GetBoolean();
+                                    author = root.TryGetProperty("user", out var up) && up.TryGetProperty("login", out var lp) ? lp.GetString() ?? "" : "";
+                                    var merged = root.TryGetProperty("merged", out var mp) && mp.GetBoolean();
+                                    updatedAt = root.TryGetProperty("updated_at", out var uap) ? uap.GetString() ?? "" : "";
+                                    state = merged ? "merged" : rawState;
+                                    extractedOwner = owner;
+                                    extractedRepo = repo;
                                 }
                             }
                         }
@@ -982,7 +1216,7 @@ internal static class WorkspaceCreatorVisuals
                         // Service failure
                     }
 
-                    return (valid, title, url);
+                    return (valid, title, extractedOwner, extractedRepo, state, stateReason, author, updatedAt, labels, headBranch, draft);
                 }).ConfigureAwait(true);
             }
             catch
@@ -992,9 +1226,10 @@ internal static class WorkspaceCreatorVisuals
 
             if (found)
             {
-                lblIssueValidation.Text = issueTitle != null
-                    ? $"✅ Issue #{issueNum}: {issueTitle}"
-                    : $"✅ Issue #{issueNum} found";
+                statusLines.Add(issueTitle != null
+                    ? $"✅ {itemTypeLabel} #{issueNum}: {issueTitle}"
+                    : $"✅ {itemTypeLabel} #{issueNum} found");
+                lblIssueValidation.Text = string.Join("\n", statusLines);
                 lblIssueValidation.ForeColor = Color.Green;
                 issueValidated = true;
                 btnCreate.Enabled = true;
@@ -1006,11 +1241,41 @@ internal static class WorkspaceCreatorVisuals
                     RelayoutControls();
                 }
 
-                issueGitHubUrl = ghUrl;
+                if (issueExtOwner != null && issueExtRepo != null)
+                {
+                    var item = new GitHubTrackedItem
+                    {
+                        Type = itemType == GitHubRefType.Pr ? "pr" : "issue",
+                        Number = issueNum,
+                        State = issueExtState ?? "open",
+                        Title = issueTitle ?? "",
+                        Author = issueExtAuthor ?? "",
+                        LastModifiedAt = issueExtUpdatedAt ?? "",
+                        LastSeenAt = DateTime.UtcNow.ToString("o"),
+                    };
+
+                    if (itemType == GitHubRefType.Pr)
+                    {
+                        item.Draft = issueDraft;
+                        item.HeadBranch = issueHeadBranch ?? "";
+                    }
+                    else
+                    {
+                        item.StateReason = issueExtStateReason;
+                        item.Labels = issueExtLabels;
+                    }
+
+                    fetchedIssueGitHubLink = new WorkspaceGitHubLink
+                    {
+                        Owner = issueExtOwner,
+                        Repo = issueExtRepo,
+                        Item = item,
+                    };
+                }
             }
             else
             {
-                lblIssueValidation.Text = $"❌ Issue #{issueNum} not found";
+                lblIssueValidation.Text = $"❌ {itemTypeLabel} #{issueNum} not found";
                 lblIssueValidation.ForeColor = Color.Red;
                 issueValidated = false;
                 btnCreate.Enabled = false;
@@ -1102,8 +1367,8 @@ internal static class WorkspaceCreatorVisuals
             {
                 // PR mode
                 var remoteName = cmbRemote.SelectedItem?.ToString();
-                var prText = txtPrNumber.Text.Trim();
-                if (string.IsNullOrEmpty(remoteName) || !int.TryParse(prText, out var prNum) || prNum <= 0)
+                var (prNum, _) = ParseSmartInput(txtPrNumber.Text);
+                if (string.IsNullOrEmpty(remoteName) || prNum <= 0)
                 {
                     MessageBox.Show("Enter a valid PR number.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
@@ -1115,30 +1380,33 @@ internal static class WorkspaceCreatorVisuals
                     return;
                 }
 
-                var platform = remotePlatforms[remoteName];
+                var sessionName = txtSessionName.Text.Trim();
+                var isIssueUrl = fetchedPrGitHubLink?.Item.IsPr == false;
                 isCreating = true;
                 btnCreate.Enabled = false;
                 btnCreate.Text = "Creating...";
-                var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceFromPrAsync(
-                    repoPath, repoFolderName!, remoteName, prNum, platform, fetchedPrHeadBranch).ConfigureAwait(true);
+                var (worktreePath, success, error) = isIssueUrl
+                    ? await WorkspaceCreationService.CreateWorkspaceAsync(
+                        repoPath,
+                        repoFolderName!,
+                        LauncherSettings.FormatBranchName(Program._settings.IssueBranchPattern, prNum, sessionName),
+                        cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main").ConfigureAwait(true)
+                    : await WorkspaceCreationService.CreateWorkspaceFromPrAsync(
+                        repoPath,
+                        repoFolderName!,
+                        remoteName,
+                        prNum,
+                        remotePlatforms[remoteName],
+                        fetchedPrHeadBranch).ConfigureAwait(true);
                 isCreating = false;
                 if (success)
                 {
-                    var sessionName = txtSessionName.Text.Trim();
-
-                    // Build GitHub URL for Edge tab
-                    string? prGhUrl = null;
-                    var prRemoteUrl = GitService.GetRemoteUrl(repoPath, remoteName);
-                    if (!string.IsNullOrEmpty(prRemoteUrl))
+                    result = new WorkspaceCreatorResult
                     {
-                        var parsed = GitService.ParseGitHubOwnerRepo(prRemoteUrl);
-                        if (parsed.HasValue)
-                        {
-                            prGhUrl = $"https://github.com/{parsed.Value.owner}/{parsed.Value.repo}/pull/{prNum}";
-                        }
-                    }
-
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, prGhUrl);
+                        WorktreePath = worktreePath,
+                        SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName,
+                        GitHubLink = fetchedPrGitHubLink,
+                    };
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }
@@ -1153,8 +1421,8 @@ internal static class WorkspaceCreatorVisuals
             {
                 // Issue mode
                 var remoteName = cmbIssueRemote.SelectedItem?.ToString();
-                var issueText = txtIssueNumber.Text.Trim();
-                if (string.IsNullOrEmpty(remoteName) || !int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+                var (issueNum, _) = ParseSmartInput(txtIssueNumber.Text);
+                if (string.IsNullOrEmpty(remoteName) || issueNum <= 0)
                 {
                     MessageBox.Show("Enter a valid issue number.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
@@ -1167,23 +1435,35 @@ internal static class WorkspaceCreatorVisuals
                 }
 
                 var sessionName = txtSessionName.Text.Trim();
-                var branchName = txtIssueBranchName.Text.Trim();
-                if (string.IsNullOrEmpty(branchName))
-                {
-                    branchName = Models.LauncherSettings.FormatBranchName(
-                        Program._settings.IssueBranchPattern, issueNum, sessionName);
-                }
-                var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
+                var isPrUrl = fetchedIssueGitHubLink?.Item.IsPr == true;
 
                 isCreating = true;
                 btnCreate.Enabled = false;
                 btnCreate.Text = "Creating...";
-                var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceAsync(
-                    repoPath, repoFolderName!, branchName, baseBranch).ConfigureAwait(true);
+                var (worktreePath, success, error) = isPrUrl
+                    ? await WorkspaceCreationService.CreateWorkspaceFromPrAsync(
+                        repoPath,
+                        repoFolderName!,
+                        remoteName,
+                        issueNum,
+                        remotePlatforms[remoteName],
+                        headBranch: fetchedIssueGitHubLink?.Item.HeadBranch).ConfigureAwait(true)
+                    : await WorkspaceCreationService.CreateWorkspaceAsync(
+                        repoPath,
+                        repoFolderName!,
+                        string.IsNullOrEmpty(txtIssueBranchName.Text.Trim())
+                            ? LauncherSettings.FormatBranchName(Program._settings.IssueBranchPattern, issueNum, sessionName)
+                            : txtIssueBranchName.Text.Trim(),
+                        cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main").ConfigureAwait(true);
                 isCreating = false;
                 if (success)
                 {
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, issueGitHubUrl);
+                    result = new WorkspaceCreatorResult
+                    {
+                        WorktreePath = worktreePath,
+                        SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName,
+                        GitHubLink = fetchedIssueGitHubLink,
+                    };
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }
@@ -1214,7 +1494,7 @@ internal static class WorkspaceCreatorVisuals
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, null);
+                    result = new WorkspaceCreatorResult { WorktreePath = worktreePath, SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName, GitHubLink = null };
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }
@@ -1238,7 +1518,7 @@ internal static class WorkspaceCreatorVisuals
                 if (success)
                 {
                     var sessionName = txtSessionName.Text.Trim();
-                    result = (worktreePath, string.IsNullOrEmpty(sessionName) ? null : sessionName, null);
+                    result = new WorkspaceCreatorResult { WorktreePath = worktreePath, SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName, GitHubLink = null };
                     form.DialogResult = DialogResult.OK;
                     form.Close();
                 }
@@ -1256,4 +1536,18 @@ internal static class WorkspaceCreatorVisuals
 
         return form.ShowDialog() == DialogResult.OK ? result : null;
     }
+}
+
+internal struct WorkspaceCreatorResult
+{
+    public string WorktreePath;
+    public string? SessionName;
+    public WorkspaceGitHubLink? GitHubLink;
+}
+
+internal struct WorkspaceGitHubLink
+{
+    public string Owner;
+    public string Repo;
+    public GitHubTrackedItem Item;
 }

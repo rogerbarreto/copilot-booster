@@ -96,6 +96,38 @@ internal static class AddIssueForm
             return remoteMap.Values.ElementAt(idx);
         }
 
+        static (int number, GitHubRef? parsedUrl) ParseSmartInput(string raw)
+        {
+            var trimmed = raw.Trim();
+            if (int.TryParse(trimmed, out var number) && number > 0)
+            {
+                return (number, null);
+            }
+
+            if (GitHubLinkService.TryParseIssueOrPrUrl(trimmed, out var parsedUrl))
+            {
+                return (parsedUrl.Number, parsedUrl);
+            }
+
+            return (0, null);
+        }
+
+        int FindRemoteIndex(GitHubRef parsedUrl)
+        {
+            var remotes = remoteMap.Values.ToList();
+            for (var i = 0; i < remotes.Count; i++)
+            {
+                var remote = remotes[i];
+                if (remote.owner.Equals(parsedUrl.Owner, StringComparison.OrdinalIgnoreCase)
+                    && remote.repo.Equals(parsedUrl.Repo, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
         var (initialOwner, initialRepo) = GetSelectedRemote();
         var lblRepo = new Label
         {
@@ -147,9 +179,8 @@ internal static class AddIssueForm
 
         async Task ValidateAsync()
         {
-            var (owner, repo) = GetSelectedRemote();
-            var issueText = txtIssue.Text.Trim();
-            if (!int.TryParse(issueText, out var issueNum) || issueNum <= 0)
+            var (itemNum, parsedUrl) = ParseSmartInput(txtIssue.Text);
+            if (itemNum <= 0)
             {
                 lblInfo.Text = "Enter a valid issue number.";
                 lblInfo.ForeColor = Color.OrangeRed;
@@ -158,11 +189,39 @@ internal static class AddIssueForm
                 return;
             }
 
+            var statusLines = new List<string>();
+            if (parsedUrl is { } urlRef)
+            {
+                var remoteIndex = FindRemoteIndex(urlRef);
+                if (remoteIndex < 0)
+                {
+                    lblInfo.Text = $"❌ This URL points to {urlRef.Owner}/{urlRef.Repo}, which is not a configured remote.";
+                    lblInfo.ForeColor = Color.OrangeRed;
+                    btnAdd.Enabled = false;
+                    validated = false;
+                    return;
+                }
+
+                if (cmbRemote.SelectedIndex != remoteIndex)
+                {
+                    cmbRemote.SelectedIndex = remoteIndex;
+                    statusLines.Add($"🔀 Switched remote to {remoteMap.Keys.ElementAt(remoteIndex)} ({urlRef.Owner}/{urlRef.Repo})");
+                }
+
+                statusLines.Add(urlRef.Type == GitHubRefType.Pr
+                    ? "ℹ Detected PR from URL — validating as PR"
+                    : "ℹ Detected Issue from URL — validating as Issue");
+            }
+
+            var (owner, repo) = GetSelectedRemote();
+            var itemType = parsedUrl?.Type == GitHubRefType.Pr ? "pr" : "issue";
+            var itemLabel = itemType == "pr" ? "PR" : "Issue";
+
             // Check for duplicate
             var existing = GitHubTrackingService.Load(sessionId);
-            if (existing?.Items.Any(i => i.Type == "issue" && i.Number == issueNum) == true)
+            if (existing?.Items.Any(i => i.Type.Equals(itemType, StringComparison.OrdinalIgnoreCase) && i.Number == itemNum) == true)
             {
-                lblInfo.Text = $"⚠ Issue #{issueNum} is already tracked in this session.";
+                lblInfo.Text = $"⚠ {itemLabel} #{itemNum} is already tracked in this session.";
                 lblInfo.ForeColor = Color.OrangeRed;
                 btnAdd.Enabled = false;
                 validated = false;
@@ -173,7 +232,9 @@ internal static class AddIssueForm
             lblInfo.ForeColor = Color.Gray;
             btnAdd.Enabled = false;
 
-            var doc = await api.GetIssueAsync(owner, repo, issueNum).ConfigureAwait(true);
+            var doc = itemType == "pr"
+                ? await api.GetPullRequestAsync(owner, repo, itemNum).ConfigureAwait(true)
+                : await api.GetIssueAsync(owner, repo, itemNum).ConfigureAwait(true);
             if (doc != null)
             {
                 using (doc)
@@ -184,45 +245,75 @@ internal static class AddIssueForm
                     var author = root.TryGetProperty("user", out var u) && u.TryGetProperty("login", out var l) ? l.GetString() ?? "" : "";
                     var updatedAt = root.TryGetProperty("updated_at", out var ua) ? ua.GetString() ?? "" : "";
 
-                    var labels = new List<string>();
-                    if (root.TryGetProperty("labels", out var labelsArr))
+                    if (itemType == "pr")
                     {
-                        foreach (var lbl in labelsArr.EnumerateArray())
+                        var draft = root.TryGetProperty("draft", out var d) && d.GetBoolean();
+                        var headBranch = root.TryGetProperty("head", out var h) && h.TryGetProperty("ref", out var r) ? r.GetString() ?? "" : "";
+                        var merged = root.TryGetProperty("merged", out var m) && m.GetBoolean();
+                        var effectiveState = merged ? "merged" : state;
+
+                        statusLines.Add($"✅ #{itemNum} — {title}\nState: {effectiveState}{(draft ? " (draft)" : "")}  |  Branch: {headBranch}\nAuthor: {author}");
+                        lblInfo.Text = string.Join("\n", statusLines);
+                        lblInfo.ForeColor = Color.Green;
+                        btnAdd.Enabled = true;
+                        validated = true;
+
+                        result = new GitHubTrackedItem
                         {
-                            if (lbl.TryGetProperty("name", out var n))
+                            Type = "pr",
+                            Number = itemNum,
+                            State = effectiveState,
+                            Draft = draft,
+                            Title = title,
+                            Author = author,
+                            HeadBranch = headBranch,
+                            LastModifiedAt = updatedAt,
+                            LastSeenAt = DateTime.UtcNow.ToString("o")
+                        };
+                    }
+                    else
+                    {
+                        var labels = new List<string>();
+                        if (root.TryGetProperty("labels", out var labelsArr))
+                        {
+                            foreach (var lbl in labelsArr.EnumerateArray())
                             {
-                                labels.Add(n.GetString() ?? "");
+                                if (lbl.TryGetProperty("name", out var n))
+                                {
+                                    labels.Add(n.GetString() ?? "");
+                                }
                             }
                         }
+
+                        var stateReason = root.TryGetProperty("state_reason", out var srp) && srp.ValueKind != System.Text.Json.JsonValueKind.Null
+                            ? srp.GetString() : null;
+
+                        var labelText = labels.Count > 0 ? string.Join(", ", labels) : "(none)";
+                        statusLines.Add($"✅ #{itemNum} — {title}\nState: {state}{(stateReason != null ? $" ({stateReason})" : "")}  |  Labels: {labelText}\nAuthor: {author}");
+                        lblInfo.Text = string.Join("\n", statusLines);
+                        lblInfo.ForeColor = Color.Green;
+                        btnAdd.Enabled = true;
+                        validated = true;
+
+                        result = new GitHubTrackedItem
+                        {
+                            Type = "issue",
+                            Number = itemNum,
+                            State = state,
+                            StateReason = stateReason,
+                            Title = title,
+                            Author = author,
+                            Labels = labels,
+                            LastModifiedAt = updatedAt,
+                            LastSeenAt = DateTime.UtcNow.ToString("o")
+                        };
                     }
-
-                    var stateReason = root.TryGetProperty("state_reason", out var srp) && srp.ValueKind != System.Text.Json.JsonValueKind.Null
-                        ? srp.GetString() : null;
-
-                    var labelText = labels.Count > 0 ? string.Join(", ", labels) : "(none)";
-                    lblInfo.Text = $"✅ #{issueNum} — {title}\nState: {state}{(stateReason != null ? $" ({stateReason})" : "")}  |  Labels: {labelText}\nAuthor: {author}";
-                    lblInfo.ForeColor = Color.Green;
-                    btnAdd.Enabled = true;
-                    validated = true;
-
-                    result = new GitHubTrackedItem
-                    {
-                        Type = "issue",
-                        Number = issueNum,
-                        State = state,
-                        StateReason = stateReason,
-                        Title = title,
-                        Author = author,
-                        Labels = labels,
-                        LastModifiedAt = updatedAt,
-                        LastSeenAt = DateTime.UtcNow.ToString("o")
-                    };
                 }
             }
             else
             {
                 var errorDetail = api.LastError != null ? $"\n({api.LastError})" : "";
-                lblInfo.Text = $"❌ Issue #{issueNum} not found in {owner}/{repo}{errorDetail}\n(Note: if this is a PR, use \"Add PR\" instead)";
+                lblInfo.Text = $"❌ {itemLabel} #{itemNum} not found in {owner}/{repo}{errorDetail}";
                 lblInfo.ForeColor = Color.OrangeRed;
                 btnAdd.Enabled = false;
                 validated = false;

@@ -9,6 +9,7 @@ namespace CopilotBooster.IntegrationTests.Integration;
 /// "Copilot CLI - {sessionId}" title for Copilot CLI — the same way MainForm launches them.
 /// Wires WindowEventHookService → ActiveStatusTracker → SessionGridVisuals identically to MainForm.
 /// </summary>
+[Trait("Category", "RequiresInteractiveDesktop")]
 [Collection(WindowEventHookCollection.Name)]
 public sealed class RunningAppsGridDetectionTests : IDisposable
 {
@@ -186,8 +187,9 @@ public sealed class RunningAppsGridDetectionTests : IDisposable
         {
             // Fallback: on CI runners, wt.exe may not produce detectable window events.
             // Launch cmd.exe directly as a second attempt.
+            var fallbackTitle = TestWindowTitle.For($"Terminal - {SessionId}");
             var fallbackProc = Process.Start(new ProcessStartInfo(
-                "cmd.exe", $"/k title Terminal - {SessionId}")
+                "cmd.exe", $"/k title {fallbackTitle}")
             {
                 UseShellExecute = true,
                 WorkingDirectory = workDir
@@ -241,7 +243,7 @@ public sealed class RunningAppsGridDetectionTests : IDisposable
         // Launch using the SAME pattern as Program.cs StartCopilotSession:
         // wt.exe with --title and --suppressApplicationTitle, OR cmd.exe fallback
         var terminal = TerminalLauncherService.DetectTerminal();
-        var title = $"Copilot CLI - {SessionId}";
+        var title = TestWindowTitle.For($"Copilot CLI - {SessionId}");
         Process? proc;
 
         if (terminal == "wt")
@@ -316,7 +318,7 @@ public sealed class RunningAppsGridDetectionTests : IDisposable
 
         // Launch Copilot CLI via real pattern
         var terminal = TerminalLauncherService.DetectTerminal();
-        var cliTitle = $"Copilot CLI - {SessionId}";
+        var cliTitle = TestWindowTitle.For($"Copilot CLI - {SessionId}");
         Process? cliProc;
 
         if (terminal == "wt")
@@ -387,7 +389,8 @@ public sealed class RunningAppsGridDetectionTests : IDisposable
         hookService.Start();
 
         // Use cmd.exe directly so we can safely kill only this process
-        var proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title Terminal - {SessionId}")
+        var titleArg = TestWindowTitle.For($"Terminal - {SessionId}");
+        var proc = Process.Start(new ProcessStartInfo("cmd.exe", $"/k title {titleArg}")
         {
             UseShellExecute = true,
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -442,9 +445,10 @@ public sealed class RunningAppsGridDetectionTests : IDisposable
         hookService.Start();
 
         // Launch cmd with generic title first, then rename after a delay
+        var titleArg = TestWindowTitle.For($"Terminal - {SessionId}");
         var proc = Process.Start(new ProcessStartInfo(
             "cmd.exe",
-            $"/k \"ping -n 2 127.0.0.1 >nul & title Terminal - {SessionId}\"")
+            $"/k \"ping -n 2 127.0.0.1 >nul & title {titleArg}\"")
         {
             UseShellExecute = true,
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)

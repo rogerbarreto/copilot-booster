@@ -10,6 +10,7 @@ namespace CopilotBooster.IntegrationTests;
 /// from WindowEventHookService event handlers without checking if the form is disposed.
 /// The timer's internal TimerNativeWindow.CreateHandle() fails when the form is shutting down.
 /// </summary>
+[Collection(WindowEventHookCollection.Name)]
 public class TimerRefreshAfterFormCloseTests
 {
     private const uint EVENT_OBJECT_DESTROY = 0x8001;

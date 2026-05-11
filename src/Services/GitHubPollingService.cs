@@ -126,6 +126,11 @@ internal class GitHubPollingService : IDisposable
 
                 foreach (var item in data.Items.ToList())
                 {
+                    if (item.IsFinal && (item.IsPr || item.StateReason != null))
+                    {
+                        continue;
+                    }
+
                     if (item.IsPr)
                     {
                         await this.PollPrAsync(sessionId, data.Owner, data.Repo, item).ConfigureAwait(false);

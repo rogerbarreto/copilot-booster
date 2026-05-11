@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -34,16 +35,23 @@ internal class SessionGridVisuals
         ? Color.FromArgb(120, 40, 40)
         : Color.FromArgb(240, 160, 160);
 
+    private const int GitHubStatusIconSize = 16;
+    private const int GitHubSpinnerFrameCount = 8;
+    private const string GitHubRunningTooltip = "Detecting GitHub link... click to cancel.";
+
     private readonly DataGridView _grid;
     private readonly ActiveStatusTracker _activeTracker;
     private readonly LauncherSettings _settings;
     private readonly Image[] _spinnerFrames;
+    private readonly Timer _spinnerTimer;
     private readonly Image _bellImage;
     private readonly Image _gitIcon;
     private readonly Image? _cwdWarningIcon;
     private readonly Image? _filesIcon;
     private readonly Image? _edgeIcon;
     private int _spinnerFrameIndex;
+    private int _githubSpinnerFrameIndex;
+    private bool _disposed;
 
     /// <summary>
     /// Callback to get the number of context files for a session.
@@ -64,6 +72,29 @@ internal class SessionGridVisuals
     /// Fired when user clicks the GitHub column. Args: sessionId, click position, cell bounds.
     /// </summary>
     internal event Action<string, Point, Rectangle>? OnGitHubColumnClick;
+
+    internal AiDetectionService? AiDetectionService
+    {
+        get;
+        set
+        {
+            if (ReferenceEquals(field, value))
+            {
+                return;
+            }
+
+            field?.DetectionStateChanged -= this.OnDetectionStateChanged;
+
+            field = value;
+            field?.DetectionStateChanged += this.OnDetectionStateChanged;
+
+            this.UpdateSpinnerTimerState();
+        }
+    }
+
+    internal IConfirmDialog ConfirmDialog { get; set; } = new MessageBoxConfirmDialog();
+
+    internal IMessageBox MessageBox { get; set; } = new MessageBoxAdapter();
 
     /// <summary>
     /// When true, the grid cursor is locked to <see cref="Cursors.Cross"/> (pin mode).
@@ -91,6 +122,8 @@ internal class SessionGridVisuals
         this._grid = grid;
         this._activeTracker = activeTracker;
         this._settings = settings ?? Program._settings;
+        this._spinnerTimer = new Timer { Interval = 100 };
+        this._spinnerTimer.Tick += this.OnSpinnerTimerTick;
 
         var asm = typeof(SessionGridVisuals).Assembly;
         this._spinnerFrames = new Image[8];
@@ -168,7 +201,7 @@ internal class SessionGridVisuals
             if (this._grid.Columns[e.ColumnIndex].Name == "GitHub" && row.Tag is string ghSessionId)
             {
                 var cellBounds = this._grid.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
-                this.OnGitHubColumnClick?.Invoke(ghSessionId, e.Location, cellBounds);
+                this.HandleGitHubCellClick(e.RowIndex, e.Location, cellBounds);
                 return;
             }
 
@@ -229,7 +262,9 @@ internal class SessionGridVisuals
             if (e.RowIndex >= 0 && this._grid.Columns[e.ColumnIndex].Name == "GitHub"
                 && this._grid.Rows[e.RowIndex].Tag is string ghSid)
             {
-                this._grid.Cursor = Cursors.Hand;
+                this._grid.Cursor = this.ShouldUseHandCursorForGitHubCell(e.Location, ghSid)
+                    ? Cursors.Hand
+                    : Cursors.Default;
                 this.UpdateGitHubTooltip(e.RowIndex, e.ColumnIndex, e.Location, ghSid);
                 return;
             }
@@ -291,10 +326,14 @@ internal class SessionGridVisuals
             {
                 e.PaintBackground(e.ClipBounds, true);
                 var githubValue = e.Value as string;
-                if (!string.IsNullOrEmpty(githubValue) && e.RowIndex >= 0
-                    && this._grid.Rows[e.RowIndex].Tag is string sessionId)
+                if (e.RowIndex >= 0 && this._grid.Rows[e.RowIndex].Tag is string sessionId)
                 {
-                    this.PaintGitHubIcons(e, sessionId);
+                    if (!string.IsNullOrEmpty(githubValue))
+                    {
+                        this.PaintGitHubIcons(e, sessionId);
+                    }
+
+                    this.PaintGitHubStatusIcon(e, sessionId);
                 }
                 e.Handled = true;
                 return;
@@ -575,6 +614,7 @@ internal class SessionGridVisuals
             }
 
             this.AutoFitCwdColumn();
+            this.UpdateSpinnerTimerState();
         }
     }
 
@@ -709,6 +749,8 @@ internal class SessionGridVisuals
                 row.Cells[6].Value = newGitHub;
             }
         }
+
+        this.UpdateSpinnerTimerState();
     }
 
     private static void ApplyRowStyling(DataGridViewRow row, string statusIcon, string activeText)
@@ -737,6 +779,61 @@ internal class SessionGridVisuals
     {
         this._spinnerFrameIndex = (this._spinnerFrameIndex + 1) % 8;
         this._grid.InvalidateColumn(0);
+    }
+
+    internal static Rectangle GetStatusIconRegion(Rectangle cellBounds)
+    {
+        var size = Math.Min(GitHubStatusIconSize, Math.Min(cellBounds.Width, cellBounds.Height));
+        return new Rectangle(Math.Max(0, cellBounds.Width - size), 0, size, size);
+    }
+
+    internal void HandleGitHubCellClick(int rowIndex, Point clickPos, Rectangle cellBounds)
+    {
+        if (rowIndex < 0 || rowIndex >= this._grid.Rows.Count
+            || this._grid.Rows[rowIndex].Tag is not string sessionId)
+        {
+            return;
+        }
+
+        if (GetStatusIconRegion(cellBounds).Contains(clickPos))
+        {
+            var status = this.GetDetectionStatus(sessionId);
+            switch (status)
+            {
+                case DetectionStatus.Running:
+                    if (this.ConfirmDialog.Confirm(
+                        "Cancel detection?",
+                        "Stop detecting the GitHub link for this session?",
+                        "Stop",
+                        "Keep running"))
+                    {
+                        this.AiDetectionService?.CancelDetection(sessionId);
+                    }
+                    return;
+                case DetectionStatus.Undecided:
+                    this.MessageBox.Show("AI auto-detect", this.BuildUndecidedMessage(sessionId));
+                    this.AiDetectionService?.Reset(sessionId);
+                    return;
+                case DetectionStatus.Error:
+                    this.MessageBox.Show("AI auto-detect", this.BuildErrorMessage(sessionId));
+                    this.AiDetectionService?.Reset(sessionId);
+                    return;
+                default:
+                    return;
+            }
+        }
+
+        this.OnGitHubColumnClick?.Invoke(sessionId, clickPos, cellBounds);
+    }
+
+    internal bool IsSpinnerVisibleForSession(string sessionId)
+    {
+        return this.GetDetectionStatus(sessionId) == DetectionStatus.Running;
+    }
+
+    internal Bitmap? GetCornerIconForSession(string sessionId)
+    {
+        return this.GetCornerIconForStatus(this.GetDetectionStatus(sessionId));
     }
 
     /// <summary>
@@ -865,8 +962,12 @@ internal class SessionGridVisuals
         const int Spacing = 4;
         const int OverlaySize = 14;
 
+        var statusVisible = this.GetDetectionStatus(sessionId) != DetectionStatus.Idle;
+        var availableWidth = statusVisible
+            ? Math.Max(0, e.CellBounds.Width - GitHubStatusIconSize)
+            : e.CellBounds.Width;
         int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
-        int ix = e.CellBounds.X + ((e.CellBounds.Width - totalWidth) / 2);
+        int ix = e.CellBounds.X + ((availableWidth - totalWidth) / 2);
         int iy = e.CellBounds.Y + ((e.CellBounds.Height - IconSize) / 2);
 
         foreach (var item in data.Items)
@@ -923,25 +1024,70 @@ internal class SessionGridVisuals
         }
     }
 
+    private void PaintGitHubStatusIcon(DataGridViewCellPaintingEventArgs e, string sessionId)
+    {
+        var status = this.GetDetectionStatus(sessionId);
+        if (status == DetectionStatus.Idle)
+        {
+            return;
+        }
+
+        var icon = this.GetCornerIconForStatus(status);
+
+        if (icon == null)
+        {
+            return;
+        }
+
+        var relativeRegion = GetStatusIconRegion(e.CellBounds);
+        var region = new Rectangle(
+            e.CellBounds.X + relativeRegion.X,
+            e.CellBounds.Y + relativeRegion.Y,
+            relativeRegion.Width,
+            relativeRegion.Height);
+        e.Graphics!.DrawImage(icon, region.X, region.Y, region.Width, region.Height);
+    }
+
     private void UpdateGitHubTooltip(int rowIndex, int colIndex, Point mousePos, string sessionId)
     {
+        var cell = this._grid.Rows[rowIndex].Cells[colIndex];
+        var cellBounds = this._grid.GetCellDisplayRectangle(colIndex, rowIndex, false);
+        var state = this.GetDetectionState(sessionId);
+        var status = state.Status;
+        if (status != DetectionStatus.Idle && GetStatusIconRegion(cellBounds).Contains(mousePos))
+        {
+            cell.ToolTipText = status switch
+            {
+                DetectionStatus.Running => GitHubRunningTooltip,
+                DetectionStatus.Undecided => AiDetectionTooltips.ForUndecided(state.UndecidedReason ?? UndecidedReason.LowConfidence, state.TopCandidates),
+                DetectionStatus.Error => state.FailureClass.HasValue
+                    ? AiDetectionTooltips.ForFailure(state.FailureClass.Value, this.GetConfiguredTimeoutSeconds())
+                    : string.Empty,
+                _ => string.Empty
+            };
+            return;
+        }
+
         var data = GitHubTrackingService.Load(sessionId);
         if (data == null || data.Items.Count == 0)
         {
+            cell.ToolTipText = "";
             return;
         }
 
         const int IconSize = 16;
         const int Spacing = 4;
-        var cellBounds = this._grid.GetCellDisplayRectangle(colIndex, rowIndex, false);
+        var availableWidth = status != DetectionStatus.Idle
+            ? Math.Max(0, cellBounds.Width - GitHubStatusIconSize)
+            : cellBounds.Width;
         int totalWidth = (data.Items.Count * IconSize) + ((data.Items.Count - 1) * Spacing);
-        int startX = (cellBounds.Width - totalWidth) / 2;
+        int startX = (availableWidth - totalWidth) / 2;
         int relativeX = mousePos.X - startX;
 
         int index = relativeX / (IconSize + Spacing);
         if (index < 0 || index >= data.Items.Count)
         {
-            this._grid.Rows[rowIndex].Cells[colIndex].ToolTipText = "";
+            cell.ToolTipText = "";
             return;
         }
 
@@ -963,7 +1109,7 @@ internal class SessionGridVisuals
             tooltip += $"\nAuthor: {item.Author}";
         }
 
-        this._grid.Rows[rowIndex].Cells[colIndex].ToolTipText = tooltip;
+        cell.ToolTipText = tooltip;
     }
 
     /// <summary>
@@ -1085,6 +1231,223 @@ internal class SessionGridVisuals
 
         var cellRect = this._grid.GetCellDisplayRectangle(4, rowIndex, false);
         menu.ShowOnCurrentScreen(this._grid, new Point(cellRect.Left + (cellRect.Width / 2), cellRect.Bottom));
+    }
+
+    internal void Dispose()
+    {
+        this._disposed = true;
+        this.AiDetectionService = null;
+        this._spinnerTimer.Stop();
+        this._spinnerTimer.Tick -= this.OnSpinnerTimerTick;
+        this._spinnerTimer.Dispose();
+    }
+
+    private void OnDetectionStateChanged(string sessionId, DetectionStatus oldStatus, DetectionStatus newStatus)
+    {
+        if (this._grid.IsDisposed)
+        {
+            return;
+        }
+
+        void Apply()
+        {
+            this.InvalidateGitHubCell(sessionId);
+            if (newStatus == DetectionStatus.Running && !this._spinnerTimer.Enabled)
+            {
+                this._spinnerTimer.Start();
+            }
+
+            if (oldStatus == DetectionStatus.Running && newStatus != DetectionStatus.Running)
+            {
+                this.UpdateSpinnerTimerState();
+            }
+        }
+
+        if (this._grid.IsHandleCreated && this._grid.InvokeRequired)
+        {
+            this._grid.BeginInvoke(Apply);
+            return;
+        }
+
+        Apply();
+    }
+
+    private void OnSpinnerTimerTick(object? sender, EventArgs e)
+    {
+        this._githubSpinnerFrameIndex = (this._githubSpinnerFrameIndex + 1) % GitHubSpinnerFrameCount;
+        var invalidated = this.InvalidateRunningGitHubCells();
+        if (!invalidated)
+        {
+            this._spinnerTimer.Stop();
+        }
+    }
+
+    private bool InvalidateRunningGitHubCells()
+    {
+        var invalidated = false;
+        var columnIndex = this.GetGitHubColumnIndex();
+        if (columnIndex < 0)
+        {
+            return false;
+        }
+
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is string sessionId && this.IsSpinnerVisibleForSession(sessionId))
+            {
+                this._grid.InvalidateCell(columnIndex, row.Index);
+                invalidated = true;
+            }
+        }
+
+        return invalidated;
+    }
+
+    private void InvalidateGitHubCell(string sessionId)
+    {
+        var columnIndex = this.GetGitHubColumnIndex();
+        if (columnIndex < 0)
+        {
+            return;
+        }
+
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is string id && string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                this._grid.InvalidateCell(columnIndex, row.Index);
+                return;
+            }
+        }
+    }
+
+    private void UpdateSpinnerTimerState()
+    {
+        if (this._disposed)
+        {
+            return;
+        }
+
+        if (this.HasRunningVisibleSession())
+        {
+            if (!this._spinnerTimer.Enabled)
+            {
+                this._spinnerTimer.Start();
+            }
+        }
+        else
+        {
+            this._spinnerTimer.Stop();
+        }
+    }
+
+    private bool HasRunningVisibleSession()
+    {
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is string sessionId && this.IsSpinnerVisibleForSession(sessionId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ShouldUseHandCursorForGitHubCell(Point mousePos, string sessionId)
+    {
+        var columnIndex = this.GetGitHubColumnIndex();
+        if (columnIndex < 0)
+        {
+            return false;
+        }
+
+        var rowIndex = this.FindRowIndexBySessionId(sessionId);
+        if (rowIndex < 0)
+        {
+            return false;
+        }
+
+        var cellBounds = this._grid.GetCellDisplayRectangle(columnIndex, rowIndex, false);
+        var status = this.GetDetectionStatus(sessionId);
+        if (GetStatusIconRegion(cellBounds).Contains(mousePos))
+        {
+            return status != DetectionStatus.Idle;
+        }
+
+        return !string.IsNullOrEmpty(this._grid.Rows[rowIndex].Cells[columnIndex].Value as string);
+    }
+
+    private int FindRowIndexBySessionId(string sessionId)
+    {
+        foreach (DataGridViewRow row in this._grid.Rows)
+        {
+            if (row.Tag is string id && string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                return row.Index;
+            }
+        }
+
+        return -1;
+    }
+
+    private int GetGitHubColumnIndex()
+    {
+        return this._grid.Columns.Contains("GitHub") ? this._grid.Columns["GitHub"]!.Index : -1;
+    }
+
+    private DetectionStatus GetDetectionStatus(string sessionId)
+    {
+        return this.AiDetectionService?.TryGetState(sessionId).Status ?? DetectionStatus.Idle;
+    }
+
+    private DetectionState GetDetectionState(string sessionId)
+    {
+        return this.AiDetectionService?.TryGetState(sessionId) ?? DetectionState.Idle;
+    }
+
+    private Bitmap? GetCornerIconForStatus(DetectionStatus status)
+    {
+        return status switch
+        {
+            DetectionStatus.Running => GitHubIconRenderer.GetSpinnerIcon(this._githubSpinnerFrameIndex, GitHubStatusIconSize),
+            DetectionStatus.Undecided => GitHubIconRenderer.GetQuestionIcon(GitHubStatusIconSize),
+            DetectionStatus.Error => GitHubIconRenderer.GetWarningIcon(GitHubStatusIconSize),
+            _ => null
+        };
+    }
+
+    private string BuildUndecidedMessage(string sessionId)
+    {
+        var state = this.GetDetectionState(sessionId);
+        if (state.UndecidedReason == UndecidedReason.AllAlreadyLinked)
+        {
+            return AiDetectionTooltips.UndecidedAllAlreadyLinked;
+        }
+
+        var candidates = state.TopCandidates?.Take(3).ToArray() ?? [];
+        return candidates.Length == 0
+            ? AiDetectionTooltips.ForUndecided(UndecidedReason.LowConfidence, state.TopCandidates)
+            : string.Join(Environment.NewLine, candidates.Select(FormatCandidateLine));
+    }
+
+    private string BuildErrorMessage(string sessionId)
+    {
+        var state = this.GetDetectionState(sessionId);
+        return state.FailureClass.HasValue
+            ? AiDetectionTooltips.ForFailure(state.FailureClass.Value, this.GetConfiguredTimeoutSeconds())
+            : "Detection failed. See app log for details.";
+    }
+
+    private int GetConfiguredTimeoutSeconds()
+    {
+        return Math.Clamp(this._settings.AiDetection.TimeoutSeconds, 30, 1800);
+    }
+
+    private static string FormatCandidateLine(AiCandidate candidate)
+    {
+        var type = candidate.Type.Equals("pr", StringComparison.OrdinalIgnoreCase) ? "PR" : "Issue";
+        return $"{type} #{candidate.Number} (confidence: {candidate.Confidence.ToString("0.00", CultureInfo.InvariantCulture)}) — {candidate.Reasoning}";
     }
 
     [ExcludeFromCodeCoverage]

@@ -12,6 +12,48 @@ source: "template"
 
 ## Patterns
 
+### Deterministic Fallbacks for User-Visible Identifiers
+
+Always provide a deterministic, non-empty fallback for user-visible identifiers (session names, display names, labels). Never rely on external state (sidecar files, API responses, host resolution) being present synchronously.
+
+**Why:** Timing races, I/O failures, and external state initialization delays can leave user-facing fields empty. An empty string in a grid cell or label breaks user comprehension and violates the principle of "every item has a meaningful name."
+
+**How:**
+- Use stable, deterministic properties like GUIDs, timestamps, or IDs as fallback sources
+- Format fallbacks clearly: `"Session {first-8-chars-of-guid}"`, `"Untitled {timestamp}"`, `"Item {id}"`
+- Place fallback logic at the service layer where data is loaded for presentation
+- Document the fallback chain priority explicitly (alias → summary → override → fallback)
+
+**Example from SessionService.cs:**
+```csharp
+string displaySummary;
+if (aliases.TryGetValue(id, out var alias))
+{
+    displaySummary = alias;
+}
+else if (!string.IsNullOrWhiteSpace(summary))
+{
+    displaySummary = summary;
+}
+else if (overrides.TryGetValue(id, out var overrideEntry))
+{
+    displaySummary = overrideEntry.Name;
+}
+else
+{
+    // Fallback: use first 8 chars of session ID as deterministic display name
+    displaySummary = id.Length >= 8 ? $"Session {id.Substring(0, 8)}" : $"Session {id}";
+}
+```
+
+**Anti-pattern:**
+```csharp
+// ❌ BAD: Returns empty string when folder exists but no summary
+displaySummary = string.IsNullOrWhiteSpace(folder) ? "(no summary)" : "";
+```
+
+**Citation:** Trinity's empty-title fix (2026-05-09), `SessionService.cs:341-358`, `.squad/decisions/inbox/trinity-empty-title-fix.md`
+
 ### [Pattern Name]
 
 Describe a key convention or practice used in this codebase. Be specific about what to do and why.

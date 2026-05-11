@@ -4,9 +4,12 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
 using CopilotBooster.Services;
+using Microsoft.Extensions.Logging;
 
 namespace CopilotBooster.Forms;
 
@@ -16,11 +19,20 @@ namespace CopilotBooster.Forms;
 [ExcludeFromCodeCoverage]
 internal sealed class SettingsForm : Form
 {
+    private const string ModelDefaultDisplay = "(default — let Copilot decide)";
+    private const string CustomSuffix = " (custom)";
+
     private readonly IReadOnlyList<NamedSession> _cachedSessions;
     private readonly UpdateInfo? _latestUpdate;
+    private CheckBox _aiEnabledCheck = null!;
+    private NumericUpDown _aiTimeoutSecondsBox = null!;
+    private NumericUpDown _aiConfidenceThresholdBox = null!;
+    private ComboBox _aiModelCombo = null!;
+    private CancellationTokenSource? _modelFetchCts;
+    private string _savedModelValue = "";
     private bool _suppressThemeChange;
 
-    internal SettingsForm(IReadOnlyList<NamedSession> cachedSessions, UpdateInfo? latestUpdate)
+    internal SettingsForm(IReadOnlyList<NamedSession> cachedSessions, UpdateInfo? latestUpdate, ICopilotProbe? copilotProbe = null)
     {
         this._cachedSessions = cachedSessions;
         this._latestUpdate = latestUpdate;
@@ -71,7 +83,7 @@ internal sealed class SettingsForm : Form
             Indent = 16
         };
 
-        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "GitHub" };
+        var categoryNames = new[] { "General", "IDEs", "Git && GitHub", "Session Tabs", "Spotlight", "GitHub", "AI" };
         foreach (var name in categoryNames)
         {
             tree.Nodes.Add(name);
@@ -701,6 +713,67 @@ internal sealed class SettingsForm : Form
         var (githubPanel, githubBody) = this.CreateCategoryPanel("GitHub", "GitHub integration settings for PR/Issue tracking.", autoScroll: true, padding: new Padding(8));
 
         // =====================================================================
+        // AI
+        // =====================================================================
+        var (aiPanel, aiBody) = this.CreateCategoryPanel("AI", "AI auto-detect settings for GitHub issue and PR detection.", autoScroll: true, padding: new Padding(8));
+        var aiSettings = Program._settings.AiDetection ?? new AiDetectionSettings();
+        this._aiEnabledCheck = new CheckBox
+        {
+            Text = "Enable AI auto-detect",
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Padding = new Padding(4, 4, 0, 4)
+        };
+
+        var aiTimeoutRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
+        var aiTimeoutLabel = new Label { Text = "Per-detection timeout (seconds):", AutoSize = true, Location = new Point(4, 12) };
+        this._aiTimeoutSecondsBox = new NumericUpDown
+        {
+            Minimum = 30,
+            Maximum = 1800,
+            Increment = 10,
+            Location = new Point(220, 9),
+            Width = 90,
+            TextAlign = HorizontalAlignment.Right
+        };
+        aiTimeoutRow.Controls.AddRange([aiTimeoutLabel, this._aiTimeoutSecondsBox]);
+
+        var aiConfidenceRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
+        var aiConfidenceLabel = new Label { Text = "Auto-apply confidence threshold:", AutoSize = true, Location = new Point(4, 12) };
+        this._aiConfidenceThresholdBox = new NumericUpDown
+        {
+            Minimum = 0.00M,
+            Maximum = 1.00M,
+            Increment = 0.05M,
+            DecimalPlaces = 2,
+            Location = new Point(220, 9),
+            Width = 90,
+            TextAlign = HorizontalAlignment.Right
+        };
+        aiConfidenceRow.Controls.AddRange([aiConfidenceLabel, this._aiConfidenceThresholdBox]);
+
+        var aiModelRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
+        var aiModelLabel = new Label { Text = "Model:", AutoSize = true, Location = new Point(4, 12) };
+        this._aiModelCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(220, 9),
+            Width = 300,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right
+        };
+        this._aiModelCombo.Items.Add(ModelDefaultDisplay);
+        this._aiModelCombo.SelectedIndex = 0;
+        aiModelRow.Controls.AddRange([aiModelLabel, SettingsVisuals.WrapWithBorder(this._aiModelCombo)]);
+
+        this.LoadAiDetectionFromSettings(aiSettings);
+        aiBody.Controls.Add(aiModelRow);
+        aiBody.Controls.Add(aiConfidenceRow);
+        aiBody.Controls.Add(aiTimeoutRow);
+        aiBody.Controls.Add(this._aiEnabledCheck);
+        this._modelFetchCts = new CancellationTokenSource();
+        _ = this.PopulateModelComboAsync(this._modelFetchCts.Token);
+
+        // =====================================================================
         // PANEL MAP & TREE WIRING
         // =====================================================================
         var panelMap = new Dictionary<string, Panel>
@@ -714,7 +787,8 @@ internal sealed class SettingsForm : Form
             ["Git && GitHub"] = gitPanel,
             ["Session Tabs"] = sessionTabsPanel,
             ["Spotlight"] = toastPanel,
-            ["GitHub"] = githubPanel
+            ["GitHub"] = githubPanel,
+            ["AI"] = aiPanel
         };
 
         foreach (var p in panelMap.Values)
@@ -831,6 +905,8 @@ internal sealed class SettingsForm : Form
             // GitHub
             Program._settings.TrackActiveSession = trackActiveCheck.Checked;
 
+            // AI
+            Program._settings.AiDetection = this.GetCurrentAiDetectionFormState();
             // Persist
             Program._settings.Save();
 
@@ -853,6 +929,136 @@ internal sealed class SettingsForm : Form
 
         // SplitterDistance must be set after the control is parented and sized
         split.SplitterDistance = 200;
+    }
+
+    internal AiDetectionSettings GetCurrentAiDetectionFormState()
+    {
+        return new AiDetectionSettings
+        {
+            Enabled = this._aiEnabledCheck.Checked,
+            TimeoutSeconds = (int)this._aiTimeoutSecondsBox.Value,
+            ConfidenceThreshold = this._aiConfidenceThresholdBox.Value,
+            Model = this.GetSelectedModelValue()
+        };
+    }
+
+    internal void LoadAiDetectionFromSettings(AiDetectionSettings s)
+    {
+        if (this.InvokeRequired)
+        {
+            this.Invoke(() => this.LoadAiDetectionFromSettings(s));
+            return;
+        }
+
+        this._aiEnabledCheck.Checked = s.Enabled;
+        this._aiTimeoutSecondsBox.Value = Math.Clamp(s.TimeoutSeconds, 30, 1800);
+        this._aiConfidenceThresholdBox.Value = Math.Clamp(s.ConfidenceThreshold, 0.00M, 1.00M);
+        this.SelectModelValue(s.Model);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            this._modelFetchCts?.Cancel();
+            this._modelFetchCts?.Dispose();
+            this._modelFetchCts = null;
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private async Task PopulateModelComboAsync(CancellationToken ct)
+    {
+        try
+        {
+            var service = new CopilotModelsService();
+            var models = await service.GetModelsAsync(ct).ConfigureAwait(true);
+            if (this.IsDisposed || ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            this.BeginInvoke(() => this.RebuildModelCombo(models));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug(ex, "Model combo fetch failed");
+        }
+    }
+
+    private void RebuildModelCombo(IReadOnlyList<string> models)
+    {
+        if (this.IsDisposed)
+        {
+            return;
+        }
+
+        var selectedValue = this._aiModelCombo.SelectedIndex < 0
+            ? this._savedModelValue
+            : this.GetSelectedModelValue();
+
+        this._aiModelCombo.Items.Clear();
+        this._aiModelCombo.Items.Add(ModelDefaultDisplay);
+        foreach (var model in models)
+        {
+            this._aiModelCombo.Items.Add(model);
+        }
+
+        this.SelectModelValue(selectedValue);
+    }
+
+    private void SelectModelValue(string? model)
+    {
+        this._savedModelValue = model?.Trim() ?? "";
+        if (this._aiModelCombo.Items.Count == 0)
+        {
+            this._aiModelCombo.Items.Add(ModelDefaultDisplay);
+        }
+
+        if (this._savedModelValue.Length == 0)
+        {
+            this._aiModelCombo.SelectedItem = ModelDefaultDisplay;
+            return;
+        }
+
+        foreach (var item in this._aiModelCombo.Items.Cast<object>())
+        {
+            if (string.Equals(item.ToString(), this._savedModelValue, StringComparison.Ordinal))
+            {
+                this._aiModelCombo.SelectedItem = item;
+                return;
+            }
+        }
+
+        var customItem = this._savedModelValue + CustomSuffix;
+        foreach (var item in this._aiModelCombo.Items.Cast<object>())
+        {
+            if (string.Equals(item.ToString(), customItem, StringComparison.Ordinal))
+            {
+                this._aiModelCombo.SelectedItem = item;
+                return;
+            }
+        }
+
+        this._aiModelCombo.Items.Add(customItem);
+        this._aiModelCombo.SelectedItem = customItem;
+    }
+
+    private string GetSelectedModelValue()
+    {
+        var selected = this._aiModelCombo.SelectedItem?.ToString() ?? "";
+        if (selected.Length == 0 || string.Equals(selected, ModelDefaultDisplay, StringComparison.Ordinal))
+        {
+            return "";
+        }
+
+        return selected.EndsWith(CustomSuffix, StringComparison.Ordinal)
+            ? selected[..^CustomSuffix.Length]
+            : selected;
     }
 
     private (Panel Outer, Panel Body) CreateCategoryPanel(string title, string? description = null, bool autoScroll = false, Padding? padding = null)
@@ -890,3 +1096,4 @@ internal sealed class SettingsForm : Form
         return (panel, body);
     }
 }
+

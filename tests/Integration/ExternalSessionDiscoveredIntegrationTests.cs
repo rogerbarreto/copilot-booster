@@ -112,7 +112,7 @@ public sealed class ExternalSessionDiscoveredIntegrationTests : IDisposable
         {
             "[INFO] [Telemetry] cli.telemetry:",
             "{",
-            "  \"kind\": \"session_start\",",
+            "  \"kind\": \"cli_ready\",",
             $"  \"session_id\": \"{sessionId}\",",
             "  \"context\": {",
             $"    \"cwd\": \"{escapedCwd}\"",
@@ -120,8 +120,9 @@ public sealed class ExternalSessionDiscoveredIntegrationTests : IDisposable
             "}"
         };
 
-        var (extractedSessionId, extractedCwd) = CopilotLogWatcherService.TryParseLogContent(logLines);
+        var sessions = CopilotLogWatcherService.TryParseLogContent(logLines);
 
+        var (extractedSessionId, extractedCwd) = sessions.Single();
         Assert.Equal(sessionId, extractedSessionId);
         Assert.Equal(testCwd, extractedCwd);
     }
