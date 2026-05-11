@@ -129,6 +129,10 @@
 * Probe cache invalidation hook lives in `SettingsForm` save path. `MainForm` passes `CopilotProbe` into the dialog. Changed `CopilotPath` calls `InvalidateCache()` after settings save and before close.
 * Tank seams: `GetCurrentAiDetectionFormState()` reads controls into a fresh `AiDetectionSettings`; `LoadAiDetectionFromSettings(AiDetectionSettings s)` marshals to UI thread and loads/clamps control values.
 
+### 2026-05-11: Release notes completeness skill — Team awareness
+
+Before tagging a release, consult `.squad/skills/release-notes-completeness/SKILL.md`. Key lesson from v0.22.0 expansion: sweep `git log <prev-tag>..<this-tag>` to catch features that landed in commits but weren't included in PR-driven changelog. Prevents shipped-feature gaps in release documentation. Neo's task captured the pattern.
+
 ### 2026-05-08 Issue #21 ICopilotProbe and Func<AiDetectionSettings> injection
 
 * Trinity implemented `ICopilotProbe` at `src/Services/ICopilotProbe.cs` with lazy `--version` probe and in-memory cache. Cache is invalidated when CopilotPath changes.
