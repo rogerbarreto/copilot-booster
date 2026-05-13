@@ -8,7 +8,7 @@ namespace CopilotBooster.IntegrationTests.Integration;
 public sealed class PullCurrentBranchOnSameBranchTests
 {
     [Fact]
-    public async Task SameBranchSession_UpdateEnabled_PullAdvancesWorkingTreeToRemoteTip()
+    public async Task PullCurrentBranchAsync_RealRepoWithRemote_AdvancesWorkingTreeHeadToRemoteTip()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         var remoteTip = await repo.CommitAndPushAsync("main", TestContext.Current.CancellationToken).ConfigureAwait(false);
@@ -21,7 +21,7 @@ public sealed class PullCurrentBranchOnSameBranchTests
     }
 
     [Fact]
-    public async Task SameBranchSession_UpdateEnabled_DirtyTree_PullFailsCleanly()
+    public async Task PullCurrentBranchAsync_DirtyTrackedFile_PullFailsAndHeadUnchanged()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         var localTip = await GitTestRepo.HeadAsync(repo.LocalPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
@@ -33,21 +33,24 @@ public sealed class PullCurrentBranchOnSameBranchTests
         Assert.False(success);
         Assert.NotNull(error);
         Assert.NotEmpty(error);
+        Assert.Contains("overwritten", error, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(localTip, await GitTestRepo.HeadAsync(repo.LocalPath, TestContext.Current.CancellationToken).ConfigureAwait(false));
     }
 
     [Fact]
-    public async Task SameBranchSession_UpdateEnabled_NoUpstream_FallsBackGracefully()
+    public async Task PullCurrentBranchAsync_NoUpstream_ReturnsSuccessFallbackFetch()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         var localTip = await repo.CreateLocalBranchWithoutUpstreamAsync("local-only", TestContext.Current.CancellationToken).ConfigureAwait(false);
         await repo.CheckoutAsync("local-only", TestContext.Current.CancellationToken).ConfigureAwait(false);
+        var remoteTip = await repo.CommitAndPushAsync("main", TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repo.LocalPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
 
         Assert.True(success, error);
         Assert.Null(error);
         Assert.Equal(localTip, await GitTestRepo.HeadAsync(repo.LocalPath, TestContext.Current.CancellationToken).ConfigureAwait(false));
+        Assert.Equal(remoteTip, await GitTestRepo.RevParseAsync(repo.LocalPath, "origin/main", TestContext.Current.CancellationToken).ConfigureAwait(false));
     }
 
     private static async Task<string> CommitReadmeAndPushAsync(string repoPath, string branchName, CancellationToken cancellationToken)
