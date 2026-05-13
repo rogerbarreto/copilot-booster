@@ -103,6 +103,84 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
         Assert.Equal("origin/feature", effectiveSourceRef);
     }
 
+#pragma warning disable IDE1006
+
+    [Fact]
+    public async Task PullCurrentBranchAsync_HappyPath_AdvancesLocalToRemoteTip()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        var expected = CommitAndPush(sourcePath, "main");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(success, error);
+        Assert.Null(error);
+        Assert.Equal(expected, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
+    [Fact]
+    public async Task PullCurrentBranchAsync_NoUpstream_FallsBackToFetchAndReturnsSuccess()
+    {
+        var (_, repoPath) = this.CreateRemoteBackedRepo();
+        RunGitCmd(repoPath, "checkout -b local-only");
+        var localTip = RunGitOutput(repoPath, "rev-parse HEAD");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(success, error);
+        Assert.Null(error);
+        Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
+    [Fact]
+    public async Task PullCurrentBranchAsync_DirtyWorkingTree_ReturnsFailureSurfacingGitError()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        var localTip = RunGitOutput(repoPath, "rev-parse HEAD");
+        CommitReadmeAndPush(sourcePath, "main");
+        File.AppendAllText(Path.Combine(repoPath, "README.md"), Environment.NewLine + "local dirty change");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.False(success);
+        Assert.NotNull(error);
+        Assert.NotEmpty(error);
+        Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
+    [Fact]
+    public async Task PullCurrentBranchAsync_AlreadyUpToDate_ReturnsSuccess()
+    {
+        var (_, repoPath) = this.CreateRemoteBackedRepo();
+        var localTip = RunGitOutput(repoPath, "rev-parse HEAD");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(success, error);
+        Assert.Null(error);
+        Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
+    [Fact]
+    public async Task PullCurrentBranchAsync_NonFastForward_ReturnsFailureWithError()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CommitAndPush(sourcePath, "main");
+        File.WriteAllText(Path.Combine(repoPath, "local-change.txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(repoPath, "add local-change.txt");
+        RunGitCmd(repoPath, "commit -m local-change");
+        var localTip = RunGitOutput(repoPath, "rev-parse HEAD");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.False(success);
+        Assert.NotNull(error);
+        Assert.NotEmpty(error);
+        Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
+#pragma warning restore IDE1006
+
     private string InitGitRepo()
     {
         var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
@@ -160,8 +238,21 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
         return rev;
     }
 
+    private static string CommitReadmeAndPush(string sourcePath, string branchName)
+    {
+        RunGitCmd(sourcePath, $"checkout {branchName}");
+        File.AppendAllText(Path.Combine(sourcePath, "README.md"), Environment.NewLine + Guid.NewGuid().ToString("N"));
+        RunGitCmd(sourcePath, "add README.md");
+        RunGitCmd(sourcePath, $"commit -m update-readme-{branchName}");
+        RunGitCmd(sourcePath, $"push origin {branchName}");
+        var rev = RunGitOutput(sourcePath, $"rev-parse {branchName}");
+        RunGitCmd(sourcePath, "checkout main");
+        return rev;
+    }
+
     private static string RunGitOutput(string workDir, string args)
     {
+        const int TimeoutMs = 10_000;
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
@@ -173,13 +264,24 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
             CreateNoWindow = true
         };
         using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
-        var stdout = proc.StandardOutput.ReadToEnd();
-        proc.WaitForExit(10_000);
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        var exited = proc.WaitForExit(TimeoutMs);
+        if (!exited)
+        {
+            proc.Kill(entireProcessTree: true);
+        }
+
+        Assert.True(exited, $"git {args} timed out after {TimeoutMs}ms");
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        Assert.True(proc.ExitCode == 0, $"git {args} failed: {stderr}");
         return stdout.Trim();
     }
 
     private static void RunGitCmd(string workDir, string args)
     {
+        const int TimeoutMs = 10_000;
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
@@ -191,6 +293,17 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
             CreateNoWindow = true
         };
         using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
-        proc.WaitForExit(10_000);
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        var exited = proc.WaitForExit(TimeoutMs);
+        if (!exited)
+        {
+            proc.Kill(entireProcessTree: true);
+        }
+
+        Assert.True(exited, $"git {args} timed out after {TimeoutMs}ms");
+        _ = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        Assert.True(proc.ExitCode == 0, $"git {args} failed: {stderr}");
     }
 }
