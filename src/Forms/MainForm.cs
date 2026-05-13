@@ -2043,6 +2043,26 @@ internal partial class MainForm : Form
                 var gitRoot = SessionService.FindGitRoot(selectedCwd);
                 if (gitRoot != null)
                 {
+                    if (promptResult.UpdateSourceFirst &&
+                        (promptResult.Action == BranchAction.ExistingBranch || promptResult.Action == BranchAction.NewBranch))
+                    {
+                        var sourceRefForUpdate = promptResult.Action == BranchAction.ExistingBranch
+                            ? promptResult.BranchName!
+                            : promptResult.BaseBranch!;
+                        var (updateOk, updateErr, _) = await WorkspaceCreationService.UpdateSourceBranchAsync(
+                            selectedCwd, sourceRefForUpdate, CancellationToken.None).ConfigureAwait(true);
+                        if (!updateOk)
+                        {
+                            var proceed = MessageBox.Show(this,
+                                $"Couldn't update from upstream:\n{updateErr}\n\nCreate session anyway with current state?",
+                                "Update Failed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                            if (proceed == DialogResult.No)
+                            {
+                                return;
+                            }
+                        }
+                    }
+
                     (bool success, string error) checkoutResult = promptResult.Action switch
                     {
                         BranchAction.ExistingBranch when !string.IsNullOrEmpty(promptResult.BranchName) =>

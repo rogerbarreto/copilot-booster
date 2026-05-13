@@ -67,6 +67,12 @@ internal class LauncherSettings
     public bool AlwaysOnTop { get; set; }
 
     /// <summary>
+    /// Gets or sets whether source branches are updated from upstream before creating worktrees or sessions.
+    /// </summary>
+    [JsonPropertyName("updateSourceBranchBeforeCreate")]
+    public bool UpdateSourceBranchBeforeCreate { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the application theme. Valid values are <c>"system"</c>, <c>"light"</c>, and <c>"dark"</c>.
     /// </summary>
     [JsonPropertyName("theme")]

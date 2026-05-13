@@ -19,6 +19,15 @@
 
 <!-- Append learnings below -->
 
+### 2026-05-14 Dialog update pre-step wiring
+
+* STANDING RULE (2026-05-13): All-Green Test Suite Required — Pre-existing test failures are NOT acceptable. The team may not declare work "done" while ANY test is failing, even if pre-dating the current change. Whoever lands work meeting a red suite must either (a) fix the pre-existing failure as part of delivery, or (b) escalate with analysis + plan before claiming completion. "Unrelated" is not sufficient. This is binding release policy: the project ships only with a fully green suite.
+
+* Worktree dialog owns the update orchestration. Branch modes call `WorkspaceCreationService.UpdateSourceBranchAsync` before the existing create methods, show the soft fail prompt on update failure, and keep the original source ref when the user continues after failure.
+* On update success, branch modes pass `effectiveSourceRef` into the unchanged create methods. This preserves Trinity's fallback behavior when a local branch is locked or not fast-forwardable.
+* `NewSessionResult` now carries `UpdateSourceFirst` with default `false`. `NewSessionNameVisuals` sets it only for existing branch and new branch actions.
+* Create buttons use two phase text. Checked update flow shows `Updating...`, then `Creating...`; cancel from the update prompt restores `Create` and clears `isCreating`.
+
 ### 2026-05-10 Dialog-Return Struct Pattern (WorkspaceCreatorVisuals)
 
 * Replaced the `(string, string?, string?)?` tuple return from `ShowWorkspaceCreator` with `WorkspaceCreatorResult?` struct. Plain `internal struct` (not record) — chosen deliberately; only promote if value-equality ever needed.
@@ -146,3 +155,9 @@ Before tagging a release, consult `.squad/skills/release-notes-completeness/SKIL
 * `SessionGridVisuals.GetCornerIconForSession(sid)` returns the current rendered corner bitmap for Tank without pixel comparing cells.
 * Corner click routing now keeps Running cancel behavior, shows undecided or error details through `IMessageBox`, then calls `_aiDetection.Reset(sid)` so `DetectionStateChanged` clears the icon.
 * Tooltip routing now calls `AiDetectionTooltips.ForUndecided(...)` and `ForFailure(...)`; only Running rows keep the shared animation timer active.
+
+### 2026-05-13 Update source branch setting toggle
+
+* `LauncherSettings.UpdateSourceBranchBeforeCreate` is persisted as `updateSourceBranchBeforeCreate` and defaults to `true`.
+* Settings UI workspace and branch behavior lives in `SettingsForm` under the `Git && GitHub` category. Reusable helper rows live in `SettingsVisuals`, including `CreateToggleWithHelper` for a checkbox plus small grey helper text.
+* Settings persistence is Save button driven. Local controls write back into `Program._settings`, then `Program._settings.Save()` writes `launcher-settings.json`.

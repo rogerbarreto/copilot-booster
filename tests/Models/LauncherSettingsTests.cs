@@ -112,6 +112,29 @@ public sealed class LauncherSettingsTests : IDisposable
     }
 
     [Fact]
+    public void UpdateSourceBranchBeforeCreate_DefaultsToEnabled()
+    {
+        var settings = new LauncherSettings();
+
+        Assert.True(settings.UpdateSourceBranchBeforeCreate);
+    }
+
+    [Fact]
+    public void UpdateSourceBranchBeforeCreate_RoundTripThroughLauncherSettings()
+    {
+        var file = Path.Combine(this._tempDir, "settings.json");
+        var settings = new LauncherSettings
+        {
+            UpdateSourceBranchBeforeCreate = false
+        };
+
+        settings.Save(file);
+        var loaded = LauncherSettings.Load(file);
+
+        Assert.False(loaded.UpdateSourceBranchBeforeCreate);
+    }
+
+    [Fact]
     public void CreateDefault_HasEmptyCollections()
     {
         var settings = LauncherSettings.CreateDefault();

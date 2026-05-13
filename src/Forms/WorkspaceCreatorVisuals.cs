@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CopilotBooster.Models;
@@ -29,8 +30,8 @@ internal static class WorkspaceCreatorVisuals
         var repoFolderName = Path.GetFileName(repoPath);
 
         const int FormWidthValue = 500;
-        const int CollapsedHeight = 340;
-        const int ExpandedHeight = 410;
+        const int CollapsedHeight = 390;
+        const int ExpandedHeight = 460;
 
         var branches = WorkspaceCreationService.GetBranches(repoPath);
         var remotes = GitService.GetRemotes(repoPath);
@@ -258,6 +259,25 @@ internal static class WorkspaceCreatorVisuals
             Location = new Point(14, y + 46)
         };
         form.Controls.Add(lblBranchHelper);
+
+        var chkUpdateSource = new CheckBox
+        {
+            Text = "Update from upstream first",
+            AutoSize = true,
+            Checked = Program._settings.UpdateSourceBranchBeforeCreate,
+            Location = new Point(14, y + 68)
+        };
+        form.Controls.Add(chkUpdateSource);
+
+        var lblUpdateSourceHelper = new Label
+        {
+            Text = "Runs git fetch and fast-forwards the source branch before creating the worktree.",
+            ForeColor = Color.Gray,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
+            AutoSize = true,
+            Location = new Point(14, y + 90)
+        };
+        form.Controls.Add(lblUpdateSourceHelper);
 
         // --- PR mode controls (hidden by default) ---
         var lblRemote = new Label
@@ -547,6 +567,7 @@ internal static class WorkspaceCreatorVisuals
             bool isPrMode = rdoFromPr.Checked;
             bool isIssueMode = rdoFromIssue.Checked;
             bool isExistingBranch = rdoExistingBranch.Checked;
+            bool isBranchMode = isExistingBranch || isNewBranch;
 
             // Current branch label — only visible in Existing Branch mode
             lblCurrentBranch.Visible = isExistingBranch;
@@ -563,9 +584,11 @@ internal static class WorkspaceCreatorVisuals
             lblNameHelper.Visible = isNewBranch;
 
             // Branch dropdown (visible in Existing Branch & New Branch modes)
-            lblBranch.Visible = !isPrMode && !isIssueMode;
-            cmbBranch.Visible = !isPrMode && !isIssueMode;
-            lblBranchHelper.Visible = !isPrMode && !isIssueMode;
+            lblBranch.Visible = isBranchMode;
+            cmbBranch.Visible = isBranchMode;
+            lblBranchHelper.Visible = isBranchMode;
+            chkUpdateSource.Visible = isBranchMode;
+            lblUpdateSourceHelper.Visible = isBranchMode;
 
             // PR mode controls
             lblRemote.Visible = isPrMode;
@@ -702,9 +725,11 @@ internal static class WorkspaceCreatorVisuals
                 lblBranch.Location = new Point(14, cy);
                 cmbBranch.Location = new Point(14, cy + 20);
                 lblBranchHelper.Location = new Point(14, cy + 46);
-                lblPreview.Location = new Point(14, cy + 68);
+                chkUpdateSource.Location = new Point(14, cy + 68);
+                lblUpdateSourceHelper.Location = new Point(14, cy + 90);
+                lblPreview.Location = new Point(14, cy + 116);
 
-                int buttonY = cy + 100;
+                int buttonY = cy + 148;
                 btnCreate.Location = new Point(300, buttonY);
                 btnCancel.Location = new Point(390, buttonY);
 
@@ -719,9 +744,11 @@ internal static class WorkspaceCreatorVisuals
                 lblBranch.Location = new Point(14, cy);
                 cmbBranch.Location = new Point(14, cy + 20);
                 lblBranchHelper.Location = new Point(14, cy + 46);
-                lblPreview.Location = new Point(14, cy + 68);
+                chkUpdateSource.Location = new Point(14, cy + 68);
+                lblUpdateSourceHelper.Location = new Point(14, cy + 90);
+                lblPreview.Location = new Point(14, cy + 116);
 
-                int buttonY = cy + 100;
+                int buttonY = cy + 148;
                 btnCreate.Location = new Point(300, buttonY);
                 btnCancel.Location = new Point(390, buttonY);
 
@@ -1485,11 +1512,36 @@ internal static class WorkspaceCreatorVisuals
                 }
 
                 var selectedBaseBranch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ') ?? "main";
+                var sourceRef = selectedBaseBranch;
                 isCreating = true;
                 btnCreate.Enabled = false;
+                if (chkUpdateSource.Checked)
+                {
+                    btnCreate.Text = "Updating...";
+                    var (updateOk, updateErr, effectiveSourceRef) = await WorkspaceCreationService.UpdateSourceBranchAsync(
+                        repoPath, sourceRef, CancellationToken.None).ConfigureAwait(true);
+                    if (!updateOk)
+                    {
+                        var proceed = MessageBox.Show(form,
+                            $"Couldn't update from upstream:\n{updateErr}\n\nCreate worktree anyway with current state?",
+                            "Update Failed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                        if (proceed == DialogResult.No)
+                        {
+                            isCreating = false;
+                            btnCreate.Enabled = true;
+                            btnCreate.Text = "Create";
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        sourceRef = effectiveSourceRef;
+                    }
+                }
+
                 btnCreate.Text = "Creating...";
                 var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceAsync(
-                    repoPath, repoFolderName!, workspaceName, selectedBaseBranch).ConfigureAwait(true);
+                    repoPath, repoFolderName!, workspaceName, sourceRef).ConfigureAwait(true);
                 isCreating = false;
                 if (success)
                 {
@@ -1509,11 +1561,36 @@ internal static class WorkspaceCreatorVisuals
             {
                 // Existing branch mode
                 var selectedBaseBranch = cmbBranch.SelectedItem?.ToString()?.TrimStart('*', ' ') ?? "main";
+                var sourceRef = selectedBaseBranch;
                 isCreating = true;
                 btnCreate.Enabled = false;
+                if (chkUpdateSource.Checked)
+                {
+                    btnCreate.Text = "Updating...";
+                    var (updateOk, updateErr, effectiveSourceRef) = await WorkspaceCreationService.UpdateSourceBranchAsync(
+                        repoPath, sourceRef, CancellationToken.None).ConfigureAwait(true);
+                    if (!updateOk)
+                    {
+                        var proceed = MessageBox.Show(form,
+                            $"Couldn't update from upstream:\n{updateErr}\n\nCreate worktree anyway with current state?",
+                            "Update Failed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                        if (proceed == DialogResult.No)
+                        {
+                            isCreating = false;
+                            btnCreate.Enabled = true;
+                            btnCreate.Text = "Create";
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        sourceRef = effectiveSourceRef;
+                    }
+                }
+
                 btnCreate.Text = "Creating...";
                 var (worktreePath, success, error) = await WorkspaceCreationService.CreateWorkspaceFromExistingBranchAsync(
-                    repoPath, repoFolderName!, selectedBaseBranch).ConfigureAwait(true);
+                    repoPath, repoFolderName!, sourceRef).ConfigureAwait(true);
                 isCreating = false;
                 if (success)
                 {

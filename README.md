@@ -264,6 +264,10 @@ Start a workspace from a GitHub issue number. Enter the issue number, click **Ch
   <img src="images/create-workspace-from-issue.png" alt="Create workspace from a GitHub Issue" width="450">
 </p>
 
+#### Update from Upstream First
+
+When creating a workspace from an existing or new branch, you can optionally enable "Update from upstream first" to ensure the source branch is current before the worktree is created. This runs `git fetch` and fast-forwards the local branch to match its upstream remote, falling back to branching from the remote-tracking ref if the local branch is checked out elsewhere or has diverged. The option defaults to enabled and can be toggled in Settings under Git/GitHub. If the update fails, you are prompted to proceed anyway or cancel.
+
 ### AI auto-detect GitHub issue / PR
 
 AI auto-detect reads the selected session conversation, extracts explicit GitHub issue and PR references, validates them with `gh`, then adds above-threshold candidates to the session's tracked GitHub items.

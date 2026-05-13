@@ -19,6 +19,15 @@ internal enum GitHubRepoResolution
 
 internal readonly record struct GitHubRepoResult(GitHubRepoResolution Status, string? Owner = null, string? Repo = null);
 
+internal enum FastForwardResult
+{
+    Ok,
+    BranchCheckedOutElsewhere,
+    NonFastForward,
+    NetworkError,
+    OtherError
+}
+
 /// <summary>
 /// Provides Git-related operations such as branch listing, worktree creation, and repository detection.
 /// </summary>
@@ -516,6 +525,44 @@ internal static partial class GitService
         return exitCode == 0 && !string.IsNullOrWhiteSpace(stdout);
     }
 
+    internal static string? GetUpstreamRemote(string repoPath, string localBranch)
+    {
+        var (exitCode, stdout, _) = RunGit(repoPath, $"rev-parse --abbrev-ref \"{localBranch}@{{upstream}}\"");
+        if (exitCode != 0)
+        {
+            return null;
+        }
+
+        var upstream = stdout.Trim();
+        var slashIndex = upstream.IndexOf('/');
+        if (slashIndex <= 0)
+        {
+            return null;
+        }
+
+        return upstream[..slashIndex];
+    }
+
+    internal static async Task<(bool success, string error)> FetchRemoteAsync(
+        string repoPath, string remote, CancellationToken cancellationToken = default)
+    {
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, $"fetch {remote}", cancellationToken).ConfigureAwait(false);
+        return exitCode == 0 ? (true, string.Empty) : (false, stderr.Trim());
+    }
+
+    internal static async Task<(FastForwardResult result, string error)> FetchAndFastForwardAsync(
+        string repoPath, string remote, string localBranch, CancellationToken cancellationToken = default)
+    {
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, $"fetch {remote} {localBranch}:{localBranch}", cancellationToken).ConfigureAwait(false);
+        var error = stderr.Trim();
+        if (exitCode == 0)
+        {
+            return (FastForwardResult.Ok, string.Empty);
+        }
+
+        return (ClassifyFastForwardError(error), error);
+    }
+
     /// <summary>
     /// Fetches a PR ref from the remote. Must be called before creating a worktree from FETCH_HEAD.
     /// </summary>
@@ -557,6 +604,33 @@ internal static partial class GitService
     internal static (string owner, string repo)? ParseGitHubOwnerRepo(string remoteUrl)
     {
         return TryParseGitHubRemote(remoteUrl) is { } repo ? (repo.Owner, repo.Repo) : null;
+    }
+
+    private static FastForwardResult ClassifyFastForwardError(string stderr)
+    {
+        if (stderr.Contains("refusing to fetch into branch", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("checked out at", StringComparison.OrdinalIgnoreCase))
+        {
+            return FastForwardResult.BranchCheckedOutElsewhere;
+        }
+
+        if (stderr.Contains("non-fast-forward", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("not fast-forward", StringComparison.OrdinalIgnoreCase))
+        {
+            return FastForwardResult.NonFastForward;
+        }
+
+        if (stderr.Contains("Could not resolve host", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("unable to access", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("Failed to connect", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("Connection", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+            || stderr.Contains("Network is unreachable", StringComparison.OrdinalIgnoreCase))
+        {
+            return FastForwardResult.NetworkError;
+        }
+
+        return FastForwardResult.OtherError;
     }
 
     private static GitHubRepoResult? TryResolveRemote(string cwd, string remoteName)

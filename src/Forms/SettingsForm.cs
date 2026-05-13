@@ -425,7 +425,16 @@ internal sealed class SettingsForm : Form
         // =====================================================================
         // GIT & GITHUB
         // =====================================================================
-        var (gitPanel, gitBody) = this.CreateCategoryPanel("Git && GitHub", "Branch naming patterns for issue and PR sessions. Use {number} and {alias} as placeholders.", autoScroll: true, padding: new Padding(8));
+        var (gitPanel, gitBody) = this.CreateCategoryPanel("Git && GitHub", "Branch behavior and naming patterns for worktrees, sessions, issues, and PRs.", autoScroll: true, padding: new Padding(8));
+
+        var updateSourceBranchBeforeCreateCheck = new CheckBox
+        {
+            Text = "Update source branch from upstream when creating worktrees / sessions",
+            Checked = Program._settings.UpdateSourceBranchBeforeCreate
+        };
+        var updateSourceBranchBeforeCreateRow = SettingsVisuals.CreateToggleWithHelper(
+            updateSourceBranchBeforeCreateCheck,
+            "Runs `git fetch` and fast-forwards the source branch before the worktree (or in-CWD branch checkout) is created. Can be overridden per-dialog.");
 
         var prBranchRow = new Panel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(4, 8, 0, 4) };
         var prBranchLabel = new Label { Text = "PR branch pattern:", AutoSize = true, Location = new Point(4, 12) };
@@ -453,6 +462,7 @@ internal sealed class SettingsForm : Form
 
         gitBody.Controls.Add(prBranchRow);
         gitBody.Controls.Add(issueBranchRow);
+        gitBody.Controls.Add(updateSourceBranchBeforeCreateRow);
 
         // =====================================================================
         // SESSION TABS
@@ -881,6 +891,7 @@ internal sealed class SettingsForm : Form
                 ? "issues/{number}-{alias}" : issueBranchBox.Text.Trim();
             Program._settings.PrBranchPattern = string.IsNullOrWhiteSpace(prBranchBox.Text)
                 ? "prs/{number}-{alias}" : prBranchBox.Text.Trim();
+            Program._settings.UpdateSourceBranchBeforeCreate = updateSourceBranchBeforeCreateCheck.Checked;
 
             // Session Tabs
             Program._settings.SessionTabs = sessionTabsList.Items.Cast<string>().ToList();

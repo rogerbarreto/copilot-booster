@@ -1,4 +1,4 @@
-# Tank — History
+﻿# Tank — History
 
 ## Core Context
 
@@ -18,6 +18,10 @@
 ## Learnings
 
 <!-- Append learnings below -->
+
+- **STANDING RULE (2026-05-13): All-Green Test Suite Required** — Pre-existing test failures are NOT acceptable. The team may not declare work "done" while ANY test is failing, even if pre-dating the current change. Whoever lands work meeting a red suite must either (a) fix the pre-existing failure as part of delivery, or (b) escalate with analysis + plan before claiming completion. "Unrelated" is not sufficient. This is binding release policy: the project ships only with a fully green suite.
+
+- **2026-05-14: Update-source git integration fixture:** `GitTestRepo` builds a source repo, bare remote, and local clone, then pushes commits after clone so the local ref is behind. Use it for end-to-end git update tests through `GitService.RunGitAsync`, not raw process shelling. Edge cases covered: checked-out branch fallback must fetch the remote-tracking ref before creating from `origin/<branch>`; no-upstream local branches remain at local tip after fallback fetch; bogus remotes return a surfaced error.
 
 - **2026-05-03 — All-green integration directive:** All integration tests must be GREEN at all times. No tolerance for environmental baseline failures. Tests that fail due to missing setup (e.g., Playwright not installed locally) are TEST BUGS requiring self-bootstrapping (fixture installs) or explicit skip traits. This supersedes any prior decision to "document pain" or "tolerate named-diff baseline". Baseline red count (13 tests) must be reduced to zero via fixture auto-install or skip traits, not accepted as "normal".
 - **Async test pattern:**xUnit v3 supports `[Fact] public async Task` natively — no special runner needed. Use `.ConfigureAwait(false)` in tests since they don't run on a UI thread.

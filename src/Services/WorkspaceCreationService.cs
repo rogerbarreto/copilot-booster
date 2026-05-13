@@ -182,6 +182,41 @@ internal static class WorkspaceCreationService
             : (worktreePath, false, errorMsg);
     }
 
+    internal static async Task<(bool success, string? error, string effectiveSourceRef)> UpdateSourceBranchAsync(
+        string repoPath, string sourceRef, CancellationToken cancellationToken = default)
+    {
+        var remotes = GitService.GetRemotes(repoPath);
+        if (GitService.IsRemoteRef(sourceRef, remotes))
+        {
+            var remote = sourceRef[..sourceRef.IndexOf('/')];
+            var (success, error) = await GitService.FetchRemoteAsync(repoPath, remote, cancellationToken).ConfigureAwait(false);
+            return success ? (true, null, sourceRef) : (false, error, sourceRef);
+        }
+
+        var localBranch = GitService.GetLocalBranchName(sourceRef, remotes);
+        var upstreamRemote = GitService.GetUpstreamRemote(repoPath, localBranch);
+        if (string.IsNullOrWhiteSpace(upstreamRemote))
+        {
+            var fallbackRemote = remotes.Count > 0 ? remotes[0] : "origin";
+            var (success, error) = await GitService.FetchRemoteAsync(repoPath, fallbackRemote, cancellationToken).ConfigureAwait(false);
+            return success ? (true, null, sourceRef) : (false, error, sourceRef);
+        }
+
+        var (result, fastForwardError) = await GitService.FetchAndFastForwardAsync(repoPath, upstreamRemote, localBranch, cancellationToken).ConfigureAwait(false);
+        if (result == FastForwardResult.Ok)
+        {
+            return (true, null, sourceRef);
+        }
+
+        if (result is FastForwardResult.BranchCheckedOutElsewhere or FastForwardResult.NonFastForward)
+        {
+            var (fetchSuccess, fetchError) = await GitService.FetchRemoteAsync(repoPath, upstreamRemote, cancellationToken).ConfigureAwait(false);
+            return fetchSuccess ? (true, null, $"{upstreamRemote}/{localBranch}") : (false, fetchError, sourceRef);
+        }
+
+        return (false, fastForwardError, sourceRef);
+    }
+
     /// <summary>
     /// Resolves a unique local branch name by appending an incrementing suffix if needed.
     /// Only conflicts with branches that are currently checked out in a worktree,

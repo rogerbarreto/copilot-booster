@@ -1,3 +1,129 @@
+# Team Decisions
+
+## STANDING RULE: All-Green Test Suite Required (2026-05-13)
+
+**Date:** 2026-05-13  
+**By:** Roger Barreto (Copilot directive)  
+**Status:** BINDING  
+
+Pre-existing test failures are NOT acceptable. The team may not declare work "done" while ANY test in the suite is failing, even if the failure pre-dates the current change. Whoever lands work that meets a red suite must either:
+1. Fix the pre-existing failure as part of their delivery, OR
+2. Escalate to the coordinator with a clear analysis of the failure and a plan, before claiming completion.
+
+"Unrelated" is not a sufficient justification on its own. This is a standing release policy: the project ships only with a fully green suite.
+
+---
+
+## 2026-05-14: Update from Upstream First — Service Helpers (Trinity)
+
+**Date:** 2026-05-14  
+**Status:** Complete  
+**Contributors:** Trinity (service implementation), Neo (architecture review)
+
+### Decision A — Service-Layer Helpers (Locked API Shape)
+
+New helpers for the `Update from upstream first` workflow:
+
+**GitService additions (internal):**
+- `GetUpstreamRemote(repoPath, localBranch)` → returns upstream remote name or null
+- `FetchRemoteAsync(repoPath, remote, ct)` → runs `git fetch <remote>`, returns `(bool success, string? error)`
+- `FetchAndFastForwardAsync(repoPath, remote, localBranch, ct)` → runs `git fetch <remote> <branch>:<branch>`, returns `(FastForwardResult result, string? error)`
+- `enum FastForwardResult { Ok, BranchCheckedOutElsewhere, NonFastForward, NetworkError, OtherError }`
+
+**WorkspaceCreationService addition (internal):**
+- `UpdateSourceBranchAsync(repoPath, sourceRef, ct)` → returns `(bool success, string? error)`
+
+Existing creation methods (`CreateWorkspaceAsync`, `CreateWorkspaceFromExistingBranchAsync`) remain UNCHANGED — no overloads, no new return types. Update is a standalone pre-step orchestrated by the dialog.
+
+### Decision B — Fallback Semantics
+
+Checked-out-elsewhere and non-fast-forward results are NOT user-visible update failures. They return success with `effectiveSourceRef = {remote}/{branch}` so worktree creation continues from remote-tracking branch. Network and unknown errors return surfaced error.
+
+**Bug fixed:** `git fetch origin branch:branch` fails when branch is checked out and does not refresh `origin/branch`. Added plain remote fetch before returning fallback ref.
+
+### Decision C — Backward Compatibility
+
+Revision 1 from Neo review: No existing method signatures change. Zero backward compatibility risk.
+
+---
+
+## 2026-05-14: Update from Upstream First — Settings + Dialog Wiring
+
+**Date:** 2026-05-14  
+**Status:** Complete  
+**Contributors:** Morpheus (settings + dialog wiring), Neo (architecture review)
+
+### Decision A — Settings UI
+
+- Added `LauncherSettings.UpdateSourceBranchBeforeCreate` (default `true`)
+- JSON persisted as `updateSourceBranchBeforeCreate`
+- Settings placement: Git && GitHub category (above branch naming patterns)
+- UI: checkbox + grey helper text via `SettingsVisuals.CreateToggleWithHelper`
+- Persistence: Settings Save button copies state; `Program._settings.Save()` handles JSON
+
+### Decision B — Worktree Dialog UX (WorkspaceCreatorVisuals)
+
+- Show checkbox for Existing branch and New branch modes only (hidden for PR, Issue)
+- Helper text directly under checkbox, grey 7.5 point style
+- Button text phases: "Updating..." (if checked) → "Creating..."
+- On update failure: soft-fail Yes/No prompt. No cancels. Yes continues with original source ref.
+- On update success: pass `effectiveSourceRef` (Trinity's return value) into existing create method
+
+### Decision C — In-CWD Session UX (MainForm + NewSessionNameVisuals)
+
+- `NewSessionResult` carries `UpdateSourceFirst` (default `false`)
+- Existing/New branch actions set it from checkbox state
+- PR, Issue, Same branch, non-git fallback keep `UpdateSourceFirst = false`
+- MainForm runs async update pre-step before synchronous checkout switch
+- Update goes async; existing synchronous checkout calls remain unchanged
+
+**Revision 3 from Neo:** `NewSessionNamePromptResult` needs `bool UpdateSourceFirst` property to carry checkbox state to MainForm.
+
+### Decision D — Rationale
+
+Neo locked the API shape with no new create result type and no new create overloads. Trinity's helper already returns effective source ref, so dialog only needed state, prompt behavior, and source-ref selection.
+
+---
+
+## 2026-05-14: Update from Upstream First — Integration Tests + Fixture
+
+**Date:** 2026-05-14  
+**Status:** Complete  
+**Contributors:** Tank (tests + fixture), Trinity (bug discovery)
+
+### Decision A — Test Coverage Map
+
+| Flow | Test | What it proves |
+| --- | --- | --- |
+| Worktree happy path | `UpdateThenCreate_LocalBehindRemote_WorktreeAtRemoteTip` | Local branch fast-forwards, worktree HEAD equals remote tip |
+| Worktree checked-out | `UpdateThenCreate_BranchCheckedOutInMainRepo_FallsBackToRemoteRef_WorktreeStillFresh` | Fallback uses fresh `origin/<branch>`, local ref unchanged |
+| Worktree no-upstream | `UpdateThenCreate_NoUpstream_LocalBranch_WorktreeAtLocalTip` | No-upstream branch fetches fallback remote, creates from unchanged local tip |
+| Worktree bad remote | `UpdateThenCreate_NetworkFailure_BogusRemote_ReturnsError` | Bogus remote returns `success=false`, source ref preserved |
+| In-CWD session | `UpdateThenCheckout_LocalBehindRemote_WorkingTreeAtRemoteTip` | Update pre-step + checkout lands main repo on latest |
+| Settings | Existing `LauncherSettingsTests` | Default true, round-trip JSON |
+
+### Decision B — Fixture: GitTestRepo
+
+`tests/Integration/TestTools/GitTestRepo.cs`:
+1. Source repo with `main`
+2. Bare remote cloned from source
+3. Local clone from bare remote
+4. Remote commits after clone to make local refs stale
+
+All git operations via `GitService.RunGitAsync` — tests exercise production process boundary.
+
+### Decision C — Bug Found and Fixed
+
+`git fetch origin branch:branch` fails when branch is checked out and does not refresh `origin/branch`. `WorkspaceCreationService.UpdateSourceBranchAsync` now performs plain remote fetch before returning fallback remote ref for checked-out and non-fast-forward cases.
+
+### Build & Test Outcome
+
+- Gate result: ✅ format / ✅ build (0 warn) / ✅ unit 912-0-2 / ✅ integration 128-0-21
+- 36 changed + 46 new files
+- All tests green (per Roger directive: no pre-existing failures acceptable)
+
+---
+
 ## 2026-05-10: GitHub URL Smart Input — Parser + Smart-Input Wiring in 3 Forms
 
 **Date:** 2026-05-10  
