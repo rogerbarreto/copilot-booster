@@ -182,6 +182,27 @@ internal static class WorkspaceCreationService
             : (worktreePath, false, errorMsg);
     }
 
+    /// <summary>
+    /// Pulls the current branch using fast-forward-only semantics when it has an upstream.
+    /// If the current branch has no upstream, fetches the first configured remote, or <c>origin</c> when no remotes are configured.
+    /// </summary>
+    /// <returns><c>(true, null)</c> when the pull or fallback fetch succeeds; otherwise <c>(false, error)</c> with git stderr.</returns>
+    internal static async Task<(bool success, string? error)> PullCurrentBranchAsync(
+        string repoPath, CancellationToken cancellationToken = default)
+    {
+        var currentBranch = GitService.GetCurrentBranch(repoPath);
+        var upstreamRemote = GitService.GetUpstreamRemote(repoPath, currentBranch);
+        if (string.IsNullOrWhiteSpace(upstreamRemote))
+        {
+            var remotes = GitService.GetRemotes(repoPath);
+            var fallbackRemote = remotes.Count > 0 ? remotes[0] : "origin";
+            var (success, error) = await GitService.FetchRemoteAsync(repoPath, fallbackRemote, cancellationToken).ConfigureAwait(false);
+            return success ? (true, null) : (false, error);
+        }
+
+        return await GitService.PullFastForwardOnlyAsync(repoPath, cancellationToken).ConfigureAwait(false);
+    }
+
     internal static async Task<(bool success, string? error, string effectiveSourceRef)> UpdateSourceBranchAsync(
         string repoPath, string sourceRef, CancellationToken cancellationToken = default)
     {

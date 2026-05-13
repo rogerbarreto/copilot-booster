@@ -550,6 +550,13 @@ internal static partial class GitService
         return exitCode == 0 ? (true, string.Empty) : (false, stderr.Trim());
     }
 
+    internal static async Task<(bool success, string? error)> PullFastForwardOnlyAsync(
+        string repoPath, CancellationToken cancellationToken = default)
+    {
+        var (exitCode, _, stderr) = await RunGitAsync(repoPath, "pull --ff-only", cancellationToken).ConfigureAwait(false);
+        return exitCode == 0 ? (true, null) : (false, stderr.Trim());
+    }
+
     internal static async Task<(FastForwardResult result, string error)> FetchAndFastForwardAsync(
         string repoPath, string remote, string localBranch, CancellationToken cancellationToken = default)
     {

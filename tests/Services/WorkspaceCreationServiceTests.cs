@@ -148,6 +148,37 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
         Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
     }
 
+    [Fact]
+    public async Task PullCurrentBranchAsync_AlreadyUpToDate_ReturnsSuccess()
+    {
+        var (_, repoPath) = this.CreateRemoteBackedRepo();
+        var localTip = RunGitOutput(repoPath, "rev-parse HEAD");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(success, error);
+        Assert.Null(error);
+        Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
+    [Fact]
+    public async Task PullCurrentBranchAsync_NonFastForward_ReturnsFailureWithError()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CommitAndPush(sourcePath, "main");
+        File.WriteAllText(Path.Combine(repoPath, "local-change.txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(repoPath, "add local-change.txt");
+        RunGitCmd(repoPath, "commit -m local-change");
+        var localTip = RunGitOutput(repoPath, "rev-parse HEAD");
+
+        var (success, error) = await WorkspaceCreationService.PullCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.False(success);
+        Assert.NotNull(error);
+        Assert.NotEmpty(error);
+        Assert.Equal(localTip, RunGitOutput(repoPath, "rev-parse HEAD"));
+    }
+
 #pragma warning restore IDE1006
 
     private string InitGitRepo()
