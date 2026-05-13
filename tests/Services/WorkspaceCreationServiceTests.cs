@@ -252,6 +252,7 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
 
     private static string RunGitOutput(string workDir, string args)
     {
+        const int TimeoutMs = 10_000;
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
@@ -263,13 +264,24 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
             CreateNoWindow = true
         };
         using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
-        var stdout = proc.StandardOutput.ReadToEnd();
-        proc.WaitForExit(10_000);
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        var exited = proc.WaitForExit(TimeoutMs);
+        if (!exited)
+        {
+            proc.Kill(entireProcessTree: true);
+        }
+
+        Assert.True(exited, $"git {args} timed out after {TimeoutMs}ms");
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        Assert.True(proc.ExitCode == 0, $"git {args} failed: {stderr}");
         return stdout.Trim();
     }
 
     private static void RunGitCmd(string workDir, string args)
     {
+        const int TimeoutMs = 10_000;
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "git",
@@ -281,6 +293,17 @@ public sealed class WorkspaceCreationServiceTests : IDisposable
             CreateNoWindow = true
         };
         using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
-        proc.WaitForExit(10_000);
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        var exited = proc.WaitForExit(TimeoutMs);
+        if (!exited)
+        {
+            proc.Kill(entireProcessTree: true);
+        }
+
+        Assert.True(exited, $"git {args} timed out after {TimeoutMs}ms");
+        _ = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        Assert.True(proc.ExitCode == 0, $"git {args} failed: {stderr}");
     }
 }
