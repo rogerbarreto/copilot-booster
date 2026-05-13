@@ -17,6 +17,8 @@
 
 ## Summary of Prior Work (Phase 0.21.0 — Copilot Host Discovery + Async Worktree, 2026-03-15 to 2026-05-02)
 
+**STANDING RULE (2026-05-13): All-Green Test Suite Required** — Pre-existing test failures are NOT acceptable. The team may not declare work "done" while ANY test is failing, even if pre-dating the current change. Whoever lands work meeting a red suite must either (a) fix the pre-existing failure as part of delivery, or (b) escalate with analysis + plan before claiming completion. "Unrelated" is not sufficient. This is binding release policy: the project ships only with a fully green suite.
+
 **Copilot Host Discovery (Phases 1-4):**
 - Implemented 5 core discovery components: `HostKindClassifier` (process name → label), `BoosterResolvedNameFormatter` (truncation + whitespace collapse), `FirstUserMessageExtractor`, `SessionNameOverrideService` (sidecar JSON), `CopilotHostInfo` record
 - Built `IProcessTreeProvider` abstraction with Win32 Toolhelp32 backend; `CopilotHostResolver` walks parent tree with cycle detection
