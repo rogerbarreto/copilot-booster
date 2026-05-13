@@ -6,7 +6,7 @@ namespace CopilotBooster.IntegrationTests.Integration;
 public sealed class UpdateBeforeInCwdSessionTests
 {
     [Fact]
-    public async Task UpdateThenCheckout_LocalBehindRemote_WorkingTreeAtRemoteTip()
+    public async Task UpdateThenCheckout_LocalBehindRemote_WorkingTreeAtRemoteTipAsync()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         await repo.CreateRemoteBranchAsync("feature", TestContext.Current.CancellationToken).ConfigureAwait(false);

@@ -24,7 +24,7 @@ public sealed class UpdateBeforeWorktreeCreationTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateThenCreate_LocalBehindRemote_WorktreeAtRemoteTip()
+    public async Task UpdateThenCreate_LocalBehindRemote_WorktreeAtRemoteTipAsync()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         ConfigureWorkspaces(repo);
@@ -43,7 +43,7 @@ public sealed class UpdateBeforeWorktreeCreationTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateThenCreate_BranchCheckedOutInMainRepo_FallsBackToRemoteRef_WorktreeStillFresh()
+    public async Task UpdateThenCreate_BranchCheckedOutInMainRepo_FallsBackToRemoteRef_WorktreeStillFreshAsync()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         ConfigureWorkspaces(repo);
@@ -64,7 +64,7 @@ public sealed class UpdateBeforeWorktreeCreationTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateThenCreate_NoUpstream_LocalBranch_WorktreeAtLocalTip()
+    public async Task UpdateThenCreate_NoUpstream_LocalBranch_WorktreeAtLocalTipAsync()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         ConfigureWorkspaces(repo);
@@ -82,7 +82,7 @@ public sealed class UpdateBeforeWorktreeCreationTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateThenCreate_NetworkFailure_BogusRemote_ReturnsError()
+    public async Task UpdateThenCreate_NetworkFailure_BogusRemote_ReturnsErrorAsync()
     {
         using var repo = await GitTestRepo.CreateAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         await repo.SetOriginUrlAsync("https://localhost:1/copilot-booster/nonexistent.git", TestContext.Current.CancellationToken).ConfigureAwait(false);
