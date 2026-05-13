@@ -20,7 +20,8 @@ internal record NewSessionResult(
     GitService.HostingPlatform? Platform,
     string? HeadBranch = null,
     int? IssueNumber = null,
-    string? GitHubUrl = null);
+    string? GitHubUrl = null,
+    bool UpdateSourceFirst = false);
 
 /// <summary>
 /// Provides a modal dialog for naming a new Copilot session.
@@ -149,7 +150,7 @@ internal static class NewSessionNameVisuals
             var simpleName = ShowNamePrompt();
             return simpleName == null
                 ? null
-                : new NewSessionResult(simpleName, BranchAction.None, null, null, null, null, null);
+                : new NewSessionResult(simpleName, BranchAction.None, null, null, null, null, null, UpdateSourceFirst: false);
         }
 
         var branches = WorkspaceCreationService.GetBranches(gitRoot);
@@ -357,6 +358,27 @@ internal static class NewSessionNameVisuals
             Visible = false
         };
         form.Controls.Add(lblBranchHelper);
+
+        var chkUpdateSource = new CheckBox
+        {
+            Text = "Update from upstream first",
+            AutoSize = true,
+            Checked = Program._settings.UpdateSourceBranchBeforeCreate,
+            Location = new Point(14, y + 68),
+            Visible = false
+        };
+        form.Controls.Add(chkUpdateSource);
+
+        var lblUpdateSourceHelper = new Label
+        {
+            Text = "Runs git fetch and fast-forwards the source branch before creating the worktree.",
+            ForeColor = Color.Gray,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f),
+            AutoSize = true,
+            Location = new Point(14, y + 90),
+            Visible = false
+        };
+        form.Controls.Add(lblUpdateSourceHelper);
 
         // --- New Branch controls (hidden by default) ---
         var lblNewBranchName = new Label
@@ -727,6 +749,7 @@ internal static class NewSessionNameVisuals
             bool isPrMode = rdoFromPr.Checked;
             bool isIssueMode = rdoFromIssue.Checked;
             bool isSameBranch = rdoSameBranch.Checked;
+            bool showUpdateSource = isSwitchBranch || isNewBranch;
 
             // Current branch label — only visible in Same Branch mode
             lblCurrentBranch.Visible = isSameBranch;
@@ -740,6 +763,8 @@ internal static class NewSessionNameVisuals
             lblBranch.Visible = isSwitchBranch;
             cmbBranch.Visible = isSwitchBranch;
             lblBranchHelper.Visible = isSwitchBranch;
+            chkUpdateSource.Visible = showUpdateSource;
+            lblUpdateSourceHelper.Visible = showUpdateSource;
 
             // New Branch controls
             lblNewBranchName.Visible = isNewBranch;
@@ -878,6 +903,10 @@ internal static class NewSessionNameVisuals
                 cmbBaseBranch.Location = new Point(14, cy + 20);
                 cy += 50;
 
+                chkUpdateSource.Location = new Point(14, cy);
+                lblUpdateSourceHelper.Location = new Point(14, cy + 22);
+                cy += 46;
+
                 int buttonY = cy + 8;
                 btnOk.Location = new Point(300, buttonY);
                 btnCancel.Location = new Point(390, buttonY);
@@ -891,8 +920,10 @@ internal static class NewSessionNameVisuals
                 lblBranch.Location = new Point(14, cy);
                 cmbBranch.Location = new Point(14, cy + 20);
                 lblBranchHelper.Location = new Point(14, cy + 46);
+                chkUpdateSource.Location = new Point(14, cy + 68);
+                lblUpdateSourceHelper.Location = new Point(14, cy + 90);
 
-                int buttonY = cy + 74;
+                int buttonY = cy + 120;
                 btnOk.Location = new Point(300, buttonY);
                 btnCancel.Location = new Point(390, buttonY);
 
@@ -1268,7 +1299,7 @@ internal static class NewSessionNameVisuals
                     }
                 }
 
-                result = new NewSessionResult(name, BranchAction.FromPr, null, null, remoteName, prNum, platform, fetchedPrHeadBranch, GitHubUrl: prGhUrl);
+                result = new NewSessionResult(name, BranchAction.FromPr, null, null, remoteName, prNum, platform, fetchedPrHeadBranch, GitHubUrl: prGhUrl, UpdateSourceFirst: false);
             }
             else if (rdoFromIssue.Checked)
             {
@@ -1294,7 +1325,7 @@ internal static class NewSessionNameVisuals
                 }
                 var baseBranch = cmbIssueBaseBranch.SelectedItem?.ToString() ?? "main";
 
-                result = new NewSessionResult(name, BranchAction.FromIssue, branchName, baseBranch, remoteName, null, null, IssueNumber: issueNum, GitHubUrl: issueGitHubUrl);
+                result = new NewSessionResult(name, BranchAction.FromIssue, branchName, baseBranch, remoteName, null, null, IssueNumber: issueNum, GitHubUrl: issueGitHubUrl, UpdateSourceFirst: false);
             }
             else if (rdoNewBranch.Checked)
             {
@@ -1306,7 +1337,7 @@ internal static class NewSessionNameVisuals
                 }
 
                 var baseBranch = cmbBaseBranch.SelectedItem?.ToString() ?? "main";
-                result = new NewSessionResult(name, BranchAction.NewBranch, branchName, baseBranch, null, null, null);
+                result = new NewSessionResult(name, BranchAction.NewBranch, branchName, baseBranch, null, null, null, UpdateSourceFirst: chkUpdateSource.Checked);
             }
             else if (rdoSwitchBranch.Checked)
             {
@@ -1317,11 +1348,11 @@ internal static class NewSessionNameVisuals
                     return;
                 }
 
-                result = new NewSessionResult(name, BranchAction.ExistingBranch, selectedBranch, null, null, null, null);
+                result = new NewSessionResult(name, BranchAction.ExistingBranch, selectedBranch, null, null, null, null, UpdateSourceFirst: chkUpdateSource.Checked);
             }
             else
             {
-                result = new NewSessionResult(name, BranchAction.None, null, null, null, null, null);
+                result = new NewSessionResult(name, BranchAction.None, null, null, null, null, null, UpdateSourceFirst: false);
             }
 
             form.DialogResult = DialogResult.OK;

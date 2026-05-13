@@ -1,5 +1,28 @@
-﻿public sealed class WorkspaceCreationServiceTests
+﻿[CollectionDefinition("Git workspace settings", DisableParallelization = true)]
+public sealed class GitWorkspaceSettingsCollection;
+[Collection("Git workspace settings")]
+public sealed class WorkspaceCreationServiceTests : IDisposable
 {
+    private readonly LauncherSettings _previousSettings;
+    private readonly string _tempDir;
+
+    public WorkspaceCreationServiceTests()
+    {
+        this._previousSettings = Program._settings ?? new LauncherSettings();
+        this._tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        Directory.CreateDirectory(this._tempDir);
+        Program._settings = new LauncherSettings
+        {
+            WorkspacesDir = Path.Combine(this._tempDir, "workspaces")
+        };
+    }
+
+    public void Dispose()
+    {
+        Program._settings = this._previousSettings;
+        try { Directory.Delete(this._tempDir, true); } catch { }
+    }
+
     [Theory]
     [InlineData("my-repo", "feature/login", "my-repo-feature-login")]
     [InlineData("repo", @"feature\branch", "repo-feature-branch")]
@@ -18,6 +41,156 @@
         var result = WorkspaceCreationService.BuildWorkspacePath("my-repo", "feature/login");
 
         Assert.EndsWith("my-repo-feature-login", result);
-        Assert.Contains("Workspaces", result);
+        Assert.Contains("Workspaces", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateSourceBranchAsync_FetchesRemoteTrackingRefAsync()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        var expected = CommitAndPush(sourcePath, "main");
+
+        var (updated, error, effectiveSourceRef) = await WorkspaceCreationService.UpdateSourceBranchAsync(repoPath, "origin/main", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(updated, error);
+        Assert.Null(error);
+        Assert.Equal("origin/main", effectiveSourceRef);
+        Assert.Equal(expected, RunGitOutput(repoPath, "rev-parse origin/main"));
+    }
+
+    [Fact]
+    public async Task UpdateSourceBranchAsync_FastForwardsLocalBranchWithUpstreamAsync()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CreateRemoteBranch(sourcePath, repoPath, "feature");
+        var expected = CommitAndPush(sourcePath, "feature");
+
+        var (updated, error, effectiveSourceRef) = await WorkspaceCreationService.UpdateSourceBranchAsync(repoPath, "feature", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(updated, error);
+        Assert.Null(error);
+        Assert.Equal("feature", effectiveSourceRef);
+        Assert.Equal(expected, RunGitOutput(repoPath, "rev-parse feature"));
+    }
+
+    [Fact]
+    public async Task UpdateSourceBranchAsync_FetchesFallbackRemote_WhenLocalBranchHasNoUpstreamAsync()
+    {
+        var (_, repoPath) = this.CreateRemoteBackedRepo();
+        RunGitCmd(repoPath, "checkout -b local-only");
+        RunGitCmd(repoPath, "checkout main");
+
+        var (updated, error, effectiveSourceRef) = await WorkspaceCreationService.UpdateSourceBranchAsync(repoPath, "local-only", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(updated, error);
+        Assert.Null(error);
+        Assert.Equal("local-only", effectiveSourceRef);
+    }
+
+    [Fact]
+    public async Task UpdateSourceBranchAsync_FallsBackToRemoteRef_WhenFastForwardBlockedAsync()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CreateRemoteBranch(sourcePath, repoPath, "feature");
+        var worktreePath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
+        RunGitCmd(repoPath, $"worktree add -q \"{worktreePath}\" feature");
+        _ = CommitAndPush(sourcePath, "feature");
+
+        var (updated, error, effectiveSourceRef) = await WorkspaceCreationService.UpdateSourceBranchAsync(repoPath, "feature", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(updated, error);
+        Assert.Null(error);
+        Assert.Equal("origin/feature", effectiveSourceRef);
+    }
+
+    private string InitGitRepo()
+    {
+        var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
+        Directory.CreateDirectory(repoPath);
+
+        RunGitCmd(repoPath, "init -b main");
+        RunGitCmd(repoPath, "config user.email test@test.com");
+        RunGitCmd(repoPath, "config user.name Test");
+        File.WriteAllText(Path.Combine(repoPath, "README.md"), "# Test");
+        RunGitCmd(repoPath, "add .");
+        RunGitCmd(repoPath, "commit -m init");
+
+        return repoPath;
+    }
+
+    private (string sourcePath, string repoPath) CreateRemoteBackedRepo()
+    {
+        var sourcePath = this.InitGitRepo();
+        var remotePath = Path.Combine(this._tempDir, "remote-" + Path.GetRandomFileName() + ".git");
+        var repoPath = Path.Combine(this._tempDir, "clone-" + Path.GetRandomFileName());
+
+        RunGitCmd(this._tempDir, $"clone --bare \"{sourcePath}\" \"{remotePath}\"");
+        RunGitCmd(sourcePath, $"remote add origin \"{remotePath}\"");
+        RunGitCmd(sourcePath, "push -u origin main");
+        RunGitCmd(this._tempDir, $"clone \"{remotePath}\" \"{repoPath}\"");
+        RunGitCmd(repoPath, "config user.email test@test.com");
+        RunGitCmd(repoPath, "config user.name Test");
+
+        return (sourcePath, repoPath);
+    }
+
+    private static void CreateRemoteBranch(string sourcePath, string repoPath, string branchName)
+    {
+        RunGitCmd(sourcePath, $"checkout -b {branchName}");
+        File.WriteAllText(Path.Combine(sourcePath, branchName + ".txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(sourcePath, "add .");
+        RunGitCmd(sourcePath, $"commit -m init-{branchName}");
+        RunGitCmd(sourcePath, $"push -u origin {branchName}");
+        RunGitCmd(sourcePath, "checkout main");
+
+        RunGitCmd(repoPath, $"fetch origin {branchName}");
+        RunGitCmd(repoPath, $"checkout -b {branchName} origin/{branchName}");
+        RunGitCmd(repoPath, "checkout main");
+    }
+
+    private static string CommitAndPush(string sourcePath, string branchName)
+    {
+        RunGitCmd(sourcePath, $"checkout {branchName}");
+        File.WriteAllText(Path.Combine(sourcePath, "change-" + Guid.NewGuid().ToString("N") + ".txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(sourcePath, "add .");
+        RunGitCmd(sourcePath, $"commit -m update-{branchName}");
+        RunGitCmd(sourcePath, $"push origin {branchName}");
+        var rev = RunGitOutput(sourcePath, $"rev-parse {branchName}");
+        RunGitCmd(sourcePath, "checkout main");
+        return rev;
+    }
+
+    private static string RunGitOutput(string workDir, string args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
+        var stdout = proc.StandardOutput.ReadToEnd();
+        proc.WaitForExit(10_000);
+        return stdout.Trim();
+    }
+
+    private static void RunGitCmd(string workDir, string args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
+        proc.WaitForExit(10_000);
     }
 }

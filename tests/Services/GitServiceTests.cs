@@ -1,4 +1,5 @@
-﻿public sealed class GitServiceTests : IDisposable
+﻿[Collection("Git workspace settings")]
+public sealed class GitServiceTests : IDisposable
 {
     private readonly string _tempDir;
 
@@ -431,6 +432,110 @@
         Assert.True(GitService.LocalBranchExists(repoPath, "main"));
     }
 
+    [Fact]
+    public void GetUpstreamRemote_ReturnsRemote_WhenUpstreamConfigured()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        _ = sourcePath;
+
+        var result = GitService.GetUpstreamRemote(repoPath, "main");
+
+        Assert.Equal("origin", result);
+    }
+
+    [Fact]
+    public void GetUpstreamRemote_ReturnsNull_WhenNoUpstreamConfigured()
+    {
+        var repoPath = this.InitBareGitRepo();
+
+        var result = GitService.GetUpstreamRemote(repoPath, "main");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task FetchRemoteAsync_ReturnsSuccess_ForLocalBareRemoteAsync()
+    {
+        var (_, repoPath) = this.CreateRemoteBackedRepo();
+
+        var (success, error) = await GitService.FetchRemoteAsync(repoPath, "origin", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.True(success, error);
+        Assert.Equal(string.Empty, error);
+    }
+
+    [Fact]
+    public async Task FetchRemoteAsync_ReturnsFailure_ForUnavailableRemoteAsync()
+    {
+        var repoPath = this.InitBareGitRepo();
+        RunGitCmd(repoPath, "remote add broken https://127.0.0.1:1/repo.git");
+
+        var (success, error) = await GitService.FetchRemoteAsync(repoPath, "broken", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.False(success);
+        Assert.NotEmpty(error);
+    }
+
+    [Fact]
+    public async Task FetchAndFastForwardAsync_ReturnsOk_WhenBranchCanFastForwardAsync()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CreateRemoteBranch(sourcePath, repoPath, "feature");
+        var expected = CommitAndPush(sourcePath, "feature");
+
+        var (result, error) = await GitService.FetchAndFastForwardAsync(repoPath, "origin", "feature", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.Equal(FastForwardResult.Ok, result);
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(expected, RunGitOutput(repoPath, "rev-parse feature"));
+    }
+
+    [Fact]
+    public async Task FetchAndFastForwardAsync_ReturnsBranchCheckedOutElsewhere_WhenBranchIsInWorktreeAsync()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CreateRemoteBranch(sourcePath, repoPath, "feature");
+        var worktreePath = Path.Combine(this._tempDir, "wt-" + Path.GetRandomFileName());
+        RunGitCmd(repoPath, $"worktree add -q \"{worktreePath}\" feature");
+        _ = CommitAndPush(sourcePath, "feature");
+
+        var (result, error) = await GitService.FetchAndFastForwardAsync(repoPath, "origin", "feature", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.Equal(FastForwardResult.BranchCheckedOutElsewhere, result);
+        Assert.Contains("refusing to fetch into branch", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FetchAndFastForwardAsync_ReturnsNonFastForward_WhenBranchDivergedAsync()
+    {
+        var (sourcePath, repoPath) = this.CreateRemoteBackedRepo();
+        CreateRemoteBranch(sourcePath, repoPath, "feature");
+        RunGitCmd(repoPath, "checkout feature");
+        File.WriteAllText(Path.Combine(repoPath, "local.txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(repoPath, "add .");
+        RunGitCmd(repoPath, "commit -m local-change");
+        RunGitCmd(repoPath, "checkout main");
+        _ = CommitAndPush(sourcePath, "feature");
+
+        var (result, error) = await GitService.FetchAndFastForwardAsync(repoPath, "origin", "feature", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.Equal(FastForwardResult.NonFastForward, result);
+        Assert.Contains("non-fast-forward", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FetchAndFastForwardAsync_ReturnsNetworkError_WhenRemoteUnavailableAsync()
+    {
+        var repoPath = this.InitBareGitRepo();
+        RunGitCmd(repoPath, "branch feature");
+        RunGitCmd(repoPath, "remote add broken https://127.0.0.1:1/repo.git");
+
+        var (result, error) = await GitService.FetchAndFastForwardAsync(repoPath, "broken", "feature", TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        Assert.Equal(FastForwardResult.NetworkError, result);
+        Assert.NotEmpty(error);
+    }
+
     private string InitBareGitRepo()
     {
         var repoPath = Path.Combine(this._tempDir, Path.GetRandomFileName());
@@ -455,6 +560,66 @@
         RunGitCmd(repoPath, $"remote add {remoteName} {remoteUrl}");
 
         return repoPath;
+    }
+
+    private (string sourcePath, string repoPath) CreateRemoteBackedRepo()
+    {
+        var sourcePath = this.InitBareGitRepo();
+        var remotePath = Path.Combine(this._tempDir, "remote-" + Path.GetRandomFileName() + ".git");
+        var repoPath = Path.Combine(this._tempDir, "clone-" + Path.GetRandomFileName());
+
+        RunGitCmd(this._tempDir, $"clone --bare \"{sourcePath}\" \"{remotePath}\"");
+        RunGitCmd(sourcePath, $"remote add origin \"{remotePath}\"");
+        RunGitCmd(sourcePath, "push -u origin main");
+        RunGitCmd(this._tempDir, $"clone \"{remotePath}\" \"{repoPath}\"");
+        RunGitCmd(repoPath, "config user.email test@test.com");
+        RunGitCmd(repoPath, "config user.name Test");
+
+        return (sourcePath, repoPath);
+    }
+
+    private static void CreateRemoteBranch(string sourcePath, string repoPath, string branchName)
+    {
+        RunGitCmd(sourcePath, $"checkout -b {branchName}");
+        File.WriteAllText(Path.Combine(sourcePath, branchName + ".txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(sourcePath, "add .");
+        RunGitCmd(sourcePath, $"commit -m init-{branchName}");
+        RunGitCmd(sourcePath, $"push -u origin {branchName}");
+        RunGitCmd(sourcePath, "checkout main");
+
+        RunGitCmd(repoPath, $"fetch origin {branchName}");
+        RunGitCmd(repoPath, $"checkout -b {branchName} origin/{branchName}");
+        RunGitCmd(repoPath, "checkout main");
+    }
+
+    private static string CommitAndPush(string sourcePath, string branchName)
+    {
+        RunGitCmd(sourcePath, $"checkout {branchName}");
+        File.WriteAllText(Path.Combine(sourcePath, "change-" + Guid.NewGuid().ToString("N") + ".txt"), Guid.NewGuid().ToString("N"));
+        RunGitCmd(sourcePath, "add .");
+        RunGitCmd(sourcePath, $"commit -m update-{branchName}");
+        RunGitCmd(sourcePath, $"push origin {branchName}");
+        var rev = RunGitOutput(sourcePath, $"rev-parse {branchName}");
+        RunGitCmd(sourcePath, "checkout main");
+        return rev;
+    }
+
+    private static string RunGitOutput(string workDir, string args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var proc = System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Failed to start git.");
+        var stdout = proc.StandardOutput.ReadToEnd();
+        proc.WaitForExit(10_000);
+        return stdout.Trim();
     }
 
     private static void RunGitCmd(string workDir, string args)

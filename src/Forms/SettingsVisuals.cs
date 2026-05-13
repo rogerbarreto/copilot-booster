@@ -106,6 +106,38 @@ internal static class SettingsVisuals
     }
 
     /// <summary>
+    /// Creates a top-docked settings toggle row with helper text underneath.
+    /// </summary>
+    internal static Panel CreateToggleWithHelper(CheckBox checkBox, string helperText)
+    {
+        var panel = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            Padding = new Padding(4, 4, 0, 4)
+        };
+
+        checkBox.Location = new Point(4, 4);
+        checkBox.AutoSize = true;
+        checkBox.Dock = DockStyle.None;
+        checkBox.Padding = Padding.Empty;
+
+        var helperLabel = new Label
+        {
+            Text = helperText,
+            Location = new Point(24, 30),
+            Size = new Size(620, 34),
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+            ForeColor = Application.IsDarkModeEnabled ? Color.Gray : Color.DimGray,
+            Font = new Font(SystemFonts.DefaultFont.FontFamily, SystemFonts.DefaultFont.Size - 1)
+        };
+
+        panel.Controls.Add(checkBox);
+        panel.Controls.Add(helperLabel);
+        return panel;
+    }
+
+    /// <summary>
     /// Creates a panel with Add, Edit, and Remove buttons for a <see cref="ListBox"/>.
     /// </summary>
     /// <param name="listBox">The list box to manage.</param>

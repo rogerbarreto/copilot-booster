@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **"Update from upstream first" option** — new checkbox in the Create New Worktree and New Copilot Session dialogs (Existing branch and New branch modes only, hidden in PR/Issue modes). When enabled, runs `git fetch` and fast-forwards the source branch before creating the worktree or checking out the new branch. Defaults to enabled, configurable in Settings under Git/GitHub. Falls back to branching from `origin/<branch>` when the local reference is checked out elsewhere or has diverged.
+- **Soft-fail prompt for branch update** — if updating the source branch fails (network error, authentication, etc.), a confirmation dialog offers the choice to proceed with the stale branch state or cancel the operation.
+
 ## [0.22.0] - 2026-05-11
 
 ### Added
