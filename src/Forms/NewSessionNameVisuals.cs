@@ -749,7 +749,7 @@ internal static class NewSessionNameVisuals
             bool isPrMode = rdoFromPr.Checked;
             bool isIssueMode = rdoFromIssue.Checked;
             bool isSameBranch = rdoSameBranch.Checked;
-            bool showUpdateSource = isSwitchBranch || isNewBranch;
+            bool showUpdateSource = isSwitchBranch || isNewBranch || isSameBranch;
 
             // Current branch label — only visible in Same Branch mode
             lblCurrentBranch.Visible = isSameBranch;
@@ -932,12 +932,17 @@ internal static class NewSessionNameVisuals
             }
             else
             {
-                // Same branch — compact
-                btnOk.Location = new Point(300, cy);
-                btnCancel.Location = new Point(390, cy);
+                // Same branch
+                chkUpdateSource.Location = new Point(14, cy);
+                lblUpdateSourceHelper.Location = new Point(14, cy + 22);
+                cy += 46;
+
+                int buttonY = cy + 8;
+                btnOk.Location = new Point(300, buttonY);
+                btnCancel.Location = new Point(390, buttonY);
 
                 btnOk.Enabled = !string.IsNullOrWhiteSpace(txtSessionName.Text);
-                form.Height = cy + 70;
+                form.Height = buttonY + 70;
             }
         }
 
@@ -1352,7 +1357,7 @@ internal static class NewSessionNameVisuals
             }
             else
             {
-                result = new NewSessionResult(name, BranchAction.None, null, null, null, null, null, UpdateSourceFirst: false);
+                result = new NewSessionResult(name, BranchAction.None, null, null, null, null, null, UpdateSourceFirst: chkUpdateSource.Checked);
             }
 
             form.DialogResult = DialogResult.OK;

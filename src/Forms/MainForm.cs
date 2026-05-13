@@ -270,6 +270,13 @@ internal partial class MainForm : Form
         }
     }
 
+    private static async Task<(bool updateOk, string? updateErr)> UpdateAndDropEffectiveRefAsync(string gitRoot, string sourceRef)
+    {
+        var (updateOk, updateErr, _) = await WorkspaceCreationService.UpdateSourceBranchAsync(
+            gitRoot, sourceRef, CancellationToken.None).ConfigureAwait(true);
+        return (updateOk, updateErr);
+    }
+
     private void SetupTrayIcon()
     {
         var trayMenu = new ContextMenuStrip();
@@ -2037,32 +2044,42 @@ internal partial class MainForm : Form
                 return;
             }
 
+            // Update from upstream before creating the session
+            if (promptResult.UpdateSourceFirst)
+            {
+                var gitRoot = SessionService.FindGitRoot(selectedCwd);
+                if (gitRoot != null)
+                {
+                    (bool updateOk, string? updateErr) = promptResult.Action switch
+                    {
+                        BranchAction.None =>
+                            await WorkspaceCreationService.PullCurrentBranchAsync(gitRoot, CancellationToken.None).ConfigureAwait(true),
+                        BranchAction.ExistingBranch when !string.IsNullOrEmpty(promptResult.BranchName) =>
+                            await UpdateAndDropEffectiveRefAsync(gitRoot, promptResult.BranchName).ConfigureAwait(true),
+                        BranchAction.NewBranch when !string.IsNullOrEmpty(promptResult.BaseBranch) =>
+                            await UpdateAndDropEffectiveRefAsync(gitRoot, promptResult.BaseBranch).ConfigureAwait(true),
+                        _ => (true, null)
+                    };
+
+                    if (!updateOk)
+                    {
+                        var proceed = MessageBox.Show(this,
+                            $"Couldn't update from upstream:\n{updateErr}\n\nCreate session anyway with current state?",
+                            "Update Failed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                        if (proceed == DialogResult.No)
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
+
             // Handle branch/PR/issue checkout before creating the session
             if (promptResult.Action != BranchAction.None)
             {
                 var gitRoot = SessionService.FindGitRoot(selectedCwd);
                 if (gitRoot != null)
                 {
-                    if (promptResult.UpdateSourceFirst &&
-                        (promptResult.Action == BranchAction.ExistingBranch || promptResult.Action == BranchAction.NewBranch))
-                    {
-                        var sourceRefForUpdate = promptResult.Action == BranchAction.ExistingBranch
-                            ? promptResult.BranchName!
-                            : promptResult.BaseBranch!;
-                        var (updateOk, updateErr, _) = await WorkspaceCreationService.UpdateSourceBranchAsync(
-                            selectedCwd, sourceRefForUpdate, CancellationToken.None).ConfigureAwait(true);
-                        if (!updateOk)
-                        {
-                            var proceed = MessageBox.Show(this,
-                                $"Couldn't update from upstream:\n{updateErr}\n\nCreate session anyway with current state?",
-                                "Update Failed", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                            if (proceed == DialogResult.No)
-                            {
-                                return;
-                            }
-                        }
-                    }
-
                     (bool success, string error) checkoutResult = promptResult.Action switch
                     {
                         BranchAction.ExistingBranch when !string.IsNullOrEmpty(promptResult.BranchName) =>
