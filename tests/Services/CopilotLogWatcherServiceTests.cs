@@ -119,8 +119,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
 
         var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
-        // No cwd in JSON or debug lines → falls back to UserProfile
-        Assert.Equal(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cwd);
+        Assert.Equal(string.Empty, cwd);
     }
 
     [Fact]
@@ -147,8 +146,10 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         Assert.Equal(@"C:\FromJson", cwd);
     }
 
-    [Fact]
-    public void TryParseLogContent_UsesFallbackCwd_WhenNoCwdInLogOrJson()
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData(@"E:\MyFallback", @"E:\MyFallback")]
+    public void TryParseLogContent_NoSourcesAvailable_ReturnsEmptyOrFallback(string? fallbackCwd, string expectedCwd)
     {
         var logContent = """
             2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
@@ -159,31 +160,11 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
             """;
         var lines = logContent.Split('\n');
 
-        var sessions = CopilotLogWatcherService.TryParseLogContent(lines, @"E:\MyFallback");
+        var sessions = CopilotLogWatcherService.TryParseLogContent(lines, fallbackCwd);
 
         var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
-        Assert.Equal(@"E:\MyFallback", cwd);
-    }
-
-    [Fact]
-    public void TryParseLogContent_UsesUserProfileFallback_WhenNoCwdAnywhere()
-    {
-        // No cwd in JSON, no debug line, no explicit fallback → UserProfile
-        var logContent = """
-            2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
-            {
-              "kind": "cli_ready",
-              "session_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-            }
-            """;
-        var lines = logContent.Split('\n');
-
-        var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
-
-        var (sessionId, cwd) = sessions.Single();
-        Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
-        Assert.Equal(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cwd);
+        Assert.Equal(expectedCwd, cwd);
     }
 
     [Fact]
@@ -239,7 +220,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
 
         var (sessionId, cwd) = sessions.Single();
         Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Equal(string.Empty, cwd);
     }
 
     [Fact]
@@ -440,7 +421,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         Assert.Equal(2, sessions.Count);
         Assert.Equal("11111111-1111-1111-1111-111111111111", sessions[0].sessionId);
         Assert.Equal("22222222-2222-2222-2222-222222222222", sessions[1].sessionId);
-        Assert.False(string.IsNullOrEmpty(sessions[0].cwd));
+        Assert.Equal(string.Empty, sessions[0].cwd);
     }
 
     [Fact]

@@ -38,27 +38,21 @@ internal partial class MainForm
                 return;
             }
 
-            var edited = SessionEditorVisuals.ShowEditor(session.Id, session.Alias, session.Summary, session.Cwd);
-            if (edited != null)
+            var editedAlias = SessionEditorVisuals.ShowEditor(session.Id, session.Alias, session.Summary, session.Cwd);
+            if (editedAlias != null)
             {
-                SessionAliasService.SetAlias(Program.SessionAliasFile, sid, edited.Value.Alias);
-
-                var sessionDir = Path.Combine(Program.SessionStateDir, sid);
-                SessionService.UpdateSessionCwd(sessionDir, edited.Value.Cwd);
+                SessionAliasService.SetAlias(Program.SessionAliasFile, sid, editedAlias);
 
                 // Update the cached session and grid row in-place to avoid a full list refresh
                 // which resets the tab view. The natural background refresh will pick up the changes.
-                session.Alias = edited.Value.Alias;
-                session.Cwd = edited.Value.Cwd;
-                session.Folder = Path.GetFileName(edited.Value.Cwd.TrimEnd('\\')) ?? edited.Value.Cwd;
+                session.Alias = editedAlias;
 
-                var gridName = !string.IsNullOrEmpty(edited.Value.Alias) ? edited.Value.Alias : session.Summary;
+                var gridName = !string.IsNullOrEmpty(editedAlias) ? editedAlias : session.Summary;
                 foreach (DataGridViewRow row in this._sessionsVisuals.SessionGrid.Rows)
                 {
                     if ((row.Tag as string) == sid)
                     {
                         row.Cells["Session"].Value = session.IsPinned ? $"\U0001F4CC {gridName}" : gridName;
-                        row.Cells["CWD"].Value = session.Folder;
                         break;
                     }
                 }

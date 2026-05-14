@@ -12,27 +12,27 @@ namespace CopilotBooster.Forms;
 internal static class SessionEditorVisuals
 {
     /// <summary>
-    /// Displays a modal dialog for editing a session's alias and CWD.
-    /// The session name (summary) is displayed read-only since it's managed by Copilot CLI.
+    /// Displays a modal dialog for viewing session details and editing the session alias.
+    /// Session name and CWD are read-only (managed by workspace.yaml).
     /// </summary>
     /// <param name="sessionId">The session ID to display.</param>
     /// <param name="currentAlias">The current session alias.</param>
     /// <param name="currentSummary">The current session summary/name.</param>
     /// <param name="currentCwd">The current working directory.</param>
-    /// <returns>A tuple of (Alias, Cwd) on save, or <c>null</c> if the user cancels.</returns>
-    internal static (string Alias, string Cwd)? ShowEditor(string sessionId, string currentAlias, string currentSummary, string currentCwd)
+    /// <returns>The updated alias on save, or <c>null</c> if the user cancels.</returns>
+    internal static string? ShowEditor(string sessionId, string currentAlias, string currentSummary, string currentCwd)
     {
-        (string Alias, string Cwd)? result = null;
+        string? result = null;
 
         var form = new Form
         {
-            Text = "Edit Session",
+            Text = "Session Details",
             Font = new Font(SystemFonts.DefaultFont.FontFamily, 10f),
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false,
             Width = 500,
-            Height = 330,
+            Height = 290,
             TopMost = Program._settings.AlwaysOnTop
         };
         SettingsVisuals.AlignWithParent(form);
@@ -96,66 +96,89 @@ internal static class SessionEditorVisuals
         form.Controls.Add(SettingsVisuals.WrapWithBorder(txtAlias));
         y += 34;
 
-        // Session Name (read-only — managed by Copilot CLI)
+        // Session Name (read-only — managed by workspace.yaml)
+        var lblNameHeader = new Label
+        {
+            Text = "Session Name (managed by workspace.yaml)",
+            AutoSize = true,
+            Location = new Point(14, y)
+        };
+        form.Controls.Add(lblNameHeader);
+        y += 20;
+
+        var nameText = $"{currentSummary}";
         var lblName = new Label
         {
-            Text = "Session Name (managed by Copilot CLI)",
+            Text = nameText,
             AutoSize = true,
-            Location = new Point(14, y)
+            ForeColor = Color.Gray,
+            Location = new Point(14, y + 2)
         };
         form.Controls.Add(lblName);
-        y += 20;
 
-        var txtName = new TextBox
+        var nameTextWidth = TextRenderer.MeasureText(nameText, form.Font).Width;
+        var btnCopyName = new Button
         {
-            Text = currentSummary,
-            Location = new Point(14, y),
-            Width = 450,
-            ReadOnly = true,
-            ForeColor = Color.Gray
+            Text = "📋",
+            Width = 30,
+            Height = 22,
+            FlatStyle = FlatStyle.Flat,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left,
+            Location = new Point(14 + nameTextWidth + 2, y - 1)
         };
-        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtName));
-        y += 34;
-
-        // CWD
-        var lblCwd = new Label
+        btnCopyName.FlatAppearance.BorderSize = 0;
+        btnCopyName.Click += (s, e) =>
         {
-            Text = "Working Directory",
+            Clipboard.SetText(currentSummary);
+            btnCopyName.Text = "✓";
+            var timer = new Timer { Interval = 1500 };
+            timer.Tick += (_, _) => { btnCopyName.Text = "📋"; timer.Stop(); timer.Dispose(); };
+            timer.Start();
+        };
+        form.Controls.Add(btnCopyName);
+        y += 28;
+
+        // CWD (read-only — managed by workspace.yaml)
+        var lblCwdHeader = new Label
+        {
+            Text = "Working Directory (managed by workspace.yaml)",
             AutoSize = true,
             Location = new Point(14, y)
         };
-        form.Controls.Add(lblCwd);
+        form.Controls.Add(lblCwdHeader);
         y += 20;
 
-        var txtCwd = new TextBox
+        var cwdText = $"{currentCwd}";
+        var lblCwd = new Label
         {
-            Text = currentCwd,
-            Location = new Point(14, y),
-            Width = 370
+            Text = cwdText,
+            AutoSize = true,
+            ForeColor = Color.Gray,
+            Location = new Point(14, y + 2),
+            MaximumSize = new Size(420, 0)
         };
-        form.Controls.Add(SettingsVisuals.WrapWithBorder(txtCwd));
+        form.Controls.Add(lblCwd);
 
-        var btnBrowse = new Button
+        var cwdTextWidth = TextRenderer.MeasureText(cwdText, form.Font, new Size(420, 0), TextFormatFlags.WordBreak).Width;
+        var btnCopyCwd = new Button
         {
-            Text = "Browse...",
-            Width = 75,
-            Location = new Point(389, y - 1)
+            Text = "📋",
+            Width = 30,
+            Height = 22,
+            FlatStyle = FlatStyle.Flat,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left,
+            Location = new Point(14 + cwdTextWidth + 2, y - 1)
         };
-        btnBrowse.Click += (s, e) =>
+        btnCopyCwd.FlatAppearance.BorderSize = 0;
+        btnCopyCwd.Click += (s, e) =>
         {
-            using var dlg = new FolderBrowserDialog();
-            var initial = txtCwd.Text.Trim();
-            if (Directory.Exists(initial))
-            {
-                dlg.SelectedPath = initial;
-            }
-
-            if (dlg.ShowDialog(form) == DialogResult.OK)
-            {
-                txtCwd.Text = dlg.SelectedPath;
-            }
+            Clipboard.SetText(currentCwd);
+            btnCopyCwd.Text = "✓";
+            var timer = new Timer { Interval = 1500 };
+            timer.Tick += (_, _) => { btnCopyCwd.Text = "📋"; timer.Stop(); timer.Dispose(); };
+            timer.Start();
         };
-        form.Controls.Add(btnBrowse);
+        form.Controls.Add(btnCopyCwd);
         y += 40;
 
         // Buttons
@@ -177,7 +200,7 @@ internal static class SessionEditorVisuals
 
         btnSave.Click += (s, e) =>
         {
-            result = (txtAlias.Text.Trim(), txtCwd.Text.Trim());
+            result = txtAlias.Text.Trim();
             form.DialogResult = DialogResult.OK;
             form.Close();
         };

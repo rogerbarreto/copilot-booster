@@ -161,3 +161,19 @@ Before tagging a release, consult `.squad/skills/release-notes-completeness/SKIL
 * `LauncherSettings.UpdateSourceBranchBeforeCreate` is persisted as `updateSourceBranchBeforeCreate` and defaults to `true`.
 * Settings UI workspace and branch behavior lives in `SettingsForm` under the `Git && GitHub` category. Reusable helper rows live in `SettingsVisuals`, including `CreateToggleWithHelper` for a checkbox plus small grey helper text.
 * Settings persistence is Save button driven. Local controls write back into `Program._settings`, then `Program._settings.Save()` writes `launcher-settings.json`.
+
+---
+
+## Team update 2026-05-14 — CWD TDD Recovery Complete
+
+**TDD Loop Directive (Roger Barreto):** All implementation work follows RED-first cycle: Tank writes test, Oracle reviews test, Trinity/Morpheus implements GREEN, Oracle reviews impl, then next item. Tests reviewed BEFORE implementation begins. Implementation reviewed BEFORE next work item. This cadence is now locked for the entire CWD feature.
+
+**WI-1 (Win32ProcessCwd helper, Trinity) — CLOSED:** 6 tests backfilled (3 unit + 3 integration), all RED-sensitive. Oracle reviewed and passed. Implementation uses SafeProcessHandle for proper lifecycle, caches on (pid, processStartTime) to prevent PID recycling bugs. One advisory: self-process CWD reading limitation documented (PEB probe may fail for current process). Production ready.
+
+**WI-4 (Session editor read-only, Morpheus) — CLOSED:** 3 contract tests backfilled, verify return type changed from tuple to string?. Oracle reviewed and passed. Alias field stays editable (user-controlled label). CWD and Session Name read-only with copy-to-clipboard icons. Return type changed to string? (Alias only). Form title "Session Details". Visual behavior verified manually. Production ready.
+
+**Pre-existing failure resolved:** LoadNamedSessionsTests.LoadNamedSessions_QuotedEmptySummary_TreatsAsEmpty now passes (resolved separately). Full suite: 930 unit tests, 0 failures, 2 skips (expected LocalOnly).
+
+**WI-2 and WI-3 unblocked:** Both ready for Tank RED-first cycle under same TDD discipline.
+
+**Standing all-green rule (decisions.md):** Reinforced. No work may claim completion while any test fails, even if pre-existing. Whoever lands code meeting a red suite must fix or escalate. This is binding release policy.

@@ -402,3 +402,19 @@ This pattern applies to any service with multi-source resolution: DNS, config fi
 
 - **2026-05-10 — RequiresInteractiveDesktop integration trait:** Tests that spawn real terminal/IDE windows or depend on global WinEvent hooks (`EVENT_OBJECT_NAMECHANGE`, create/destroy/foreground) are marked `[Trait("Category", "RequiresInteractiveDesktop")]`. Rationale: GitHub-hosted `windows-latest` runners cannot reliably deliver WinEvent hook notifications for externally launched GUI processes (`cmd.exe`, `mspaint.exe`, IdeSimVS, etc.), even though those tests remain valuable locally. CI must filter both skip categories with: `dotnet run --project tests/CopilotBooster.IntegrationTests.csproj -c Release -- -notrait "Category=LocalOnly" -notrait "Category=RequiresInteractiveDesktop"`. Prefer class-level traits when every test in the class has the same interactive desktop dependency; use method-level traits for mixed classes or classes with existing LocalOnly tests that should remain untouched.
 - **2026-05-11 — Flaky test: AiDetectSpinnerCancelIntegrationTests.Spinner_StartsWhenDetectionRunsAndStopsWhenDetectionEndsAsync:** Test failed once during v0.22.0 release (Neo's first turn, multi-turn halt), then passed in isolation and on full-suite re-run (Coordinator verified green). Likely race condition or timing assumption. This is a STABILIZATION CANDIDATE for a future cycle — investigate root cause (spinner lifecycle timing, event ordering, or WinForms control state assumptions). Pattern mirrors historical `AiDetectTreeKillIntegrationTests` flake (fixed via determinism upgrade). High-priority for Tank to debug if flake reoccurs.
+
+---
+
+## Team update 2026-05-14 — CWD TDD Recovery Complete
+
+**TDD Loop Directive (Roger Barreto):** All implementation work follows RED-first cycle: Tank writes test, Oracle reviews test, Trinity/Morpheus implements GREEN, Oracle reviews impl, then next item. Tests reviewed BEFORE implementation begins. Implementation reviewed BEFORE next work item. This cadence is now locked for the entire CWD feature.
+
+**WI-1 (Win32ProcessCwd helper, Trinity) — CLOSED:** 6 tests backfilled (3 unit + 3 integration), all RED-sensitive. Oracle reviewed and passed. Implementation uses SafeProcessHandle for proper lifecycle, caches on (pid, processStartTime) to prevent PID recycling bugs. One advisory: self-process CWD reading limitation documented (PEB probe may fail for current process). Production ready.
+
+**WI-4 (Session editor read-only, Morpheus) — CLOSED:** 3 contract tests backfilled, verify return type changed from tuple to string?. Oracle reviewed and passed. Alias field stays editable (user-controlled label). CWD and Session Name read-only with copy-to-clipboard icons. Return type changed to string? (Alias only). Form title "Session Details". Visual behavior verified manually. Production ready.
+
+**Pre-existing failure resolved:** LoadNamedSessionsTests.LoadNamedSessions_QuotedEmptySummary_TreatsAsEmpty now passes (resolved separately). Full suite: 930 unit tests, 0 failures, 2 skips (expected LocalOnly).
+
+**WI-2 and WI-3 unblocked:** Both ready for Tank RED-first cycle under same TDD discipline.
+
+**Standing all-green rule (decisions.md):** Reinforced. No work may claim completion while any test fails, even if pre-existing. Whoever lands code meeting a red suite must fix or escalate. This is binding release policy.

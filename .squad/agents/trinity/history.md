@@ -1,4 +1,4 @@
-# Trinity — History
+﻿# Trinity — History
 
 ## Core Context
 
@@ -252,3 +252,19 @@ Result: Warp-hosted Copilot CLI sessions now correctly resolve to warp.exe (1322
 
 **2026-05-10: Issue #15 Phase 2 — GitHubLinkService.GetItemUrl added:** Added `internal static string GetItemUrl(string owner, string repo, GitHubTrackedItem item)` to `GitHubLinkService.cs`. Dispatches to `GetPrUrl` or `GetIssueUrl` based on `item.IsPr` (the canonical discriminator on `GitHubTrackedItem`). Added `using CopilotBooster.Models;` to the file. Method placed between `GetIssueUrl` and `GetRunUrl` per member-ordering (URL builders, ascending specificity). Pre-existing build environment failure (MSB3492 cache lock) confirmed unrelated to this change. Format check clean (IDE0001: `<see cref>` simplified to unqualified name after adding the using).
 
+
+---
+
+## Team update 2026-05-14 — CWD TDD Recovery Complete
+
+**TDD Loop Directive (Roger Barreto):** All implementation work follows RED-first cycle: Tank writes test, Oracle reviews test, Trinity/Morpheus implements GREEN, Oracle reviews impl, then next item. Tests reviewed BEFORE implementation begins. Implementation reviewed BEFORE next work item. This cadence is now locked for the entire CWD feature.
+
+**WI-1 (Win32ProcessCwd helper, Trinity) — CLOSED:** 6 tests backfilled (3 unit + 3 integration), all RED-sensitive. Oracle reviewed and passed. Implementation uses SafeProcessHandle for proper lifecycle, caches on (pid, processStartTime) to prevent PID recycling bugs. One advisory: self-process CWD reading limitation documented (PEB probe may fail for current process). Production ready.
+
+**WI-4 (Session editor read-only, Morpheus) — CLOSED:** 3 contract tests backfilled, verify return type changed from tuple to string?. Oracle reviewed and passed. Alias field stays editable (user-controlled label). CWD and Session Name read-only with copy-to-clipboard icons. Return type changed to string? (Alias only). Form title "Session Details". Visual behavior verified manually. Production ready.
+
+**Pre-existing failure resolved:** LoadNamedSessionsTests.LoadNamedSessions_QuotedEmptySummary_TreatsAsEmpty now passes (resolved separately). Full suite: 930 unit tests, 0 failures, 2 skips (expected LocalOnly).
+
+**WI-2 and WI-3 unblocked:** Both ready for Tank RED-first cycle under same TDD discipline.
+
+**Standing all-green rule (decisions.md):** Reinforced. No work may claim completion while any test fails, even if pre-existing. Whoever lands code meeting a red suite must fix or escalate. This is binding release policy.
