@@ -41,3 +41,4 @@
 
 - **Team update 2026-05-14 — CWD feature complete:** All 7 WI closed. Trinity completed WI-1 (Win32ProcessCwd), WI-2 (CWD fallback + seam), WI-3 (editor removal, absorbed). Morpheus completed WI-4 (SessionEditorVisuals read-only). Tank completed WI-5/6/7 (15 tests: 11 WI-2 + 4 WI-3 regression guards). Oracle reviewed all work at TDD gates (RED approval, GREEN approval). Full suite: 939 unit, 155 integration, all green. Build clean. Decisions merged, inbox cleared. Feature closed.
 
+- **Team update 2026-05-16 — Live CWD from events.jsonl closed.** Feature WI-LiveCwd-1 complete: Tank wrote 7 RED tests, Oracle reviewed and approved seams, Trinity implemented parser + event + UI wiring. Read-only directive enforced (production reads only, tests isolated). Backward compat preserved (parameterless ctor chains to string overload). All tests green (946 unit, 155 integration). Feature closed, ready for commit.

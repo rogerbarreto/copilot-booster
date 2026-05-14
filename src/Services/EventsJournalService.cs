@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -23,6 +24,8 @@ internal class EventsJournalService : IDisposable
     private static readonly TimeSpan s_stalenessThreshold = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan s_fallbackPollInterval = TimeSpan.FromSeconds(30);
 
+    private readonly string _sessionsDir;
+    private readonly ConcurrentDictionary<string, string> _latestCwdBySessionId = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CachedState> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _cacheLock = new();
     private FileSystemWatcher? _watcher;
@@ -43,6 +46,12 @@ internal class EventsJournalService : IDisposable
     internal event Action<string>? BoosterResolvedNameUpdated;
 
     /// <summary>
+    /// Fired on the FileSystemWatcher thread when a session's latest cwd changes.
+    /// Subscribers must marshal to the UI thread.
+    /// </summary>
+    internal event Action<string, string>? LatestCwdChanged;
+
+    /// <summary>
     /// When true, StatusChanged events are suppressed (during startup priming).
     /// </summary>
     internal bool SuppressEvents { get; set; } = true;
@@ -58,20 +67,30 @@ internal class EventsJournalService : IDisposable
 
     private record CachedState(DateTime LastModifiedUtc, SessionStatus Status);
 
+    internal EventsJournalService()
+        : this(s_copilotSessionsDir)
+    {
+    }
+
+    internal EventsJournalService(string sessionsDir)
+    {
+        this._sessionsDir = sessionsDir;
+    }
+
     /// <summary>
     /// Starts the FileSystemWatcher. On each change, reads the last event
     /// and raises <see cref="StatusChanged"/> if the status actually changed.
     /// </summary>
     internal void StartWatching()
     {
-        if (!Directory.Exists(s_copilotSessionsDir))
+        if (!Directory.Exists(this._sessionsDir))
         {
             return;
         }
 
         try
         {
-            this._watcher = new FileSystemWatcher(s_copilotSessionsDir, "events.jsonl")
+            this._watcher = new FileSystemWatcher(this._sessionsDir, "events.jsonl")
             {
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
@@ -107,7 +126,7 @@ internal class EventsJournalService : IDisposable
             previousStatus = this._cache.TryGetValue(sessionId, out var prev) ? prev.Status : SessionStatus.Unknown;
         }
 
-        var newStatus = this.ReadAndCacheStatus(sessionId);
+        var newStatus = this.ReadAndCacheStatus(sessionId, raiseCwdChanged: !this.SuppressEvents);
 
         // Skip if unknown, unchanged, or suppressed
         if (newStatus == SessionStatus.Unknown || this.SuppressEvents)
@@ -216,9 +235,9 @@ internal class EventsJournalService : IDisposable
         }
     }
 
-    private SessionStatus ReadAndCacheStatus(string sessionId)
+    private SessionStatus ReadAndCacheStatus(string sessionId, bool raiseCwdChanged = false)
     {
-        var eventsPath = Path.Combine(s_copilotSessionsDir, sessionId, "events.jsonl");
+        var eventsPath = Path.Combine(this._sessionsDir, sessionId, "events.jsonl");
         if (!File.Exists(eventsPath))
         {
             return SessionStatus.Unknown;
@@ -227,6 +246,7 @@ internal class EventsJournalService : IDisposable
         try
         {
             var lastWrite = File.GetLastWriteTimeUtc(eventsPath);
+            this.ReadAndCacheLatestCwd(sessionId, eventsPath, raiseCwdChanged);
             var status = DetermineStatusFromFile(eventsPath, lastWrite);
 
             // Only cache definitive statuses — Unknown means the last event
@@ -246,6 +266,112 @@ internal class EventsJournalService : IDisposable
             Program.Logger.LogDebug("Failed to read events for {SessionId}: {Error}", sessionId, ex.Message);
             return SessionStatus.Unknown;
         }
+    }
+
+    internal static string? ExtractLatestCwd(TextReader reader)
+    {
+        string? sessionStartCwd = null;
+        string? latestHookCwd = null;
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("type", out var typeProp))
+                {
+                    continue;
+                }
+
+                var eventType = typeProp.GetString();
+                if (string.Equals(eventType, "session.start", StringComparison.Ordinal))
+                {
+                    var cwd = TryGetSessionStartCwd(root);
+                    if (!string.IsNullOrWhiteSpace(cwd))
+                    {
+                        sessionStartCwd = cwd;
+                    }
+                }
+                else if (string.Equals(eventType, "hook.start", StringComparison.Ordinal))
+                {
+                    var cwd = TryGetHookStartCwd(root);
+                    if (!string.IsNullOrWhiteSpace(cwd))
+                    {
+                        latestHookCwd = cwd;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return latestHookCwd ?? sessionStartCwd;
+    }
+
+    private void ReadAndCacheLatestCwd(string sessionId, string eventsPath, bool raiseCwdChanged)
+    {
+        if (!File.Exists(eventsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = new FileStream(eventsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            var latestCwd = ExtractLatestCwd(reader);
+            if (string.IsNullOrWhiteSpace(latestCwd))
+            {
+                return;
+            }
+
+            if (this._latestCwdBySessionId.TryGetValue(sessionId, out var cachedCwd)
+                && string.Equals(cachedCwd, latestCwd, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            this._latestCwdBySessionId[sessionId] = latestCwd;
+            if (raiseCwdChanged)
+            {
+                this.LatestCwdChanged?.Invoke(sessionId, latestCwd);
+            }
+        }
+        catch (Exception ex)
+        {
+            Program.Logger.LogDebug("Failed to read latest cwd for {SessionId}: {Error}", sessionId, ex.Message);
+        }
+    }
+
+    private static string? TryGetSessionStartCwd(JsonElement root)
+    {
+        if (root.TryGetProperty("data", out var data)
+            && data.TryGetProperty("context", out var context)
+            && context.TryGetProperty("cwd", out var cwd))
+        {
+            return cwd.GetString();
+        }
+
+        return null;
+    }
+
+    private static string? TryGetHookStartCwd(JsonElement root)
+    {
+        if (root.TryGetProperty("data", out var data)
+            && data.TryGetProperty("input", out var input)
+            && input.TryGetProperty("cwd", out var cwd))
+        {
+            return cwd.GetString();
+        }
+
+        return null;
     }
 
     /// <summary>

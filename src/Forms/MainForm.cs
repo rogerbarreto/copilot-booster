@@ -148,6 +148,7 @@ internal partial class MainForm : Form
             copilotProbe: this.CopilotProbe);
         this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
+        this._activeTracker.EventsJournal.LatestCwdChanged += this.OnLatestCwdChanged;
         this._activeTracker.EventsJournal.StartWatching();
 
         this._workspaceWatcher = new WorkspaceYamlWatcherService();
@@ -1772,6 +1773,27 @@ internal partial class MainForm : Form
     private Dictionary<string, string> BuildSessionSummaryMap()
     {
         return ActiveStatusTracker.BuildSessionSummaryMap(this._cachedSessions);
+    }
+
+    private void OnLatestCwdChanged(string sessionId, string cwd)
+    {
+        if (!this.IsHandleCreated)
+        {
+            return;
+        }
+
+        this.BeginInvoke(() =>
+        {
+            var session = this._cachedSessions.FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+            if (session == null)
+            {
+                return;
+            }
+
+            session.Cwd = cwd;
+            session.Folder = Path.GetFileName(cwd.TrimEnd('\\'));
+            this.RequestRefresh(sessionId: sessionId, dataChanged: true);
+        });
     }
 
     /// <summary>

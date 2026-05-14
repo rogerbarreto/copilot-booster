@@ -1,0 +1,28 @@
+﻿feat(events-journal): live CWD from events.jsonl, watcher reuse, read-only
+
+Add WI-LiveCwd-1 feature: extract and track live session CWD from Copilot CLI
+events.jsonl without mutating it. Reuses existing EventsJournalService watcher
+instead of adding new FileSystemWatcher.
+
+Changes:
+  - EventsJournalService.ExtractLatestCwd: pure parser scans events.jsonl,
+    extracts hook.start.data.input.cwd, falls back to session.start.data.context.cwd
+  - EventsJournalService.LatestCwdChanged: internal event fires on cwd delta
+  - EventsJournalService(string sessionsDir): testable constructor (parameterless
+    overload preserved for ActiveStatusTracker backward compat)
+  - MainForm.OnLatestCwdChanged: marshals event to UI thread, updates cached
+    session.Cwd and Folder, calls RequestRefresh for grid refresh
+
+Read-only directive enforced: production reads only (FileShare.ReadWrite),
+tests use isolated temp dirs under AppContext.BaseDirectory.
+
+Tests: 7 new RED tests turned GREEN (ExtractLatestCwd parser, malformed input,
+truncated final line, watcher event notification). Unit suite 946 (0 failed),
+integration suite 155 (0 failed). Build clean, format clean.
+
+Test deviation accepted: reflection helper uses GetAddMethod(nonPublic:true) to
+subscribe to internal event; standard .NET pattern, isolated to test code.
+
+Skill documented: .squad/skills/append-only-jsonl-field-extraction.md
+
+Feature WI-LiveCwd-1 closed.
