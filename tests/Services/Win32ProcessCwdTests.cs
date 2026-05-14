@@ -1,6 +1,4 @@
-using System.Diagnostics;
-
-namespace CopilotBooster.Tests.Services;
+﻿namespace CopilotBooster.Tests.Services;
 
 public sealed class Win32ProcessCwdTests
 {

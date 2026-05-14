@@ -1,4 +1,4 @@
-namespace CopilotBooster.Tests.Forms;
+﻿namespace CopilotBooster.Tests.Forms;
 
 /// <summary>
 /// Neo Q3 accepted the direct WinForms handler test gap, so these source contract tests pin

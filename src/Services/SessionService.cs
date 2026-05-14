@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -214,7 +215,7 @@ internal class SessionService
     /// Cache of Git repository detection results keyed by CWD path.
     /// Once discovered, a directory's git status won't change during the app lifetime.
     /// </summary>
-    private static readonly Dictionary<string, bool> s_gitRepoCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, bool> s_gitRepoCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Migrates sessions with workspace-deleted.yaml marker files to the cache-based soft-delete approach.

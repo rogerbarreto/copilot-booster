@@ -1,4 +1,4 @@
-namespace CopilotBooster.Tests.Forms;
+﻿namespace CopilotBooster.Tests.Forms;
 
 /// <summary>
 /// Tests for SessionEditorVisuals behavioral contract after WI-4 (read-only CWD/Name conversion).

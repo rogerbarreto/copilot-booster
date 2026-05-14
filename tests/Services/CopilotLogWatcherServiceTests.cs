@@ -261,7 +261,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         var (sessionId, cwd) = sessions.Single();
 
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Equal(string.Empty, cwd);
     }
 
     // ── Bug D: Multi-session /resume support ──────────────────────────
@@ -380,6 +380,104 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
     }
 
     [Fact]
+    public void TryProcessLogFile_JsonCwdPresent_UsesJsonCwd()
+    {
+        const string sessionId = "11111111-2222-3333-4444-555555555555";
+        var logContent = """
+            2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
+            {
+              "kind": "cli_ready",
+              "session_id": "11111111-2222-3333-4444-555555555555",
+              "context": {
+                "cwd": "C:\\FromJson"
+              }
+            }
+            2026-05-09T10:59:34.128Z [DEBUG] [remoteHosts] Starting remote host detection for cwd=D:\FromDebugLine, featureFlagEnabled=true
+            """;
+
+        var cwd = this.ProcessLogFileAndReadCwd(sessionId, logContent, Environment.ProcessId, @"D:\DefaultShouldNotWin");
+
+        Assert.Equal(@"C:\FromJson", cwd);
+    }
+
+    [Fact]
+    public void TryProcessLogFile_JsonMissingDebugLinePresent_UsesDebugLineCwd()
+    {
+        const string sessionId = "22222222-3333-4444-5555-666666666666";
+        var logContent = """
+            2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
+            {
+              "kind": "cli_ready",
+              "session_id": "22222222-3333-4444-5555-666666666666"
+            }
+            2026-05-09T10:59:34.128Z [DEBUG] [remoteHosts] Starting remote host detection for cwd=D:\FromDebugLine, featureFlagEnabled=true
+            """;
+
+        var cwd = this.ProcessLogFileAndReadCwd(sessionId, logContent, Environment.ProcessId, @"D:\DefaultShouldNotWin");
+
+        Assert.Equal(@"D:\FromDebugLine", cwd);
+    }
+
+    [Fact]
+    public void TryProcessLogFile_JsonAndDebugMissingPebProbeReturnsPath_UsesPebCwd()
+    {
+        var method = typeof(CopilotLogWatcherService)
+            .GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .SingleOrDefault(m => m.Name == "ResolveCwdAfterParse" && m.GetParameters().Length == 3);
+        Assert.NotNull(method);
+
+        var previousSettings = Program._settings;
+        Program._settings = LauncherSettings.CreateDefault();
+        Program._settings.SuppressSave = true;
+        Program._settings.DefaultWorkDir = @"D:\DefaultShouldNotWin";
+
+        try
+        {
+            var result = (string)method.Invoke(null, [string.Empty, 39992, (Func<int, string?>)(_ => @"D:\FromPeb")])!;
+
+            Assert.Equal(@"D:\FromPeb", result);
+        }
+        finally
+        {
+            Program._settings = previousSettings;
+        }
+    }
+
+    [Fact]
+    public void TryProcessLogFile_AllLogAndPebSourcesEmptyDefaultWorkDirPresent_UsesDefaultWorkDir()
+    {
+        const string sessionId = "44444444-5555-6666-7777-888888888888";
+        var logContent = """
+            2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
+            {
+              "kind": "cli_ready",
+              "session_id": "44444444-5555-6666-7777-888888888888"
+            }
+            """;
+
+        var cwd = this.ProcessLogFileAndReadCwd(sessionId, logContent, int.MaxValue, @"D:\repo");
+
+        Assert.Equal(@"D:\repo", cwd);
+    }
+
+    [Fact]
+    public void TryProcessLogFile_AllSourcesEmptyDefaultWorkDirEmpty_ReturnsEmptyCwd()
+    {
+        const string sessionId = "55555555-6666-7777-8888-999999999999";
+        var logContent = """
+            2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
+            {
+              "kind": "cli_ready",
+              "session_id": "55555555-6666-7777-8888-999999999999"
+            }
+            """;
+
+        var cwd = this.ProcessLogFileAndReadCwd(sessionId, logContent, int.MaxValue, string.Empty);
+
+        Assert.Equal(string.Empty, cwd);
+    }
+
+    [Fact]
     public void TryParseLogContent_ExtractsSessionId_FromInfoWorkspaceInitializedLine()
     {
         // Regex fallback: no telemetry blocks, only Workspace initialized INFO line
@@ -393,7 +491,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
 
         var (sessionId, cwd) = sessions.Single();
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Equal(string.Empty, cwd);
     }
 
     [Fact]
@@ -461,7 +559,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         // Should have parsed the first valid session only
         var (sessionId, cwd) = sessions.Single();
         Assert.Equal("ba62613b-7f04-46bc-9c1e-778b12616687", sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Equal(string.Empty, cwd);
     }
 
     [Fact]
@@ -527,9 +625,8 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
     }
 
     [Fact]
-    public void Integration_WorkspaceYaml_NeverHasEmptyCwd()
+    public void Integration_WorkspaceYaml_AllowsEmptyCwd_WhenNoSourcesAvailable()
     {
-        // Log file with no cwd anywhere → fallback should produce a non-empty cwd
         var logContent = """
             2026-05-09T10:59:34.127Z [INFO] [Telemetry] cli.telemetry:
             {
@@ -542,15 +639,13 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         var logFile = Path.Combine(logsDir, "process-999-111.log");
         File.WriteAllText(logFile, logContent);
 
-        // Parse — cwd should fall back to UserProfile, never null/empty
         var lines = File.ReadAllLines(logFile);
         var sessions = CopilotLogWatcherService.TryParseLogContent(lines);
 
         var (sessionId, cwd) = sessions.Single();
         Assert.Equal("abcdabcd-1234-5678-abcd-1234567890ab", sessionId);
-        Assert.False(string.IsNullOrEmpty(cwd));
+        Assert.Equal(string.Empty, cwd);
 
-        // Create workspace.yaml and verify cwd is present
         var sessionStateDir = Path.Combine(this._tempDir, "session-state");
         var sessionDir = Path.Combine(sessionStateDir, sessionId);
         Directory.CreateDirectory(sessionDir);
@@ -558,12 +653,7 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         CopilotLogWatcherService.CreateWorkspaceYaml(wsFile, sessionId, cwd, sessionId);
 
         var content = File.ReadAllText(wsFile);
-        Assert.DoesNotContain("cwd: \r", content);
-        Assert.DoesNotContain("cwd: \n", content);
-        // cwd line should have actual content after "cwd: "
-        var cwdLine = content.Split('\n').First(l => l.TrimStart().StartsWith("cwd:"));
-        var cwdValue = cwdLine.Split("cwd: ", 2)[1].Trim();
-        Assert.False(string.IsNullOrEmpty(cwdValue));
+        Assert.Contains("cwd: ", content);
     }
 
     // ── Should-Create-Workspace Logic ─────────────────────────────────
@@ -644,5 +734,42 @@ public sealed class CopilotLogWatcherServiceTests : IDisposable
         Assert.Contains("cwd:", content);
         // Empty summary should not produce a "summary:" line with content
         Assert.DoesNotContain("name:", content);
+    }
+
+    private string ProcessLogFileAndReadCwd(string sessionId, string logContent, int pid, string defaultWorkDir)
+    {
+        var previousSettings = Program._settings;
+        Program._settings = LauncherSettings.CreateDefault();
+        Program._settings.SuppressSave = true;
+        Program._settings.DefaultWorkDir = defaultWorkDir;
+
+        try
+        {
+            var logFilePath = Path.Combine(this._tempDir, $"process-17374747448775-{pid}.log");
+            File.WriteAllText(logFilePath, logContent);
+
+            var sessionDir = Path.Combine(this._tempDir, sessionId);
+            Directory.CreateDirectory(sessionDir);
+
+            var watcher = new CopilotLogWatcherService(this._tempDir);
+            watcher.GetType()
+                .GetMethod("TryProcessLogFile", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .Invoke(watcher, [logFilePath, 3]);
+
+            var workspaceYaml = Path.Combine(sessionDir, "workspace.yaml");
+            Assert.True(File.Exists(workspaceYaml));
+
+            return ReadWorkspaceYamlCwd(workspaceYaml);
+        }
+        finally
+        {
+            Program._settings = previousSettings;
+        }
+    }
+
+    private static string ReadWorkspaceYamlCwd(string workspaceYaml)
+    {
+        var cwdLine = File.ReadLines(workspaceYaml).Single(line => line.StartsWith("cwd:", StringComparison.Ordinal));
+        return cwdLine.Length == "cwd:".Length ? string.Empty : cwdLine["cwd: ".Length..];
     }
 }

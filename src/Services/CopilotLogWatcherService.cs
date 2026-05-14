@@ -218,8 +218,9 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
 
                 // Session folder exists without workspace.yaml — create one
                 var sessionDir = Path.Combine(this._sessionStateDir, sessionId);
-                CreateWorkspaceYamlFromPid(Path.Combine(sessionDir, "workspace.yaml"), sessionId, cwd, pid.Value);
-                Program.Logger.LogInformation("External Copilot session discovered: {SessionId} at {Cwd}", sessionId, cwd);
+                var resolvedCwd = ResolveCwdAfterParse(cwd, pid.Value, Win32ProcessCwd.Get);
+                CreateWorkspaceYamlFromPid(Path.Combine(sessionDir, "workspace.yaml"), sessionId, resolvedCwd, pid.Value);
+                Program.Logger.LogInformation("External Copilot session discovered: {SessionId} at {Cwd}", sessionId, resolvedCwd);
                 this.ExternalSessionDiscovered?.Invoke(sessionId, pid.Value);
 
                 lock (this._cacheLock)
@@ -262,7 +263,7 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     /// Parses log file lines looking for ALL session_id values across cli.telemetry JSON blocks
     /// and INFO patterns (Workspace initialized, Registering foreground session).
     /// Bug D fix: returns a list of ALL sessions encountered in order, not just the first.
-    /// CWD fallback chain: (1) JSON context.cwd → (2) debug line cwd= → (3) fallbackCwd → (4) UserProfile.
+    /// CWD fallback chain: (1) JSON context.cwd → (2) debug line cwd= → (3) fallbackCwd → (4) empty string.
     /// Returns list of (sessionId, cwd) tuples — cwd is process-wide and shared across all sessions.
     /// Consecutive duplicate session IDs are deduplicated.
     /// </summary>
@@ -382,11 +383,11 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
             }
         }
 
-        // CWD fallback chain: JSON (1) → debug line (2) → caller-provided fallback (3) → UserProfile (4)
+        // CWD fallback chain: JSON (1) → debug line (2) → caller-provided fallback (3) → empty string (4)
         var cwd = cwdFromJson
             ?? cwdFromDebugLine
             ?? fallbackCwd
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            ?? string.Empty;
 
         // Return list of (sessionId, cwd) tuples — all sessions share the same process-wide cwd
         return sessions.Select(sid => (sid, cwd)).ToList();
@@ -449,6 +450,41 @@ internal sealed partial class CopilotLogWatcherService : IDisposable
     {
         using var reader = new StringReader(string.Join('\n', lines));
         return TryParseLogContent(reader, fallbackCwd);
+    }
+
+    internal static string ResolveCwdAfterParse(string parsedCwd, int pid, Func<int, string?> getProcessCwd)
+    {
+        var trimmedParsedCwd = parsedCwd.Trim();
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).Trim();
+        if (!string.IsNullOrWhiteSpace(trimmedParsedCwd)
+            && !string.Equals(trimmedParsedCwd, userProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            return parsedCwd;
+        }
+
+        string? processCwd;
+        try
+        {
+            processCwd = getProcessCwd(pid);
+        }
+        catch
+        {
+            processCwd = null;
+        }
+
+        var trimmedProcessCwd = processCwd?.Trim();
+        if (!string.IsNullOrWhiteSpace(trimmedProcessCwd))
+        {
+            return trimmedProcessCwd;
+        }
+
+        var defaultWorkDir = Program._settings.DefaultWorkDir?.Trim();
+        if (!string.IsNullOrWhiteSpace(defaultWorkDir) && Path.IsPathRooted(defaultWorkDir))
+        {
+            return defaultWorkDir;
+        }
+
+        return string.Empty;
     }
 
     /// <summary>
