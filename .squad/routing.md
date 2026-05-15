@@ -58,9 +58,10 @@ When triaging, the Lead should ask:
 | Work Type | Primary | Secondary |
 |-----------|---------|----------|
 | Architecture, code review, decisions | Neo | — |
-| Business logic, design patterns | Trinity | — |
+| Business logic, design patterns | Trinity | Switch (when Trinity locked out) |
 | WinForms, components, theming | Morpheus | — |
 | TDD, unit & integration tests | Tank | — |
+| Peer review of Tank's tests, gap analysis (GPT-5.5 lineage for analytical diversity) | Dozer | — |
 | SOLID, refactoring, performance | Oracle | — |
 | Research, docs validation, community patterns | Niobe | — |
 

@@ -182,6 +182,48 @@ internal class EventsJournalService : IDisposable
     }
 
     /// <summary>
+    /// Attempts to retrieve the latest CWD for a session from the in-memory cache.
+    /// Returns true with the cached CWD if present, false with empty string otherwise.
+    /// </summary>
+    internal bool TryGetLatestCwd(string sessionId, out string cwd)
+    {
+        if (this._latestCwdBySessionId.TryGetValue(sessionId, out var cachedCwd))
+        {
+            cwd = cachedCwd;
+            return true;
+        }
+
+        cwd = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Applies live CWD overlay to sessions after LoadSessions returns.
+    /// For each session: if journal has a live CWD that differs from session.Cwd (case-insensitive),
+    /// overlays it by setting session.Cwd and recomputing session.Folder.
+    /// </summary>
+    internal static void ApplyLiveCwdOverlay(
+        IReadOnlyList<Models.NamedSession> sessions,
+        EventsJournalService journal)
+    {
+        foreach (var session in sessions)
+        {
+            if (!journal.TryGetLatestCwd(session.Id, out var liveCwd))
+            {
+                continue;
+            }
+
+            if (string.Equals(session.Cwd, liveCwd, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            session.Cwd = liveCwd;
+            session.Folder = Path.GetFileName(liveCwd.TrimEnd('\\', '/'));
+        }
+    }
+
+    /// <summary>
     /// Performs an initial disk read for all given session IDs to prime the cache.
     /// Call once at startup after loading the persisted cache. Does NOT raise events.
     /// </summary>

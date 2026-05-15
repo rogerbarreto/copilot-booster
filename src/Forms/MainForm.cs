@@ -27,6 +27,7 @@ internal partial class MainForm : Form
     private List<NamedSession> _cachedSessions = [];
     private ActiveStatusSnapshot _lastSnapshot = new([], [], []);
     private readonly ActiveStatusTracker _activeTracker = new();
+    private readonly EventsJournalService _eventsJournal;
     private readonly SessionRefreshCoordinator _refreshCoordinator;
     private readonly SessionInteractionManager _interactionManager;
     private System.Windows.Forms.Timer? _spinnerTimer;
@@ -122,6 +123,7 @@ internal partial class MainForm : Form
 
         this._interactionManager = new SessionInteractionManager(Program.SessionStateDir, Program.TerminalCacheFile);
         this._refreshCoordinator = new SessionRefreshCoordinator(Program.SessionStateDir, Program.PidRegistryFile, this._activeTracker);
+        this._eventsJournal = this._activeTracker.EventsJournal;
         this._githubApi = new GitHubApiService(() => Program._settings.GitHubToken);
         this._githubPoller = new GitHubPollingService(this._githubApi,
             () => this._cachedSessions.Select(s => s.Id).ToList());
@@ -1603,6 +1605,7 @@ internal partial class MainForm : Form
         try
         {
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+            EventsJournalService.ApplyLiveCwdOverlay(sessions, this._eventsJournal);
             this._cachedSessions = sessions;
             this.ApplySessionStates(this._cachedSessions);
             this.WriteSessionMetadata();
@@ -1746,6 +1749,7 @@ internal partial class MainForm : Form
         if (this._dirtyDataSessionIds.Count > 0)
         {
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
+            EventsJournalService.ApplyLiveCwdOverlay(sessions, this._eventsJournal);
             this._cachedSessions = sessions;
             this.ApplySessionStates(this._cachedSessions);
         }

@@ -12,6 +12,12 @@
       "universe": "The Matrix",
       "status": "active"
     },
+    "switch": {
+      "created_at": "2026-05-15T19:00:00.000Z",
+      "persistent_name": "Switch",
+      "universe": "The Matrix",
+      "status": "active"
+    },
     "morpheus": {
       "created_at": "2026-03-15T15:50:59.660Z",
       "persistent_name": "Morpheus",
@@ -21,6 +27,12 @@
     "tank": {
       "created_at": "2026-03-15T15:50:59.660Z",
       "persistent_name": "Tank",
+      "universe": "The Matrix",
+      "status": "active"
+    },
+    "dozer": {
+      "created_at": "2026-05-15T18:30:00.000Z",
+      "persistent_name": "Dozer",
       "universe": "The Matrix",
       "status": "active"
     },

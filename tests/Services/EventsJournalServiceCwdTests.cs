@@ -1,5 +1,4 @@
-﻿using System.Reflection;
-using System.Text;
+﻿using System.Text;
 
 public sealed class EventsJournalServiceCwdTests : IDisposable
 {
@@ -13,7 +12,13 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
 
     public void Dispose()
     {
-        try { Directory.Delete(this._tempDir, true); } catch { }
+        try
+        {
+            Directory.Delete(this._tempDir, true);
+        }
+        catch
+        {
+        }
     }
 
     [Fact]
@@ -24,7 +29,7 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
             HookStart(@"D:\new"),
             HookStart(@"D:\new"));
 
-        var result = ExtractLatestCwd(reader);
+        var result = EventsJournalService.ExtractLatestCwd(reader);
 
         Assert.Equal(@"D:\new", result);
     }
@@ -34,7 +39,7 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
     {
         using var reader = ReaderFor(SessionStart(@"D:\old"));
 
-        var result = ExtractLatestCwd(reader);
+        var result = EventsJournalService.ExtractLatestCwd(reader);
 
         Assert.Equal(@"D:\old", result);
     }
@@ -48,7 +53,7 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
             HookStart(@"D:\cwd2"),
             HookStart(@"D:\cwd3"));
 
-        var result = ExtractLatestCwd(reader);
+        var result = EventsJournalService.ExtractLatestCwd(reader);
 
         Assert.Equal(@"D:\cwd3", result);
     }
@@ -60,7 +65,7 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
     {
         using var reader = new StringReader(content);
 
-        var result = ExtractLatestCwd(reader);
+        var result = EventsJournalService.ExtractLatestCwd(reader);
 
         Assert.Null(result);
     }
@@ -74,9 +79,29 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
             HookStart(@"D:\valid2") + Environment.NewLine +
             "{\"type\":\"hook.start\",\"data\":{");
 
-        var result = ExtractLatestCwd(reader);
+        var result = EventsJournalService.ExtractLatestCwd(reader);
 
         Assert.Equal(@"D:\valid2", result);
+    }
+
+    [Fact]
+    public void TryGetLatestCwd_AfterReadAndCacheLatestCwd_ReturnsLatestCwd()
+    {
+        const string sessionId = "98845667-7e51-422e-80e9-05becdb6e5e5";
+        var sessionDir = Path.Combine(this._tempDir, sessionId);
+        Directory.CreateDirectory(sessionDir);
+        File.WriteAllText(
+            Path.Combine(sessionDir, "events.jsonl"),
+            string.Join(Environment.NewLine,
+                SessionStart(@"D:\old"),
+                HookStart(@"D:\new")) + Environment.NewLine,
+            Encoding.UTF8);
+
+        using var service = new EventsJournalService(this._tempDir);
+        service.PrimeCache([sessionId]);
+
+        Assert.True(service.TryGetLatestCwd(sessionId, out var cwd));
+        Assert.Equal(@"D:\new", cwd);
     }
 
     [Fact]
@@ -86,54 +111,29 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
         var sessionDir = Path.Combine(this._tempDir, sessionId);
         Directory.CreateDirectory(sessionDir);
         var eventsPath = Path.Combine(sessionDir, "events.jsonl");
-        await File.WriteAllTextAsync(eventsPath, SessionStart(@"D:\old") + Environment.NewLine, Encoding.UTF8, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            eventsPath,
+            SessionStart(@"D:\old") + Environment.NewLine,
+            Encoding.UTF8,
+            TestContext.Current.CancellationToken);
 
-        using var service = CreateServiceForRoot(this._tempDir);
+        using var service = new EventsJournalService(this._tempDir);
+        service.PrimeCache([sessionId]);
         service.SuppressEvents = false;
 
         var changed = new TaskCompletionSource<(string SessionId, string Cwd)>(TaskCreationOptions.RunContinuationsAsynchronously);
-        AddLatestCwdChangedHandler(service, (raisedSessionId, cwd) => changed.TrySetResult((raisedSessionId, cwd)));
+        service.LatestCwdChanged += (raisedSessionId, cwd) => changed.TrySetResult((raisedSessionId, cwd));
 
         service.StartWatching();
-        await File.AppendAllTextAsync(eventsPath, HookStart(@"D:\new") + Environment.NewLine, Encoding.UTF8, TestContext.Current.CancellationToken);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        using (var writer = new StreamWriter(eventsPath, append: true, Encoding.UTF8))
+        {
+            await writer.WriteLineAsync(HookStart(@"D:\new"));
+        }
 
         var result = await changed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.Equal(sessionId, result.SessionId);
         Assert.Equal(@"D:\new", result.Cwd);
-    }
-
-    private static string? ExtractLatestCwd(TextReader reader)
-    {
-        var method = typeof(EventsJournalService).GetMethod(
-            "ExtractLatestCwd",
-            BindingFlags.NonPublic | BindingFlags.Static,
-            binder: null,
-            types: [typeof(TextReader)],
-            modifiers: null);
-
-        Assert.NotNull(method);
-        return (string?)method.Invoke(null, [reader]);
-    }
-
-    private static EventsJournalService CreateServiceForRoot(string sessionsRoot)
-    {
-        var ctor = typeof(EventsJournalService).GetConstructor(
-            BindingFlags.NonPublic | BindingFlags.Instance,
-            binder: null,
-            types: [typeof(string)],
-            modifiers: null);
-
-        Assert.NotNull(ctor);
-        return (EventsJournalService)ctor.Invoke([sessionsRoot]);
-    }
-
-    private static void AddLatestCwdChangedHandler(EventsJournalService service, Action<string, string> handler)
-    {
-        var evt = typeof(EventsJournalService).GetEvent("LatestCwdChanged", BindingFlags.NonPublic | BindingFlags.Instance);
-        Assert.NotNull(evt);
-        var addMethod = evt.GetAddMethod(nonPublic: true);
-        Assert.NotNull(addMethod);
-        addMethod.Invoke(service, [handler]);
     }
 
     private static StringReader ReaderFor(params string[] lines)

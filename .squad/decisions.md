@@ -315,3 +315,221 @@ internal EventsJournalService(string sessionsDir) { ... }
 **Test Suite:** All green (946 unit, 155 integration)
 
 **Outcome:** Ready for git commit and release. No further action required.
+
+---
+
+## ULTRA DIRECTIVE: Gaps are Never Acceptable (2026-05-15T18-50-00Z)
+
+**By:** Roger Barreto (via Copilot)
+
+**What:** "GAPS IS NEVER ACCEPTABLE." Any reviewer verdict that includes "GAPS", "WITH GAPS", "APPROVE WITH GAPS", or any equivalent qualifier is treated as a REJECT. Reviewer Rejection Lockout applies in full: the original author of the rejected artifact is locked out and a different agent must own the revision.
+
+**Scope:** RED tests, GREEN implementations, design reviews, and all other artifacts subject to quality gates.
+
+**Rationale:** User directive enforcing all-or-nothing quality gates. The analytical-diversity peer reviewer (e.g., Dozer) surfaces gaps; once surfaced they must be closed by a different agent. No "good enough" makes it past the gate.
+
+**Operational Consequences:**
+1. Reviewers must use either APPROVE or REJECT. "APPROVE WITH GAPS" verdicts are abolished.
+2. When gaps are found, reviewer issues REJECT with gap list, remedy, and required revision owner (must be different agent).
+3. Coordinator must refuse to spawn the locked-out author for revision.
+4. Charter updates required for all reviewer agents to remove "WITH GAPS" language.
+
+**Retroactive Scope:** Does not invalidate work that landed before 2026-05-15T18-50Z. Any verdict after this timestamp must conform.
+
+---
+
+## Live CWD Overlay Survives LoadSessions Reload (2026-05-16)
+
+**Date:** 2026-05-16  
+**Feature:** Apply live CWD overlay after LoadSessions to prevent stale workspace.yaml data from overwriting live CWD on every refresh tick  
+**Contributors:** Tank (RED), Dozer (peer + impl review), Oracle (gates), Trinity (first attempt, locked out), Switch (lockout relief, final GREEN)  
+**Status:** COMPLETE & APPROVED  
+
+### Overview
+
+Copilot CLI updates events.jsonl when `/cwd` switches but does not update workspace.yaml. The live CWD feature extracts the latest session CWD from events.jsonl (committed earlier). However, MainForm's refresh loop calls `SessionService.LoadSessions()` which rebuilds `NamedSession` instances fresh from stale workspace.yaml, silently overwriting the live CWD that had just been applied via `OnLatestCwdChanged`. 
+
+Solution: Wire `EventsJournalService.ApplyLiveCwdOverlay(sessions, journal)` at BOTH MainForm callsites that consume LoadSessions output:
+1. `OnDebouncedRefreshAsync` (data-only refresh when a live event arrives)
+2. `RefreshBackgroundCoreAsync` (full-refresh timer every 45s)
+
+Without both callsites, the live CWD would be silently restored to stale workspace.yaml on the full-refresh tick.
+
+### Red-Green-Review Pipeline
+
+#### Tank: RED Tests (LiveCwdOverlaySeamTests.cs)
+
+**Date:** 2026-05-16
+
+4 RED tests exposing missing production seam:
+
+1. `ApplyLiveCwdOverlay_WhenLiveCwdDiffersFromWorkspaceYaml_OverlaysLiveCwd` — Core happy path
+2. `ApplyLiveCwdOverlay_WhenLiveCwdMatchesWorkspaceYaml_NoChange` — Idempotency guard
+3. `ApplyLiveCwdOverlay_WhenSessionHasNoLiveCwd_NoChange` — Empty cache edge case
+4. `ProductionCallsite_MainFormOnDebouncedRefreshAsync_CallsApplyLiveCwdOverlay` — Source-contract substring guard
+
+**Build Status:** Compile-time RED. `EventsJournalService.ApplyLiveCwdOverlay` does not exist. Tests reference missing seam.
+
+#### Dozer: Peer Review with Gap-Coverage Tests (LiveCwdOverlaySeamGapCoverageTests.cs)
+
+**Date:** 2026-05-16
+
+**Verdict:** APPROVE WITH GAPS (pre-ULTRA DIRECTIVE)
+
+Added 3 gap-coverage tests capturing missing edge cases:
+
+1. `ApplyLiveCwdOverlay_WhenLiveCwdDiffersOnlyByCase_PreservesWorkspaceCwdAndFolder` — Behavioral test for Windows case-insensitive path handling (OrdinalIgnoreCase comparison required)
+2. `ApplyLiveCwdOverlay_WhenMultipleSessionsHaveMixedLiveCwdStates_OverlaysEachIndependently` — Verifies N sessions processed without short-circuiting
+3. `ProductionCallsite_MainFormOnDebouncedRefreshAsync_CallsOverlayBeforeCachingAndApplyingStates` — Ordered source-contract guard requiring exact sequence: `LoadSessions()` → `ApplyLiveCwdOverlay()` → `_cachedSessions = sessions` → `ApplySessionStates()`
+
+**Gap Analysis:**
+- Tank's substring guard too loose (could pass on comment or dead branch)
+- Dozer's ordered guard binding: asserts exact 4-step sequence in order
+- Path edge case: `TrimEnd('\\')` only trims backslashes, leaving forward-slash paths empty in Folder computation
+- **Missing gap (to be discovered later):** `RefreshBackgroundCoreAsync` also calls `LoadSessions` but lacks overlay call. This full-refresh path (every 45s) silently restores stale CWD.
+
+#### Oracle: RED Gate Review
+
+**Date:** 2026-05-16
+
+**Verdict:** ✅ APPROVE
+
+**Seam Signature (BINDING for Trinity):**
+```csharp
+internal static void ApplyLiveCwdOverlay(
+    IReadOnlyList<NamedSession> sessions,
+    EventsJournalService journal)
+```
+
+**Seam Requirements:**
+- Owner: `EventsJournalService` (static method)
+- Use `TryGetLatestCwd(sessionId, out cwd)` to access journal cache (must be added)
+- Case-insensitive comparison: `StringComparison.OrdinalIgnoreCase` required
+- Folder computation: `Path.GetFileName(liveCwd.TrimEnd('\\'))` (per Tank's design)
+- No `ArgumentNullException` throws; empty input should no-op
+- No logging; pure in-memory mutation
+
+**Source-Contract Guard (Binding):** Dozer's ordered guard is the standard. Asserts 4 exact substrings in sequence with local variable names fixed (`sessions`, `this._eventsJournal`).
+
+**Marching Orders:** Trinity may proceed GREEN. Must match binding seam signature exactly. Must wire callsite between `LoadSessions()` and `_cachedSessions` assignment.
+
+#### Trinity: GREEN Implementation (First Attempt) — LOCKED OUT
+
+**Date:** 2026-05-16
+
+Implemented seam per Oracle's binding contract. Added `TryGetLatestCwd` and `ApplyLiveCwdOverlay` to `EventsJournalService.cs`. Wired callsite in `MainForm.OnDebouncedRefreshAsync`.
+
+**Test Results:** All 7 tests passed (4 Tank + 3 Dozer). 956 unit tests pass total.
+
+**Gap 1 (BLOCKING):** `RefreshBackgroundCoreAsync` missing overlay call. This method is called by the full-refresh timer every 45 seconds. Trinity wired only the data-only refresh path (`OnDebouncedRefreshAsync`), leaving the full-refresh path vulnerable to stale `workspace.yaml` restoration.
+
+**Gap 2:** Folder computation with forward-slash. When Copilot CLI emits paths like `D:/repo/work/agent-framework/` (forward slashes), `Path.GetFileName(liveCwd.TrimEnd('\\'))` leaves the trailing forward slash intact, and `GetFileName` on Windows returns empty string for forward-slash-terminated paths. Result: empty Folder display name.
+
+**Verdict:** ❌ REJECTED per ULTRA DIRECTIVE (2026-05-15T18-50-00Z). Gaps = REJECT. Trinity locked out. Switch (new Services Dev agent) hired as lockout relief.
+
+#### Dozer: Implementation Review (Trinity's Attempt)
+
+**Date:** 2026-05-16
+
+Reviewed Trinity's implementation and captured gap analysis:
+
+1. **Gap 1:** RefreshBackgroundCoreAsync reloads sessions without overlay. Full-refresh timer (every 45s) overwrites live CWD with stale workspace.yaml. Added `ProductionCallsite_RefreshBackgroundCoreAsync_CallsOverlayBeforeCachingAndApplyingStates` test to verify the missing callsite.
+
+2. **Gap 2:** Trailing forward-slash case not handled. Added `ApplyLiveCwdOverlay_WhenLiveCwdHasTrailingForwardSlash_ComputesFolderFromLastSegment` test expecting `D:/repo/work/agent-framework/` → Folder = `agent-framework`.
+
+**Verdict:** APPROVE WITH GAPS (legacy pre-ULTRA). Both gaps documented for next implementer.
+
+#### Oracle: Implementation Gate (Trinity's Attempt) — Missed Gaps
+
+**Date:** 2026-05-16
+
+**Verdict:** ✅ APPROVE
+
+Verified Trinity's implementation matches binding contract exactly. All tests passed. Suite green. No scope creep. Oracle did not re-verify against Dozer's new gap-find tests. Oracle's verdict is superseded by ULTRA DIRECTIVE lockout: gaps found = REJECT regardless of Oracle's approval.
+
+#### Switch: GREEN Implementation (Lockout Relief)
+
+**Date:** 2026-05-16
+
+Trinity locked out per ULTRA DIRECTIVE. Switch (claude-sonnet-4.5, new Services Dev) hired as relief to re-implement from scratch.
+
+**Implementation:**
+1. Added `internal bool TryGetLatestCwd(string sessionId, out string cwd)` to `EventsJournalService.cs` (lines 188–198)
+2. Added `internal static void ApplyLiveCwdOverlay(IReadOnlyList<NamedSession> sessions, EventsJournalService journal)` to `EventsJournalService.cs` (lines 205–224)
+   - Case-insensitive comparison: `StringComparison.OrdinalIgnoreCase`
+   - **Forward-slash trim FIXED:** `TrimEnd('\\', '/')` trims both backslash and forward slash
+3. Added `private readonly EventsJournalService _eventsJournal;` field to `MainForm.cs`
+4. **Wired BOTH callsites:**
+   - `OnDebouncedRefreshAsync` (data-only path, line 1752)
+   - **RefreshBackgroundCoreAsync** (full-refresh path, line 1608) — **The gap Trinity missed**
+
+**Test Results:**
+- Tank's 4 tests: ✅ All pass
+- Dozer's 5 gap tests: ✅ All pass (including forward-slash and RefreshBackgroundCoreAsync tests)
+- EventsJournalServiceCwdTests: ✅ 8 pass
+- Full suite: ✅ 958 total, 0 failed, 2 skipped
+
+**Deviations:** None. Exact match to Oracle's binding contract. Both gaps closed.
+
+#### Oracle: Binary Gate Review (Switch GREEN)
+
+**Date:** 2026-05-16
+
+**Directive:** ULTRA DIRECTIVE (2026-05-15T18-50-00Z) — binary verdicts only. APPROVE or REJECT.
+
+**Verdict:** ✅ APPROVE
+
+- All 9 targeted tests pass (4 Tank + 5 Dozer)
+- Full suite 958/958 green
+- Both MainForm callsites correctly ordered
+- Forward-slash trim in place
+- SOLID principles upheld
+- No scope creep
+- `dotnet format` clean
+
+Trinity → Scribe pipeline may proceed.
+
+#### Dozer: Binary Review (Switch GREEN)
+
+**Date:** 2026-05-16
+
+**Directive:** ULTRA DIRECTIVE (2026-05-15T18-50-00Z) — binary verdicts only.
+
+**Verdict:** ✅ APPROVE
+
+All prior gaps confirmed closed:
+- Forward-slash trim: `TrimEnd('\\', '/')` implemented
+- RefreshBackgroundCoreAsync: Callsite present at line 1608, correctly ordered
+- Case-sensitivity: `OrdinalIgnoreCase` in place
+- Multi-session: Correct independent iteration
+
+No new gaps found. Production code path verified GREEN.
+
+### Files Modified
+
+**Production:**
+- `src/Services/EventsJournalService.cs` — Added `TryGetLatestCwd` + `ApplyLiveCwdOverlay` seam
+- `src/Forms/MainForm.cs` — Added `_eventsJournal` field + callsites in both refresh paths
+
+**Tests:**
+- `tests/Services/LiveCwdOverlaySeamTests.cs` — Tank's 4 RED tests (new)
+- `tests/Services/LiveCwdOverlaySeamGapCoverageTests.cs` — Dozer's 5 gap tests (new)
+
+### Verification
+
+- **Build:** `dotnet build src/ --tl:off` — 0 warnings, 0 errors
+- **Format:** `dotnet format` — exit code 0
+- **Unit Tests:** 958 total, 0 errors, 0 failed, 2 skipped (LocalOnly, CopilotProbe pending)
+- **Targeted Classes:** LiveCwdOverlaySeamTests (4 pass), LiveCwdOverlaySeamGapCoverageTests (5 pass), EventsJournalServiceCwdTests (8 pass)
+
+### Key Learnings (ULTRA DIRECTIVE Impact)
+
+1. **Gaps trigger REJECT** — Finding gaps forces original author out, requires different agent for revision
+2. **Binary verdicts enforce rigor** — "APPROVE WITH GAPS" eliminated; no half-measures past gates
+3. **Lockout relief pattern** — When lockout applies, hire different agent to re-solve; Trinity locked, Switch hired
+4. **Two-agent gap finding** — Peer reviewer (Dozer) + implementation reviewer (Oracle) both added tests; Oracle's gate review alone missed gap
+5. **Source-contract guards are enforcement** — Ordered guard forced both callsites to be wired (Trinity missed RefreshBackgroundCoreAsync; Dozer's test caught it)
+
+### Outcome
+
+Feature complete. Live CWD overlay now survives both data-only refresh (OnDebouncedRefreshAsync) and full-refresh timer (RefreshBackgroundCoreAsync). Stale workspace.yaml data no longer overwrites live CWD. All gaps closed. Ready for commit.
