@@ -148,9 +148,7 @@ internal partial class MainForm : Form
             this._githubPoller,
             settingsGetter: () => Program._settings.AiDetection,
             copilotProbe: this.CopilotProbe);
-        this._activeTracker.EventsJournal.LoadCache();
         this._activeTracker.EventsJournal.StatusChanged += this.OnEventsStatusChanged;
-        this._activeTracker.EventsJournal.LatestCwdChanged += this.OnLatestCwdChanged;
         this._activeTracker.EventsJournal.StartWatching();
 
         this._workspaceWatcher = new WorkspaceYamlWatcherService();
@@ -886,7 +884,6 @@ internal partial class MainForm : Form
         this._spinnerTimer?.Stop();
         this._updateCheckTimer?.Stop();
 
-        this._activeTracker.EventsJournal.SaveCache();
         this._activeTracker.EventsJournal.Dispose();
         this._workspaceWatcher?.Dispose();
         this._contextWatcher?.Dispose();
@@ -1605,7 +1602,6 @@ internal partial class MainForm : Form
         try
         {
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-            EventsJournalService.ApplyLiveCwdOverlay(sessions, this._eventsJournal);
             this._cachedSessions = sessions;
             this.ApplySessionStates(this._cachedSessions);
             this.WriteSessionMetadata();
@@ -1749,7 +1745,6 @@ internal partial class MainForm : Form
         if (this._dirtyDataSessionIds.Count > 0)
         {
             var sessions = (List<NamedSession>)await Task.Run(() => this._refreshCoordinator.LoadSessions()).ConfigureAwait(true);
-            EventsJournalService.ApplyLiveCwdOverlay(sessions, this._eventsJournal);
             this._cachedSessions = sessions;
             this.ApplySessionStates(this._cachedSessions);
         }
@@ -1777,27 +1772,6 @@ internal partial class MainForm : Form
     private Dictionary<string, string> BuildSessionSummaryMap()
     {
         return ActiveStatusTracker.BuildSessionSummaryMap(this._cachedSessions);
-    }
-
-    private void OnLatestCwdChanged(string sessionId, string cwd)
-    {
-        if (!this.IsHandleCreated)
-        {
-            return;
-        }
-
-        this.BeginInvoke(() =>
-        {
-            var session = this._cachedSessions.FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.OrdinalIgnoreCase));
-            if (session == null)
-            {
-                return;
-            }
-
-            session.Cwd = cwd;
-            session.Folder = Path.GetFileName(cwd.TrimEnd('\\'));
-            this.RequestRefresh(sessionId: sessionId, dataChanged: true);
-        });
     }
 
     /// <summary>
@@ -1878,10 +1852,6 @@ internal partial class MainForm : Form
         // This must run BEFORE the first RefreshActiveStatus so active icons light up
         await Task.Run(() => this._activeTracker.RescanExistingSessions()).ConfigureAwait(true);
 
-        // Prime events.jsonl cache for all sessions (initial disk read)
-        await Task.Run(() => this._activeTracker.EventsJournal.PrimeCache(
-            sessions.Select(s => s.Id).ToList())).ConfigureAwait(true);
-
         var snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
 
         // Seed startup sessions — suppress bell for working sessions only
@@ -1908,9 +1878,6 @@ internal partial class MainForm : Form
         {
             snapshot = await Task.Run(() => this._refreshCoordinator.RefreshActiveStatus(this._cachedSessions)).ConfigureAwait(true);
         }
-
-        // Now enable watcher events — startup seeding is complete
-        this._activeTracker.EventsJournal.SuppressEvents = false;
 
         // Sort active sessions to the top on initial load, pinned first
         var activeIds = new HashSet<string>(snapshot.ActiveTextBySessionId.Keys, StringComparer.OrdinalIgnoreCase);

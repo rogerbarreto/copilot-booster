@@ -329,11 +329,11 @@ internal class SessionService
                         }
                         else if (line.StartsWith("name:"))
                         {
-                            name = line[5..].Trim().Trim('"');
+                            name = StripQuoteWrappers(line[5..].Trim());
                         }
                         else if (line.StartsWith("summary:"))
                         {
-                            summary = line[8..].Trim().Trim('"');
+                            summary = StripQuoteWrappers(line[8..].Trim());
                         }
                     }
 
@@ -351,6 +351,10 @@ internal class SessionService
                         return null;
                     }
 
+                    // Resolve CWD: prefer most recent source (yaml vs events.jsonl), yaml wins ties
+                    var yamlMtime = File.GetLastWriteTimeUtc(wsFile);
+                    cwd = ResolveSessionCwd(d, cwd, yamlMtime);
+
                     // Delete empty, non-active sessions
                     var hasEvents = File.Exists(Path.Combine(d, "events.jsonl"));
                     if (!hasEvents && activeIds != null && !activeIds.Contains(id))
@@ -360,11 +364,9 @@ internal class SessionService
                     }
 
                     var folder = Path.GetFileName(cwd?.TrimEnd('\\') ?? "");
+
+                    // Compute display summary following precedence: alias > workspace title (name > summary) > override > fallback
                     string displaySummary;
-                    // Copilot CLI v1.0.44 writes the authoritative title to `name:` (with
-                    // optional `user_named:`); older sessions only have `summary:`. Prefer
-                    // `name:` so user-renamed sessions reflect their current title and the
-                    // booster does not surface a stale first-user-message override.
                     var workspaceTitle = !string.IsNullOrWhiteSpace(name) ? name : summary;
                     if (aliases.TryGetValue(id, out var alias))
                     {
@@ -380,7 +382,6 @@ internal class SessionService
                     }
                     else
                     {
-                        // Fallback: use first 8 chars of session ID as deterministic display name
                         displaySummary = id.Length >= 8 ? $"Session {id.Substring(0, 8)}" : $"Session {id}";
                     }
 
@@ -407,6 +408,7 @@ internal class SessionService
                         Folder = folder,
                         IsGitRepo = isGitRepo,
                         Summary = displaySummary,
+                        Alias = aliases.TryGetValue(id, out var aliasValue) ? aliasValue : "",
                         LastModified = Directory.GetLastWriteTime(d)
                     };
                 }
@@ -567,5 +569,66 @@ internal class SessionService
             dir = parent;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Resolves session CWD by comparing workspace.yaml and events.jsonl mtimes.
+    /// Most recent source wins; yaml wins ties. Empty cwds fall back to the other source.
+    /// </summary>
+    internal static string ResolveSessionCwd(string sessionDir, string? yamlCwd, DateTime yamlMtime)
+    {
+        var eventsPath = Path.Combine(sessionDir, "events.jsonl");
+        if (!File.Exists(eventsPath))
+        {
+            return yamlCwd ?? string.Empty;
+        }
+
+        var eventsMtime = File.GetLastWriteTimeUtc(eventsPath);
+        var eventsCwd = EventsJournalService.ExtractLatestCwdFromTail(eventsPath);
+
+        // Both sources empty
+        if (string.IsNullOrEmpty(yamlCwd) && string.IsNullOrEmpty(eventsCwd))
+        {
+            return string.Empty;
+        }
+
+        // Only one source has valid cwd
+        if (string.IsNullOrEmpty(yamlCwd))
+        {
+            return eventsCwd;
+        }
+
+        if (string.IsNullOrEmpty(eventsCwd))
+        {
+            return yamlCwd;
+        }
+
+        // Both have valid cwds: prefer newer source, yaml wins ties
+        return eventsMtime > yamlMtime ? eventsCwd : yamlCwd;
+    }
+
+    /// <summary>
+    /// Strips nested quote wrappers (both " and ') from a value.
+    /// Handles: '"X"' → X, "'X'" → X, "X" → X, 'X' → X, X → X.
+    /// </summary>
+    internal static string StripQuoteWrappers(string value)
+    {
+        while (true)
+        {
+            if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+            {
+                value = value[1..^1];
+            }
+            else if (value.Length >= 2 && value[0] == '\'' && value[^1] == '\'')
+            {
+                value = value[1..^1];
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return value;
     }
 }

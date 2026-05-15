@@ -84,57 +84,7 @@ public sealed class EventsJournalServiceCwdTests : IDisposable
         Assert.Equal(@"D:\valid2", result);
     }
 
-    [Fact]
-    public void TryGetLatestCwd_AfterReadAndCacheLatestCwd_ReturnsLatestCwd()
-    {
-        const string sessionId = "98845667-7e51-422e-80e9-05becdb6e5e5";
-        var sessionDir = Path.Combine(this._tempDir, sessionId);
-        Directory.CreateDirectory(sessionDir);
-        File.WriteAllText(
-            Path.Combine(sessionDir, "events.jsonl"),
-            string.Join(Environment.NewLine,
-                SessionStart(@"D:\old"),
-                HookStart(@"D:\new")) + Environment.NewLine,
-            Encoding.UTF8);
 
-        using var service = new EventsJournalService(this._tempDir);
-        service.PrimeCache([sessionId]);
-
-        Assert.True(service.TryGetLatestCwd(sessionId, out var cwd));
-        Assert.Equal(@"D:\new", cwd);
-    }
-
-    [Fact]
-    public async Task EventsJournalService_RaisesCwdChangedEvent_WhenLatestCwdChangesAcrossWatcherFire()
-    {
-        const string sessionId = "98845667-7e51-422e-80e9-05becdb6e5e5";
-        var sessionDir = Path.Combine(this._tempDir, sessionId);
-        Directory.CreateDirectory(sessionDir);
-        var eventsPath = Path.Combine(sessionDir, "events.jsonl");
-        await File.WriteAllTextAsync(
-            eventsPath,
-            SessionStart(@"D:\old") + Environment.NewLine,
-            Encoding.UTF8,
-            TestContext.Current.CancellationToken);
-
-        using var service = new EventsJournalService(this._tempDir);
-        service.PrimeCache([sessionId]);
-        service.SuppressEvents = false;
-
-        var changed = new TaskCompletionSource<(string SessionId, string Cwd)>(TaskCreationOptions.RunContinuationsAsynchronously);
-        service.LatestCwdChanged += (raisedSessionId, cwd) => changed.TrySetResult((raisedSessionId, cwd));
-
-        service.StartWatching();
-        await Task.Delay(200, TestContext.Current.CancellationToken);
-        using (var writer = new StreamWriter(eventsPath, append: true, Encoding.UTF8))
-        {
-            await writer.WriteLineAsync(HookStart(@"D:\new"));
-        }
-
-        var result = await changed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-        Assert.Equal(sessionId, result.SessionId);
-        Assert.Equal(@"D:\new", result.Cwd);
-    }
 
     private static StringReader ReaderFor(params string[] lines)
     {

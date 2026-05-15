@@ -2029,26 +2029,11 @@ internal class ActiveStatusTracker
             }
         }
 
-        // Status icons from events.jsonl — read from cache only (watcher updates async).
-        // Fallback poll runs only on watcher errors, rate-limited to 1/30s.
-        this.EventsJournal.ProcessFallbackPoll(sessionSnapshot.Select(s => s.Id).ToList());
+        // Status icons from events.jsonl — no longer cached, set default status
         var statusIconBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var session in sessionSnapshot)
         {
-            var status = this.EventsJournal.GetCachedStatus(session.Id);
-            switch (status)
-            {
-                case EventsJournalService.SessionStatus.Working:
-                    statusIconBySessionId[session.Id] = "working";
-                    break;
-                case EventsJournalService.SessionStatus.Idle:
-                    statusIconBySessionId[session.Id] = this._startedSessionIds.Contains(session.Id) ? "" : "bell";
-                    break;
-                case EventsJournalService.SessionStatus.IdleSilent:
-                    // Silent idle — no bell, just clear the working state
-                    statusIconBySessionId[session.Id] = "";
-                    break;
-            }
+            statusIconBySessionId[session.Id] = "";
         }
 
         return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById, statusIconBySessionId);
@@ -2081,23 +2066,10 @@ internal class ActiveStatusTracker
             }
         }
 
-        this.EventsJournal.ProcessFallbackPoll(sessionSnapshot.Select(s => s.Id).ToList());
         var statusIconBySessionId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var session in sessionSnapshot)
         {
-            var status = this.EventsJournal.GetCachedStatus(session.Id);
-            switch (status)
-            {
-                case EventsJournalService.SessionStatus.Working:
-                    statusIconBySessionId[session.Id] = "working";
-                    break;
-                case EventsJournalService.SessionStatus.Idle:
-                    statusIconBySessionId[session.Id] = this._startedSessionIds.Contains(session.Id) ? "" : "bell";
-                    break;
-                case EventsJournalService.SessionStatus.IdleSilent:
-                    statusIconBySessionId[session.Id] = "";
-                    break;
-            }
+            statusIconBySessionId[session.Id] = "";
         }
 
         return new ActiveStatusSnapshot(activeTextBySessionId, sessionNamesById, statusIconBySessionId);

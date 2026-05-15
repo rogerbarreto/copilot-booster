@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -19,18 +17,10 @@ internal class EventsJournalService : IDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".copilot", "session-state");
 
-    private static readonly string s_cacheFile = Path.Combine(Program.AppDataDir, "events-cache.json");
-
     private static readonly TimeSpan s_stalenessThreshold = TimeSpan.FromMinutes(30);
-    private static readonly TimeSpan s_fallbackPollInterval = TimeSpan.FromSeconds(30);
 
     private readonly string _sessionsDir;
-    private readonly ConcurrentDictionary<string, string> _latestCwdBySessionId = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, CachedState> _cache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _cacheLock = new();
     private FileSystemWatcher? _watcher;
-    private bool _needsFallbackPoll;
-    private DateTime _lastFallbackPollUtc = DateTime.MinValue;
 
     /// <summary>
     /// Fired on the FileSystemWatcher thread when a session's status changes.
@@ -45,17 +35,6 @@ internal class EventsJournalService : IDisposable
     /// </summary>
     internal event Action<string>? BoosterResolvedNameUpdated;
 
-    /// <summary>
-    /// Fired on the FileSystemWatcher thread when a session's latest cwd changes.
-    /// Subscribers must marshal to the UI thread.
-    /// </summary>
-    internal event Action<string, string>? LatestCwdChanged;
-
-    /// <summary>
-    /// When true, StatusChanged events are suppressed (during startup priming).
-    /// </summary>
-    internal bool SuppressEvents { get; set; } = true;
-
     internal enum SessionStatus
     {
         Unknown,
@@ -64,8 +43,6 @@ internal class EventsJournalService : IDisposable
         /// <summary>Idle but should not trigger a bell (e.g., user abort, mode change).</summary>
         IdleSilent
     }
-
-    private record CachedState(DateTime LastModifiedUtc, SessionStatus Status);
 
     internal EventsJournalService()
         : this(s_copilotSessionsDir)
@@ -120,31 +97,8 @@ internal class EventsJournalService : IDisposable
             return;
         }
 
-        SessionStatus previousStatus;
-        lock (this._cacheLock)
-        {
-            previousStatus = this._cache.TryGetValue(sessionId, out var prev) ? prev.Status : SessionStatus.Unknown;
-        }
-
-        var newStatus = this.ReadAndCacheStatus(sessionId, raiseCwdChanged: !this.SuppressEvents);
-
-        // Skip if unknown, unchanged, or suppressed
-        if (newStatus == SessionStatus.Unknown || this.SuppressEvents)
-        {
-            return;
-        }
-
-        // Normalize for comparison: IdleSilent and Idle are both "not working"
-        bool wasWorking = previousStatus == SessionStatus.Working;
-        bool isWorking = newStatus == SessionStatus.Working;
-        if (wasWorking != isWorking || (wasWorking && isWorking))
-        {
-            // Only fire on actual transitions (working↔idle)
-            if (wasWorking != isWorking)
-            {
-                StatusChanged?.Invoke(sessionId, newStatus);
-            }
-        }
+        // Simply fire StatusChanged - MainForm will refresh from disk
+        StatusChanged?.Invoke(sessionId, SessionStatus.Unknown);
 
         // Deferred Booster-Resolved Name resolution: if the current override
         // is unresolved (ResolvedFromUserMessage == false), attempt to extract
@@ -155,161 +109,107 @@ internal class EventsJournalService : IDisposable
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
         Program.Logger.LogWarning("FileSystemWatcher error: {Error}", e.GetException().Message);
-        this._needsFallbackPoll = true;
     }
 
     /// <summary>
-    /// Returns the cached status for a session (never reads disk).
-    /// Used by the 3-second refresh loop to include status in snapshots.
+    /// Tail-reads events.jsonl to extract the latest CWD.
+    /// Scans backwards from EOF to find the last hook.start CWD, falls back to session.start.
+    /// Performance budget: ≤500KB allocations, ≤100ms for 8MB file.
     /// </summary>
-    internal SessionStatus GetCachedStatus(string sessionId)
+    internal static string ExtractLatestCwdFromTail(string eventsJsonlPath)
     {
-        lock (this._cacheLock)
+        if (!File.Exists(eventsJsonlPath))
         {
-            if (!this._cache.TryGetValue(sessionId, out var cached))
-            {
-                return SessionStatus.Unknown;
-            }
-
-            if (cached.Status == SessionStatus.Working
-                && DateTime.UtcNow - cached.LastModifiedUtc > s_stalenessThreshold)
-            {
-                return SessionStatus.IdleSilent;
-            }
-
-            return cached.Status;
-        }
-    }
-
-    /// <summary>
-    /// Attempts to retrieve the latest CWD for a session from the in-memory cache.
-    /// Returns true with the cached CWD if present, false with empty string otherwise.
-    /// </summary>
-    internal bool TryGetLatestCwd(string sessionId, out string cwd)
-    {
-        if (this._latestCwdBySessionId.TryGetValue(sessionId, out var cachedCwd))
-        {
-            cwd = cachedCwd;
-            return true;
-        }
-
-        cwd = string.Empty;
-        return false;
-    }
-
-    /// <summary>
-    /// Applies live CWD overlay to sessions after LoadSessions returns.
-    /// For each session: if journal has a live CWD that differs from session.Cwd (case-insensitive),
-    /// overlays it by setting session.Cwd and recomputing session.Folder.
-    /// </summary>
-    internal static void ApplyLiveCwdOverlay(
-        IReadOnlyList<Models.NamedSession> sessions,
-        EventsJournalService journal)
-    {
-        foreach (var session in sessions)
-        {
-            if (!journal.TryGetLatestCwd(session.Id, out var liveCwd))
-            {
-                continue;
-            }
-
-            if (string.Equals(session.Cwd, liveCwd, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            session.Cwd = liveCwd;
-            session.Folder = Path.GetFileName(liveCwd.TrimEnd('\\', '/'));
-        }
-    }
-
-    /// <summary>
-    /// Performs an initial disk read for all given session IDs to prime the cache.
-    /// Call once at startup after loading the persisted cache. Does NOT raise events.
-    /// </summary>
-    internal void PrimeCache(IReadOnlyList<string> sessionIds)
-    {
-        foreach (var sid in sessionIds)
-        {
-            this.ReadAndCacheStatus(sid);
-        }
-    }
-
-    /// <summary>
-    /// Processes fallback poll on watcher error. Rate-limited to 1/30s.
-    /// Call from the refresh tick.
-    /// </summary>
-    internal void ProcessFallbackPoll(IReadOnlyList<string> sessionIds)
-    {
-        if (!this._needsFallbackPoll)
-        {
-            return;
-        }
-
-        if (DateTime.UtcNow - this._lastFallbackPollUtc < s_fallbackPollInterval)
-        {
-            return;
-        }
-
-        this._needsFallbackPoll = false;
-        this._lastFallbackPollUtc = DateTime.UtcNow;
-
-        foreach (var sid in sessionIds)
-        {
-            SessionStatus previousStatus;
-            lock (this._cacheLock)
-            {
-                previousStatus = this._cache.TryGetValue(sid, out var prev) ? prev.Status : SessionStatus.Unknown;
-            }
-
-            var status = this.ReadAndCacheStatus(sid);
-            if (status == SessionStatus.Unknown || this.SuppressEvents)
-            {
-                continue;
-            }
-
-            bool wasWorking = previousStatus == SessionStatus.Working;
-            bool isWorking = status == SessionStatus.Working;
-            if (wasWorking != isWorking)
-            {
-                StatusChanged?.Invoke(sid, status);
-            }
-        }
-    }
-
-    private SessionStatus ReadAndCacheStatus(string sessionId, bool raiseCwdChanged = false)
-    {
-        var eventsPath = Path.Combine(this._sessionsDir, sessionId, "events.jsonl");
-        if (!File.Exists(eventsPath))
-        {
-            return SessionStatus.Unknown;
+            return string.Empty;
         }
 
         try
         {
-            var lastWrite = File.GetLastWriteTimeUtc(eventsPath);
-            this.ReadAndCacheLatestCwd(sessionId, eventsPath, raiseCwdChanged);
-            var status = DetermineStatusFromFile(eventsPath, lastWrite);
-
-            // Only cache definitive statuses — Unknown means the last event
-            // was ambiguous (turn_end, tool.execution_complete), keep previous.
-            if (status != SessionStatus.Unknown)
+            using var fs = new FileStream(eventsJsonlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length == 0)
             {
-                lock (this._cacheLock)
+                return string.Empty;
+            }
+
+            // Read last 64KB chunk (covers ~640 lines at ~100 bytes/line)
+            const int tailSize = 65536;
+            var bufferSize = (int)Math.Min(tailSize, fs.Length);
+            var buffer = new byte[bufferSize];
+            fs.Seek(-bufferSize, SeekOrigin.End);
+            var bytesRead = fs.Read(buffer, 0, bufferSize);
+
+            // Scan backwards for complete lines, finding hook.start or session.start
+            // Pre-filter by type to minimize string allocations
+            string? hookCwd = null;
+            string? sessionCwd = null;
+            int lineEnd = bytesRead;
+            var typeMarkerHook = System.Text.Encoding.UTF8.GetBytes("\"type\":\"hook.start\"");
+            var typeMarkerSession = System.Text.Encoding.UTF8.GetBytes("\"type\":\"session.start\"");
+            
+            for (int i = bytesRead - 1; i >= 0; i--)
+            {
+                if (buffer[i] == (byte)'\n' || i == 0)
                 {
-                    this._cache[sessionId] = new CachedState(lastWrite, status);
+                    int lineStart = (i == 0) ? 0 : i + 1;
+                    int lineLength = lineEnd - lineStart;
+                    if (lineLength > 0)
+                    {
+                        // Check if line contains hook.start or session.start before allocating string
+                        var lineSpan = buffer.AsSpan(lineStart, lineLength);
+                        bool isHookStart = lineSpan.IndexOf(typeMarkerHook) >= 0;
+                        bool isSessionStart = !isHookStart && lineSpan.IndexOf(typeMarkerSession) >= 0;
+                        
+                        if (isHookStart || isSessionStart)
+                        {
+                            var line = System.Text.Encoding.UTF8.GetString(lineSpan).Trim();
+                            // Strip UTF-8 BOM if present (test files may include it)
+                            if (line.Length > 0 && line[0] == '\uFEFF')
+                            {
+                                line = line.Substring(1);
+                            }
+                            if (!string.IsNullOrWhiteSpace(line))
+                            {
+                                try
+                                {
+                                    using var doc = JsonDocument.Parse(line);
+                                    var root = doc.RootElement;
+                                    
+                                    if (isHookStart && hookCwd == null)
+                                    {
+                                        hookCwd = TryGetHookStartCwd(root);
+                                        if (!string.IsNullOrEmpty(hookCwd))
+                                        {
+                                            return hookCwd; // Found latest hook.start, return immediately
+                                        }
+                                    }
+                                    else if (isSessionStart && sessionCwd == null)
+                                    {
+                                        sessionCwd = TryGetSessionStartCwd(root);
+                                    }
+                                }
+                                catch (JsonException)
+                                {
+                                    // Skip malformed/partial lines
+                                }
+                            }
+                        }
+                    }
+                    lineEnd = i;
                 }
             }
 
-            return status;
+            return hookCwd ?? sessionCwd ?? string.Empty;
         }
         catch (Exception ex)
         {
-            Program.Logger.LogDebug("Failed to read events for {SessionId}: {Error}", sessionId, ex.Message);
-            return SessionStatus.Unknown;
+            Program.Logger.LogDebug("Failed to tail-read events.jsonl: {Error}", ex.Message);
+            return string.Empty;
         }
     }
 
+    /// <summary>
+    /// Parses a TextReader sequentially to extract the latest CWD (for tests).
+    /// </summary>
     internal static string? ExtractLatestCwd(TextReader reader)
     {
         string? sessionStartCwd = null;
@@ -357,41 +257,6 @@ internal class EventsJournalService : IDisposable
         return latestHookCwd ?? sessionStartCwd;
     }
 
-    private void ReadAndCacheLatestCwd(string sessionId, string eventsPath, bool raiseCwdChanged)
-    {
-        if (!File.Exists(eventsPath))
-        {
-            return;
-        }
-
-        try
-        {
-            using var stream = new FileStream(eventsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(stream);
-            var latestCwd = ExtractLatestCwd(reader);
-            if (string.IsNullOrWhiteSpace(latestCwd))
-            {
-                return;
-            }
-
-            if (this._latestCwdBySessionId.TryGetValue(sessionId, out var cachedCwd)
-                && string.Equals(cachedCwd, latestCwd, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            this._latestCwdBySessionId[sessionId] = latestCwd;
-            if (raiseCwdChanged)
-            {
-                this.LatestCwdChanged?.Invoke(sessionId, latestCwd);
-            }
-        }
-        catch (Exception ex)
-        {
-            Program.Logger.LogDebug("Failed to read latest cwd for {SessionId}: {Error}", sessionId, ex.Message);
-        }
-    }
-
     private static string? TryGetSessionStartCwd(JsonElement root)
     {
         if (root.TryGetProperty("data", out var data)
@@ -414,78 +279,6 @@ internal class EventsJournalService : IDisposable
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Reads the last line of events.jsonl and determines status using content-based detection.
-    /// </summary>
-    private static SessionStatus DetermineStatusFromFile(string path, DateTime lastWriteUtc)
-    {
-        // Stale files — session hasn't been active recently, skip entirely
-        if (DateTime.UtcNow - lastWriteUtc > s_stalenessThreshold)
-        {
-            return SessionStatus.Unknown;
-        }
-
-        string? lastLine = ReadLastLine(path);
-        if (lastLine == null)
-        {
-            return SessionStatus.Unknown;
-        }
-
-        using var doc = JsonDocument.Parse(lastLine);
-        var root = doc.RootElement;
-
-        if (!root.TryGetProperty("type", out var typeProp))
-        {
-            return SessionStatus.Unknown;
-        }
-
-        var eventType = typeProp.GetString();
-        if (eventType == null)
-        {
-            return SessionStatus.Unknown;
-        }
-
-        switch (eventType)
-        {
-            case "assistant.turn_start":
-            case "user.message":
-            case "session.truncation":
-                return SessionStatus.Working;
-
-            case "assistant.message":
-                // Content-based: if toolRequests present → Working, else → Idle (final answer)
-                if (root.TryGetProperty("data", out var msgData)
-                    && msgData.TryGetProperty("toolRequests", out var toolReqs)
-                    && toolReqs.ValueKind == JsonValueKind.Array
-                    && toolReqs.GetArrayLength() > 0)
-                {
-                    return SessionStatus.Working;
-                }
-
-                return SessionStatus.Idle;
-
-            case "tool.execution_start":
-                // ask_user → Idle (HitL), any other tool → Working
-                if (root.TryGetProperty("data", out var toolData)
-                    && toolData.TryGetProperty("toolName", out var toolName)
-                    && string.Equals(toolName.GetString(), "ask_user", StringComparison.OrdinalIgnoreCase))
-                {
-                    return SessionStatus.Idle;
-                }
-
-                return SessionStatus.Working;
-
-            case "abort":
-            case "session.mode_changed":
-            case "session.plan_changed":
-                return SessionStatus.IdleSilent;
-
-            // assistant.turn_end, tool.execution_complete — ambiguous mid-chain, skip
-            default:
-                return SessionStatus.Unknown;
-        }
     }
 
     /// <summary>
@@ -546,62 +339,6 @@ internal class EventsJournalService : IDisposable
         {
             Program.Logger.LogDebug("Failed to read events.jsonl: {Error}", ex.Message);
             return null;
-        }
-    }
-
-    internal void LoadCache()
-    {
-        try
-        {
-            if (!File.Exists(s_cacheFile))
-            {
-                return;
-            }
-
-            var entries = JsonSerializer.Deserialize<Dictionary<string, CachedState>>(File.ReadAllText(s_cacheFile));
-            if (entries != null)
-            {
-                var now = DateTime.UtcNow;
-                lock (this._cacheLock)
-                {
-                    foreach (var kvp in entries)
-                    {
-                        // Discard stale cached entries — prevents false bells on restart
-                        if (now - kvp.Value.LastModifiedUtc <= s_stalenessThreshold)
-                        {
-                            this._cache[kvp.Key] = kvp.Value;
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Program.Logger.LogDebug("Failed to load events cache: {Error}", ex.Message);
-        }
-    }
-
-    internal void SaveCache()
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(s_cacheFile);
-            if (dir != null && !Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            Dictionary<string, CachedState> snapshot;
-            lock (this._cacheLock)
-            {
-                snapshot = new Dictionary<string, CachedState>(this._cache, StringComparer.OrdinalIgnoreCase);
-            }
-
-            File.WriteAllText(s_cacheFile, JsonSerializer.Serialize(snapshot));
-        }
-        catch (Exception ex)
-        {
-            Program.Logger.LogDebug("Failed to save events cache: {Error}", ex.Message);
         }
     }
 
