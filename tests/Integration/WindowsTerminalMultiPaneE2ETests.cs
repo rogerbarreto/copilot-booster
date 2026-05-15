@@ -408,12 +408,16 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
 
         if (wtHwnd == IntPtr.Zero)
         {
-            // Fallback: if we can't find via pane inspection, just track all current WT windows
-            // (risky but better than leaking). Ideally we'd walk the process tree from copilotPid.
-            foreach (var hwnd in EnumerateWindowsTerminalHwnds())
-            {
-                this._wtWindowHwnds.Add(hwnd);
-            }
+            // Safety: do NOT fall back to tracking every WindowsTerminal HWND on the
+            // desktop. Cleanup would later derive PIDs from those HWNDs and kill the
+            // WT process behind them — Windows Terminal is single-instance, so that
+            // PID owns every WT window on the developer's machine, including the
+            // host of their live Copilot CLI session. Anything we destroy must trace
+            // back to a creation site this test owns. Fail loudly instead.
+            Assert.Fail(
+                $"Could not locate the spawned wt window for session '{session.Label}' "
+                + "via UIA pane inspection. Refusing to fall back to broad WT enumeration; "
+                + "that would risk destroying WT windows the test did not create.");
         }
 
         // Wait for ~/.copilot/logs/process-*-{pid}.log to contain "Workspace initialized"
@@ -963,26 +967,13 @@ public sealed class WindowsTerminalMultiPaneE2ETests : IDisposable
         // Wait briefly for windows to close gracefully
         Thread.Sleep(1_000);
 
-        // Force-kill any WT windows that didn't close
-        foreach (var hwnd in this._wtWindowHwnds.Where(hwnd => hwnd != IntPtr.Zero && IsWindow(hwnd)).Distinct())
-        {
-            try
-            {
-                // Get the WT process PID from the window and kill it
-                var threadId = GetWindowThreadProcessId(hwnd, out var wtPid);
-                if (threadId != 0 && wtPid > 0)
-                {
-                    var wtProcess = Process.GetProcessById((int)wtPid);
-                    if (!wtProcess.HasExited)
-                    {
-                        wtProcess.Kill();
-                        wtProcess.WaitForExit(2_000);
-                    }
-                    wtProcess.Dispose();
-                }
-            }
-            catch { }
-        }
+        // Safety: do NOT force-kill the WT process derived from a tracked HWND.
+        // Windows Terminal is single-instance — the PID behind our HWND also owns
+        // every other WT window on the desktop, including the developer's live
+        // Copilot CLI host. WM_CLOSE above is enough to close the window we
+        // created. If it refuses to close, that is a test bug — we still must
+        // not kill processes we did not spawn. _startedProcesses below handles
+        // graceful close for processes the test launched directly.
 
         foreach (var process in this._startedProcesses)
         {
